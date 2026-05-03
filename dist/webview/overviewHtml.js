@@ -4,7 +4,7 @@ exports.renderOverviewHtml = renderOverviewHtml;
 const graphRenderer_1 = require("./graphRenderer");
 const webviewAssets_1 = require("./webviewAssets");
 function renderOverviewHtml(input) {
-    const { summary, engines, agentContextPreview, nonce } = input;
+    const { summary, engines, agentContextPreview, nonce, localAiTaskLog, localAiConfig } = input;
     const graph = (0, graphRenderer_1.buildWebviewGraphData)(summary.graph);
     const javaClasses = summary.inventory.javaSpring.files.length;
     const methods = estimateMethods(summary);
@@ -14,10 +14,13 @@ function renderOverviewHtml(input) {
     const stack = summary.inventory.stack.filter((signal) => signal.detected);
     const plsql = summary.inventory.plsql;
     const plsqlRisks = summary.risks.risks.filter((risk) => risk.category === 'plsql');
+    const detectedProjects = summary.detectedProjects ?? [];
     const data = {
         graph,
         project: summary.workspaceName,
-        engines: engines.map((engine) => ({ id: engine.id, name: engine.name, detected: engine.detected }))
+        engines: engines.map((engine) => ({ id: engine.id, name: engine.name, detected: engine.detected })),
+        projects: detectedProjects,
+        selectedProject: null
     };
     return `<!doctype html>
 <html lang="pt-BR">
@@ -35,32 +38,55 @@ function renderOverviewHtml(input) {
       <div>
         <h1>TIC Coder Lite</h1>
         <p class="muted">Workspace: <strong>${escapeHtml(summary.workspaceName)}</strong></p>
-        <p class="muted">Entenda seu workspace antes de pedir para a IA alterar o codigo.</p>
+        <p class="muted">Entenda seu workspace antes de pedir para a IA alterar o código.</p>
       </div>
       <div class="actions">
-        <button class="btn primary" data-command="analyzeProject">Analisar Projeto</button>
+        <button class="btn primary" data-command="analyzeProject">⚡ Analisar Workspace</button>
         <button class="btn" data-command="exportForCodex">Exportar para Codex</button>
         <button class="btn" data-command="exportForClaude">Exportar para Claude</button>
-        <button class="btn" data-command="enhanceLocalAi">Melhorar com IA Local</button>
+        <button class="btn" data-command="enhanceLocalAi">🧠 Melhorar com IA Local</button>
       </div>
     </header>
+
+    <section class="section">
+      <h2>Subprojetos Detectados</h2>
+      ${detectedProjects.length > 0
+        ? `<div class="project-selector">
+             <label>Selecionar projeto para análise:</label>
+             <div class="project-grid">
+               <div class="project-card active" data-project-id="all">
+                 <span class="project-icon">🌍</span>
+                 <span class="project-name">Todos os projetos</span>
+                 <span class="project-count">${detectedProjects.length} projeto(s)</span>
+               </div>
+               ${detectedProjects.map((project) => `
+                 <div class="project-card" data-project-id="${escapeHtml(project.id)}">
+                   <span class="project-icon">${getProjectIcon(project.kind)}</span>
+                   <span class="project-name">${escapeHtml(project.name)}</span>
+                   <span class="project-count">${project.files} arquivo(s) · ${project.risks} risco(s)</span>
+                 </div>
+               `).join('')}
+             </div>
+           </div>`
+        : `<div class="card"><p>Nenhum subprojeto específico detectado. Análise global sendo exibida.</p></div>`}
+    </section>
 
     <section class="summary" aria-label="Resumo">
       ${metric('Arquivos analisados', summary.totalFiles)}
       ${metric('Classes Java', javaClasses)}
-      ${metric('Metodos estimados', methods)}
+      ${metric('Métodos estimados', methods)}
       ${metric('Riscos', summary.risks.summary.total)}
       ${metric('Engines de IA', detectedEngines.length)}
       ${metric('Database / PL/SQL', plsql.files.length)}
     </section>
 
     <section class="section">
-      <h2>Configuracao facil</h2>
+      <h2>Configuração Fácil</h2>
       <div class="setup-grid">
         <div class="card setup-card">
-          <strong>Comecar sem configurar nada</strong>
+          <strong>Começar sem configurar nada</strong>
           <p class="caption">Usa o Modo Lite local: sem IA, sem Docker, sem banco e sem servidor.</p>
-          <button class="btn primary" data-command="setupBeginner">Aplicar padrao recomendado</button>
+          <button class="btn primary" data-command="setupBeginner">Aplicar padrão recomendado</button>
         </div>
         <div class="card setup-card">
           <strong>Exportar para ferramentas de IA</strong>
@@ -74,9 +100,9 @@ function renderOverviewHtml(input) {
           <button class="btn" data-command="disableLocalAi">Desligar IA Local</button>
         </div>
         <div class="card setup-card">
-          <strong>Ajustes avancados</strong>
-          <p class="caption">Abre as configuracoes nativas do VS Code ja filtradas para TIC Coder Lite.</p>
-          <button class="btn" data-command="openSettings">Abrir configuracoes</button>
+          <strong>Ajustes avançados</strong>
+          <p class="caption">Abre as configurações nativas do VS Code já filtradas para TIC Coder Lite.</p>
+          <button class="btn" data-command="openSettings">Abrir configurações</button>
         </div>
       </div>
     </section>
@@ -84,16 +110,16 @@ function renderOverviewHtml(input) {
     <section class="section">
       <h2>Modos do TIC Coder Lite</h2>
       <div class="mode-tabs" role="tablist">
-        <button class="mode active" data-mode="lite"><strong>Modo Lite</strong><br><span class="caption">Analise local, sem IA, sem banco e sem Docker.</span></button>
-        <button class="mode" data-mode="standard"><strong>IA Padrao</strong><br><span class="caption">Exporta contexto para Codex, Claude Code, Copilot, Cursor e Gemini.</span></button>
-        <button class="mode" data-mode="local"><strong>IA Local</strong><br><span class="caption">Usa Ollama opcionalmente para melhorar resumos e perguntas.</span></button>
+        <button class="mode active" data-mode="lite"><strong>⚡ Modo Lite</strong><br><span class="caption">Análise local, sem IA, sem banco e sem Docker.</span></button>
+        <button class="mode" data-mode="standard"><strong>🤖 IA Padrão</strong><br><span class="caption">Exporta contexto para Codex, Claude Code, Copilot, Cursor e Gemini.</span></button>
+        <button class="mode" data-mode="local"><strong>🧠 IA Local</strong><br><span class="caption">Usa Ollama opcionalmente para melhorar resumos e perguntas.</span></button>
       </div>
 
       <div class="mode-panel active" data-panel="lite">
-        <p>O Modo Lite gera scan, grafo, riscos e contexto em <code>.tic-code</code> sem depender de servicos externos.</p>
+        <p>O Modo Lite gera scan, grafo, riscos e contexto em <code>.tic-code</code> sem depender de serviços externos.</p>
       </div>
       <div class="mode-panel" data-panel="standard">
-        <p>A IA Padrao grava arquivos nativos para ferramentas de codificacao assistida.</p>
+        <p>A IA Padrão grava arquivos nativos para ferramentas de codificação assistida.</p>
         <div class="actions">
           <button class="btn primary" data-command="exportForCodex">Exportar para Codex</button>
           <button class="btn" data-command="exportForClaude">Exportar para Claude</button>
@@ -104,8 +130,10 @@ function renderOverviewHtml(input) {
         <p class="caption">Engines detectadas: ${detectedEngines.map((engine) => escapeHtml(engine.name)).join(', ') || 'nenhuma detectada ainda'}.</p>
       </div>
       <div class="mode-panel" data-panel="local">
-        <p>A IA Local e opcional e usa Ollama quando estiver configurado. O scan continua funcionando sem ela.</p>
+        <p>A IA Local é opcional e usa Ollama quando estiver configurado. O scan continua funcionando sem ela.</p>
+        ${localAiConfig ? `<p class="caption">Modelo local: <strong>${escapeHtml(localAiConfig.model || localAiConfig.fastModel)}</strong> &middot; modo: <strong>${escapeHtml(localAiConfig.mode)}</strong> &middot; ${localAiConfig.enabled ? 'ativado' : 'desativado'}</p>` : ''}
         <button class="btn primary" data-command="enhanceLocalAi">Melhorar com IA Local</button>
+        ${renderLocalAiLog(localAiTaskLog)}
       </div>
     </section>
 
@@ -114,38 +142,54 @@ function renderOverviewHtml(input) {
       <div class="card graph-card">
         <div class="graph-toolbar">
           <div>
-            <strong>Mapa de dependencias do workspace</strong>
-            <div class="caption"><span id="graphTotal">${summary.graph.stats.nodeCount} nos totais · ${summary.graph.stats.edgeCount} arestas totais</span> · <span id="graphVisible">carregando...</span></div>
+            <strong>Mapa de dependências do workspace</strong>
+            <div class="caption">
+              <span id="graphTotal">${summary.graph.stats.nodeCount} nós totais · ${summary.graph.stats.edgeCount} arestas totais</span>
+              · <span id="graphVisible">carregando...</span>
+              · <span class="muted">${graph.stats.internalCount} internos · ${graph.stats.externalCount + graph.stats.frameworkCount} externos ocultos por padrão</span>
+            </div>
           </div>
           <div class="graph-tools">
-            <input id="graphSearch" type="search" placeholder="Buscar no ou arquivo">
-            <select id="moduleFilter" aria-label="Filtrar por modulo"></select>
+            <input id="graphSearch" type="search" placeholder="Buscar nó ou arquivo">
+            <select id="originFilter" aria-label="Filtrar por origem">
+              <option value="internal" selected>Internos</option>
+              <option value="external">Externos</option>
+              <option value="framework">Frameworks</option>
+              <option value="high-risk">Alto risco</option>
+              <option value="all">Todos</option>
+            </select>
+            <select id="moduleFilter" aria-label="Filtrar por módulo"></select>
             <select id="layoutSelect" aria-label="Layout do grafo">
               <option value="agrupado">Agrupado</option>
               <option value="radial">Radial</option>
               <option value="camadas">Camadas</option>
             </select>
             <input id="density" type="range" min="15" max="100" value="65" title="Densidade de arestas">
-            <button class="btn compact" id="zoomOut">-</button>
+            <button class="btn compact" id="zoomOut">−</button>
             <button class="btn compact" id="fitGraph">Ajustar</button>
             <button class="btn compact" id="zoomIn">+</button>
-            <button class="btn compact" id="toggleLabels">Labels</button>
+            <button class="btn compact" id="toggleLabels">Rótulos</button>
           </div>
+        </div>
+        <div id="graphOriginInfo" class="caption" style="padding:4px 10px;background:var(--vscode-textBlockQuote-background,#f0f4ff);border-radius:4px;margin:4px 0">
+          Exibindo apenas nós internos do workspace. Dependências externas foram ocultadas para reduzir ruído. Use o filtro <em>Externos</em> ou <em>Todos</em> para ver dependências de terceiros.
         </div>
         <div class="graph-shell">
           <div class="graph-wrap" id="graphWrap">
-            <svg id="graph" role="img" aria-label="Grafo de dependencias do TIC Coder Lite"></svg>
-            <div class="graph-hint">Arraste o fundo para mover · use scroll para zoom · clique em um no para detalhes</div>
+            <svg id="graph" role="img" aria-label="Grafo de dependências do TIC Coder Lite"></svg>
+            <div class="graph-hint">Arraste o fundo para mover · use scroll para zoom · clique em um nó para detalhes</div>
           </div>
           <aside class="graph-side">
-            <h2 id="nodeTitle">No</h2>
+            <h2 id="nodeTitle">Nó</h2>
             <div class="caption mono" id="nodeMeta"></div>
             <ul id="nodeDetails"></ul>
+            <h2 style="margin-top:16px">Dependências externas do nó</h2>
+            <ul id="nodeExternalDeps" class="caption"></ul>
             <h2 style="margin-top:16px">Legenda</h2>
             <div class="legend">
-              <span>controller</span><span>service</span><span>repository</span><span>entity</span><span>external</span><span>risco alto</span>
+              <span>controller</span><span>service</span><span>repository</span><span>entity</span><span>externo</span><span>framework</span><span>risco alto</span>
             </div>
-            <h2 style="margin-top:16px">Arestas do no</h2>
+            <h2 style="margin-top:16px">Arestas do nó</h2>
             <ul id="nodeEdges"></ul>
           </aside>
         </div>
@@ -174,12 +218,81 @@ function renderOverviewHtml(input) {
     </section>
 
     <section class="section">
-      <h2>Contexto para IA</h2>
-      <div class="detail context">${escapeHtml(agentContextPreview || 'Execute Analisar Projeto para gerar .tic-code/agent-context.md')}</div>
+      <h2>🔍 Programação Reversa / SDD</h2>
+      <p class="caption">Análise determinística local que transforma código em especificações técnicas, regras candidatas, gaps e rastreabilidade para agentes de IA.</p>
+
+      <div class="mode-tabs" role="tablist">
+        <button class="mode active" data-mode="rev-lite"><strong>⚡ Modo Lite</strong><br><span class="caption">Programação reversa sem IA — análise determinística com marcação de confiança.</span></button>
+        <button class="mode" data-mode="rev-standard"><strong>🤖 IA Padrão</strong><br><span class="caption">Codex/Claude/Copilot/Cursor devem ler <code>.tic-code/reverse-engineering/</code> antes de alterar código.</span></button>
+        <button class="mode" data-mode="rev-local"><strong>🧠 IA Local</strong><br><span class="caption">Ollama opcional melhora textos e perguntas, mas não é necessário para gerar o SDD base.</span></button>
+      </div>
+
+      <div class="mode-panel active" data-panel="rev-lite">
+        <p>Os arquivos abaixo foram gerados em <code>.tic-code/reverse-engineering/</code> por análise determinística, sem IA:</p>
+        <div class="pill-list" style="flex-wrap:wrap; gap:6px; margin-top:10px">
+          <span class="pill">📋 inventory.md</span>
+          <span class="pill">🔗 dependencies.md</span>
+          <span class="pill">🔬 code-analysis.md</span>
+          <span class="pill">🏢 domain.md</span>
+          <span class="pill">📜 business-rules.md</span>
+          <span class="pill">🔄 state-machines.md</span>
+          <span class="pill">🔐 permissions.md</span>
+          <span class="pill">🏗️ architecture.md</span>
+          <span class="pill">📡 api-contracts.md</span>
+          <span class="pill">📚 data-dictionary.md</span>
+          <span class="pill">🗄️ database-analysis.md</span>
+          ${plsql.detected ? `<span class="pill">🟠 plsql-analysis.md</span>` : ''}
+          <span class="pill">📊 confidence-report.md</span>
+          <span class="pill">⚠️ gaps.md</span>
+          <span class="pill">❓ questions.md</span>
+          <span class="pill">🔗 traceability/</span>
+        </div>
+        <div class="metrics" style="margin-top:12px">
+          ${metric('Riscos críticos', summary.risks.risks.filter((r) => r.level === 'critical').length)}
+          ${metric('Riscos altos', summary.risks.risks.filter((r) => r.level === 'high').length)}
+          ${metric('Artefatos gerados', 15 + (plsql.detected ? 1 : 0))}
+          ${plsql.detected ? metric('Packages PL/SQL', plsql.counts.package) : ''}
+          ${plsql.detected ? metric('Triggers PL/SQL', plsql.counts.trigger) : ''}
+        </div>
+      </div>
+      <div class="mode-panel" data-panel="rev-standard">
+        <p>Ao usar Codex, Claude Code, GitHub Copilot, Cursor ou Gemini neste workspace:</p>
+        <ol>
+          <li>Leia <code>.tic-code/reverse-engineering/inventory.md</code> para entender o sistema.</li>
+          <li>Leia <code>.tic-code/reverse-engineering/architecture.md</code> antes de propor mudanças estruturais.</li>
+          <li>Leia <code>.tic-code/reverse-engineering/business-rules.md</code> — regras marcadas 🟡 precisam de validação.</li>
+          <li>Verifique <code>.tic-code/reverse-engineering/gaps.md</code> para 🔴 lacunas antes de qualquer refatoração.</li>
+          <li>Consulte <code>.tic-code/reverse-engineering/traceability/</code> para rastrear código ↔ spec ↔ risco.</li>
+          ${plsql.detected ? `<li>⚠️ PL/SQL detectado: leia <code>.tic-code/reverse-engineering/plsql-analysis.md</code> antes de alterar qualquer tabela ou regra no backend.</li>` : ''}
+        </ol>
+        <p class="caption">Todos esses arquivos são gerados automaticamente pelo Modo Lite — sem IA, banco, Docker ou servidor.</p>
+      </div>
+      <div class="mode-panel" data-panel="rev-local">
+        <p>Ollama é opcional. O TIC Coder Lite gera todos os artefatos de programação reversa sem Ollama.</p>
+        <p>Com Ollama ativado, você pode melhorar:</p>
+        <ul>
+          <li>Resumos de regras de negócio candidatas</li>
+          <li>Perguntas de validação humana</li>
+          <li>Descrições de domínio e arquitetura</li>
+        </ul>
+        <button class="btn" data-command="enhanceLocalAi">🧠 Melhorar com Ollama (opcional)</button>
+        <p class="caption">Selecione o modo em <code>ticCoderLite.localAi.mode</code>: <strong>auto</strong> (padrão), <strong>fast</strong> ou <strong>quality</strong>.</p>
+        ${renderLocalAiLog(localAiTaskLog)}
+      </div>
+
+      ${detectedProjects.length > 0 ? `
+      <h3 style="margin-top:14px">Programação Reversa por Projeto</h3>
+      <ul>${detectedProjects.map((project) => `<li>${getProjectIcon(project.kind)} <strong>${escapeHtml(project.name)}</strong> — <span class="mono">.tic-code/projects/${escapeHtml(project.id)}/reverse-engineering/</span></li>`).join('')}</ul>
+      ` : ''}
     </section>
 
     <section class="section">
-      <h2>Exportacoes</h2>
+      <h2>Contexto para IA</h2>
+      <div class="detail context">${escapeHtml(agentContextPreview || 'Execute Analisar Workspace para gerar .tic-code/agent-context.md')}</div>
+    </section>
+
+    <section class="section">
+      <h2>Exportações</h2>
       <div class="metrics">
         <div class="card"><strong>AGENTS.md</strong><p class="caption">Codex</p></div>
         <div class="card"><strong>CLAUDE.md</strong><p class="caption">Claude Code</p></div>
@@ -190,15 +303,15 @@ function renderOverviewHtml(input) {
     </section>
 
     <section class="section">
-      <h2>Stack e Modulos</h2>
+      <h2>Stack e Módulos</h2>
       <div class="two-column">
         <div>
           <h2>Stack detectada</h2>
           <div class="pill-list">${stack.map((signal) => `<span class="pill">${escapeHtml(signal.name)}</span>`).join('') || '<span class="pill">Nenhuma stack detectada</span>'}</div>
         </div>
         <div>
-          <h2>Modulos</h2>
-          <ul>${modules.map((module) => `<li><strong>${escapeHtml(module.kind)}</strong><span>${module.files.length}</span></li>`).join('') || '<li><span>Nenhum modulo detectado</span></li>'}</ul>
+          <h2>Módulos</h2>
+          <ul>${modules.map((module) => `<li><strong>${escapeHtml(module.kind)}</strong><span>${module.files.length}</span></li>`).join('') || '<li><span>Nenhum módulo detectado</span></li>'}</ul>
         </div>
       </div>
     </section>
@@ -211,6 +324,37 @@ function renderOverviewHtml(input) {
   ${(0, webviewAssets_1.getOverviewScript)(nonce)}
 </body>
 </html>`;
+}
+function renderLocalAiLog(log) {
+    if (!log || log.length === 0) {
+        return '<p class="caption" style="margin-top:8px">Nenhuma execução de IA Local registrada ainda.</p>';
+    }
+    const rows = log.map((entry) => `
+    <tr>
+      <td>${escapeHtml(entry.taskLabel)}</td>
+      <td class="mono">${escapeHtml(entry.model)}</td>
+      <td class="caption">${escapeHtml(entry.reason)}</td>
+    </tr>`).join('');
+    return `
+    <details style="margin-top:10px">
+      <summary class="caption" style="cursor:pointer">📋 Modelos usados na última execução</summary>
+      <table style="width:100%;margin-top:6px;border-collapse:collapse;font-size:0.85em">
+        <thead><tr><th style="text-align:left">Tarefa</th><th style="text-align:left">Modelo</th><th style="text-align:left">Motivo</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </details>`;
+}
+function getProjectIcon(kind) {
+    const icons = {
+        backend: '⚙️',
+        frontend: '🎨',
+        mobile: '📱',
+        database: '🗄️',
+        infra: '🌐',
+        shared: '📦',
+        unknown: '❓'
+    };
+    return icons[kind] ?? '📁';
 }
 function metric(label, value) {
     return `<div class="card"><span class="value">${escapeHtml(String(value))}</span><span class="label">${escapeHtml(label)}</span></div>`;

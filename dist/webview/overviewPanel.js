@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.openOverviewPanel = openOverviewPanel;
 const vscode = __importStar(require("vscode"));
 const analyzeProject_1 = require("../commands/analyzeProject");
+const checkOllamaStatus_1 = require("../local-ai/checkOllamaStatus");
 const writeTicCodeFolder_1 = require("../exporters/writeTicCodeFolder");
 const detectEngines_1 = require("../reversa-adapter/detectEngines");
 const overviewHtml_1 = require("./overviewHtml");
@@ -47,12 +48,17 @@ async function openOverviewPanel(context) {
     }
     let summary = (0, analyzeProject_1.getLastAnalysis)(context);
     if (!summary) {
-        const analyzeLabel = 'Analisar Projeto';
+        const analyzeLabel = 'Analisar Workspace';
         const action = await vscode.window.showInformationMessage('Ainda não há análise do Modo Lite. O Modo Lite funciona sem IA, banco, Docker ou servidor.', analyzeLabel);
         if (action !== analyzeLabel) {
             return;
         }
-        summary = await (0, analyzeProject_1.analyzeWorkspace)(root);
+        const newSummary = await (0, analyzeProject_1.analyzeWorkspace)(root);
+        if (!newSummary) {
+            vscode.window.showErrorMessage('Falha ao analisar workspace.');
+            return;
+        }
+        summary = newSummary;
         await (0, writeTicCodeFolder_1.writeTicCodeFolder)(root, summary);
         await context.globalState.update('ticCoderLite.lastAnalysis', summary);
     }
@@ -62,8 +68,11 @@ async function openOverviewPanel(context) {
         switch (message.command) {
             case 'analyzeProject':
                 await vscode.commands.executeCommand('ticCoderLite.analyzeProject');
-                summary = (0, analyzeProject_1.getLastAnalysis)(context) ?? await (0, analyzeProject_1.analyzeWorkspace)(root);
-                await render(panel, context, root, summary);
+                const latestAnalysis = (0, analyzeProject_1.getLastAnalysis)(context);
+                if (latestAnalysis) {
+                    summary = latestAnalysis;
+                    await render(panel, context, root, summary);
+                }
                 break;
             case 'exportForCodex':
                 await vscode.commands.executeCommand('ticCoderLite.exportForCodex');
@@ -85,7 +94,7 @@ async function openOverviewPanel(context) {
                 break;
             case 'setupBeginner':
                 await applyBeginnerSetup();
-                vscode.window.showInformationMessage('TIC Coder Lite: padrão recomendado aplicado. Você já pode usar Analisar Projeto.');
+                vscode.window.showInformationMessage('TIC Coder Lite: padrão recomendado aplicado. Você já pode usar Analisar Workspace.');
                 break;
             case 'detectEngines':
                 await vscode.commands.executeCommand('ticCoderLite.detectAiEngines');
@@ -124,11 +133,31 @@ async function setLocalAiEnabled(enabled) {
 async function render(panel, context, root, summary) {
     const engines = await (0, detectEngines_1.detectEngines)(root.uri.fsPath);
     const agentContextPreview = await readTextIfExists(vscode.Uri.joinPath(root.uri, '.tic-code', 'agent-context.md'));
+    const localAiLogRaw = await readTextIfExists(vscode.Uri.joinPath(root.uri, '.tic-code', 'local-ai-log.json'));
+    let localAiTaskLog;
+    if (localAiLogRaw) {
+        try {
+            localAiTaskLog = JSON.parse(localAiLogRaw);
+        }
+        catch {
+            localAiTaskLog = undefined;
+        }
+    }
+    const aiSettings = (0, checkOllamaStatus_1.getLocalAiSettings)();
+    const localAiConfig = {
+        model: aiSettings.model,
+        fastModel: aiSettings.fastModel,
+        qualityModel: aiSettings.qualityModel,
+        mode: aiSettings.mode,
+        enabled: aiSettings.enabled
+    };
     panel.webview.html = (0, overviewHtml_1.renderOverviewHtml)({
         summary,
         engines,
         agentContextPreview: agentContextPreview.slice(0, 2600),
-        nonce: getNonce()
+        nonce: getNonce(),
+        localAiTaskLog,
+        localAiConfig
     });
     await context.globalState.update('ticCoderLite.lastAnalysis', summary);
 }

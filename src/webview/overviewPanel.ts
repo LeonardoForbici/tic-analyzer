@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { analyzeWorkspace, getLastAnalysis, getWorkspaceRoot } from '../commands/analyzeProject';
+import { getLocalAiSettings } from '../local-ai/checkOllamaStatus';
 import { writeTicCodeFolder } from '../exporters/writeTicCodeFolder';
 import { detectEngines } from '../reversa-adapter/detectEngines';
 import type { ProjectSummary } from '../types';
@@ -14,12 +15,17 @@ export async function openOverviewPanel(context: vscode.ExtensionContext): Promi
 
   let summary = getLastAnalysis(context);
   if (!summary) {
-    const analyzeLabel = 'Analisar Projeto';
+    const analyzeLabel = 'Analisar Workspace';
     const action = await vscode.window.showInformationMessage('Ainda não há análise do Modo Lite. O Modo Lite funciona sem IA, banco, Docker ou servidor.', analyzeLabel);
     if (action !== analyzeLabel) {
       return;
     }
-    summary = await analyzeWorkspace(root);
+    const newSummary = await analyzeWorkspace(root);
+    if (!newSummary) {
+      vscode.window.showErrorMessage('Falha ao analisar workspace.');
+      return;
+    }
+    summary = newSummary;
     await writeTicCodeFolder(root, summary);
     await context.globalState.update('ticCoderLite.lastAnalysis', summary);
   }
@@ -37,8 +43,11 @@ export async function openOverviewPanel(context: vscode.ExtensionContext): Promi
     switch (message.command) {
       case 'analyzeProject':
         await vscode.commands.executeCommand('ticCoderLite.analyzeProject');
-        summary = getLastAnalysis(context) ?? await analyzeWorkspace(root);
-        await render(panel, context, root, summary);
+        const latestAnalysis = getLastAnalysis(context);
+        if (latestAnalysis) {
+          summary = latestAnalysis;
+          await render(panel, context, root, summary);
+        }
         break;
       case 'exportForCodex':
         await vscode.commands.executeCommand('ticCoderLite.exportForCodex');
@@ -60,7 +69,7 @@ export async function openOverviewPanel(context: vscode.ExtensionContext): Promi
         break;
       case 'setupBeginner':
         await applyBeginnerSetup();
-        vscode.window.showInformationMessage('TIC Coder Lite: padrão recomendado aplicado. Você já pode usar Analisar Projeto.');
+        vscode.window.showInformationMessage('TIC Coder Lite: padrão recomendado aplicado. Você já pode usar Analisar Workspace.');
         break;
       case 'detectEngines':
         await vscode.commands.executeCommand('ticCoderLite.detectAiEngines');
@@ -102,11 +111,30 @@ async function setLocalAiEnabled(enabled: boolean): Promise<void> {
 async function render(panel: vscode.WebviewPanel, context: vscode.ExtensionContext, root: vscode.WorkspaceFolder, summary: ProjectSummary): Promise<void> {
   const engines = await detectEngines(root.uri.fsPath);
   const agentContextPreview = await readTextIfExists(vscode.Uri.joinPath(root.uri, '.tic-code', 'agent-context.md'));
+  const localAiLogRaw = await readTextIfExists(vscode.Uri.joinPath(root.uri, '.tic-code', 'local-ai-log.json'));
+  let localAiTaskLog: import('../local-ai/ollamaClient').LocalAiTaskLogEntry[] | undefined;
+  if (localAiLogRaw) {
+    try {
+      localAiTaskLog = JSON.parse(localAiLogRaw) as import('../local-ai/ollamaClient').LocalAiTaskLogEntry[];
+    } catch {
+      localAiTaskLog = undefined;
+    }
+  }
+  const aiSettings = getLocalAiSettings();
+  const localAiConfig = {
+    model: aiSettings.model,
+    fastModel: aiSettings.fastModel,
+    qualityModel: aiSettings.qualityModel,
+    mode: aiSettings.mode,
+    enabled: aiSettings.enabled
+  };
   panel.webview.html = renderOverviewHtml({
     summary,
     engines,
     agentContextPreview: agentContextPreview.slice(0, 2600),
-    nonce: getNonce()
+    nonce: getNonce(),
+    localAiTaskLog,
+    localAiConfig
   });
   await context.globalState.update('ticCoderLite.lastAnalysis', summary);
 }

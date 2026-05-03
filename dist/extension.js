@@ -72,12 +72,12 @@ class TicCoderLiteTreeProvider {
         const summary = (0, analyzeProject_1.getLastAnalysis)(this.context);
         if (!summary) {
             return [
-                commandItem('Modo Lite: Analisar Projeto', 'ticCoderLite.analyzeProject', 'Scan determinístico sem IA, banco, Docker ou servidor'),
+                commandItem('Analisar Workspace', 'ticCoderLite.analyzeProject', 'Scan determinístico sem IA, banco, Docker ou servidor'),
                 commandItem('Abrir Visão dos 3 Modos', 'ticCoderLite.openOverview', 'Mostrar Modo Lite, IA Padrão e IA Local')
             ];
         }
         return [
-            commandItem('Modo Lite: Analisar Projeto', 'ticCoderLite.analyzeProject', 'Atualizar scan local determinístico'),
+            commandItem('Analisar Workspace', 'ticCoderLite.analyzeProject', 'Atualizar scan local determinístico'),
             commandItem('Abrir Visão dos 3 Modos', 'ticCoderLite.openOverview', 'Mostrar Modo Lite, IA Padrão e IA Local'),
             commandItem('Modo Lite: Gerar Contexto', 'ticCoderLite.generateAgentContext', 'Gravar .tic-code/agent-context.md sem IA'),
             commandItem('IA Padrão: Detectar Engines', 'ticCoderLite.detectAiEngines', 'Detectar Codex, Claude Code, Copilot, Cursor, Gemini e Aider'),

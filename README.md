@@ -1,50 +1,50 @@
 # TIC Coder Lite
 
-TIC Coder Lite is a local-first VS Code extension that helps developers understand a workspace before asking an AI assistant to change code.
+TIC Coder Lite é uma extensão VS Code local-first que ajuda desenvolvedores a entender um workspace antes de pedir para um assistente de IA alterar o código.
 
-It scans the open project, builds a lightweight architecture graph, detects deterministic risks, and exports context files that tools such as Codex, Claude Code, GitHub Copilot, Cursor, Gemini CLI, and local Ollama models can read.
+Ele escaneia o projeto aberto, constrói um grafo de arquitetura leve, detecta riscos determinísticos e exporta arquivos de contexto que ferramentas como Codex, Claude Code, GitHub Copilot, Cursor, Gemini CLI e modelos Ollama locais podem ler.
 
-TIC Coder Lite is prepared for local demos and future `.vsix` packaging. It is not published to the Marketplace yet.
+TIC Coder Lite está preparado para demos locais e futuro empacotamento `.vsix`. Ainda não é publicado no Marketplace.
 
-## Screenshots
+## Capturas de Tela
 
-Demo screenshots can be recorded after launching the Extension Development Host. Placeholder files are included for the future screenshots:
+Capturas de demo podem ser gravadas após iniciar o Extension Development Host. Arquivos de placeholder estão incluídos para futuras screenshots:
 
 - `docs/screenshots/overview-placeholder.svg`
 - `docs/screenshots/graph-placeholder.svg`
 - `docs/screenshots/context-placeholder.svg`
 
-## The Three Modes
+## Os Três Modos
 
-### 1. Lite Mode
+### 1. ⚡ Modo Lite
 
-Lite Mode works without AI.
+Modo Lite funciona sem IA.
 
-- Deterministic workspace scanner
-- Stack and architecture detection by convention
-- Lightweight graph from imports and package references
-- Deterministic risk detector
-- `.tic-code/` context generation
-- No database
-- No Docker
-- No server
-- No Ollama
-- No AI runtime
+- Scanner de workspace determinístico
+- Detecção de stack e arquitetura por convenção
+- Grafo leve de imports e referências de packages
+- Detector de riscos determinístico
+- Geração de contexto `.tic-code/`
+- Sem banco de dados
+- Sem Docker
+- Sem servidor
+- Sem Ollama
+- Sem runtime de IA
 
-Use this mode when you want a fast, local project inventory before editing code.
+Use este modo quando quer um inventário de projeto rápido e local antes de editar código.
 
-### 2. Standard AI Mode
+### 2. 🤖 Modo IA Padrão
 
-Standard AI Mode exports TIC Coder Lite context to the AI coding tools already used by the developer.
+Modo IA Padrão exporta contexto TIC Coder Lite para as ferramentas de codificação com IA já usadas pelo desenvolvedor.
 
-- Codex reads `AGENTS.md`
-- Claude Code reads `CLAUDE.md`
-- GitHub Copilot reads `.github/copilot-instructions.md`
-- Cursor reads `.cursorrules`
-- Gemini CLI reads `GEMINI.md`
-- Aider can read `CONVENTIONS.md`
+- Codex lê `AGENTS.md`
+- Claude Code lê `CLAUDE.md`
+- GitHub Copilot lê `.github/copilot-instructions.md`
+- Cursor lê `.cursorrules`
+- Gemini CLI lê `GEMINI.md`
+- Aider pode ler `CONVENTIONS.md`
 
-All generated agent files instruct the assistant to read:
+Todos os arquivos de agente gerados instruem o assistente a ler:
 
 - `.tic-code/agent-context.md`
 - `.tic-code/risks.md`
@@ -52,64 +52,201 @@ All generated agent files instruct the assistant to read:
 - `.tic-code/confidence-report.md`
 - `.tic-code/questions.md`
 
-Existing files are handled safely. TIC Coder Lite can ask, append a marked TIC Coder Lite section, or ignore the file depending on `ticCoderLite.exports.safeWriteMode`. It never deletes project files.
+Arquivos existentes são tratados com segurança. TIC Coder Lite pode perguntar, adicionar uma seção marcada TIC Coder Lite ou ignorar o arquivo dependendo de `ticCoderLite.exports.safeWriteMode`. Nunca deleta arquivos do projeto.
 
-### 3. Local AI Mode
+### 3. 🧠 Modo IA Local
 
-Local AI Mode is optional and uses Ollama only when enabled.
+Modo IA Local é opcional e usa Ollama apenas quando habilitado.
 
-- Default URL: `http://localhost:11434`
-- Default model: `qwen2.5-coder:1.5b`
-- No model is downloaded automatically
-- A small model is recommended for the first demo
-- It does not require huge 60GB models
-- It can be disabled at any time
-- Lite Mode continues working if Ollama is offline
+- URL padrão: `http://localhost:11434`
+- Nenhum modelo é baixado automaticamente
+- Pode ser desabilitado a qualquer momento
+- Modo Lite continua funcionando se Ollama estiver offline
 
-Local AI Mode can generate:
+#### Seleção Automática de Modelo
+
+O Modo IA Local seleciona o modelo certo para cada tarefa:
+
+| Tarefa | Modo `auto` |
+|--------|-------------|
+| Resumo de módulos | `fastModel` |
+| Explicação de riscos | `fastModel` |
+| Perguntas e lacunas | `fastModel` |
+| Contexto para IA | `fastModel` |
+| Análise PL/SQL | `qualityModel` |
+| Regras de negócio | `qualityModel` |
+| Análise de domínio | `qualityModel` |
+| Máquinas de estado | `qualityModel` |
+| Permissões | `qualityModel` |
+| Arquivos críticos | `qualityModel` |
+
+**Fallback automático:**
+- Se `qualityModel` não estiver instalado, usa `fastModel`
+- Se `fastModel` não estiver instalado, exibe mensagem amigável com instrução de instalação
+- Nunca baixa modelos automaticamente
+
+**Modos de seleção** (`ticCoderLite.localAi.mode`):
+- `auto` (padrão) — escolhe o modelo certo para cada tarefa
+- `fast` — usa sempre `fastModel`
+- `quality` — usa sempre `qualityModel`
+
+Modo IA Local pode gerar:
 
 - `.tic-code/agent-context.ai.md`
 - `.tic-code/questions.ai.md`
 - `.tic-code/module-summaries.ai.md`
 
-## How To Run Locally
+## Como Executar Localmente
 
-Install dependencies:
+Instale as dependências:
 
 ```bash
 npm install
 ```
 
-Compile the extension:
+Compile a extensão:
 
 ```bash
 npm run compile
 ```
 
-Open this folder in VS Code:
+Abra esta pasta no VS Code:
 
 ```bash
 code .
 ```
 
-Press `F5` to start an Extension Development Host. In the new VS Code window, open a project you want to analyze and run commands from the Command Palette.
+Pressione `F5` para iniciar um Extension Development Host. Na nova janela VS Code, abra um projeto que deseja analisar e execute comandos da Paleta de Comandos.
 
-## How To Analyze A Project
+## Como Analisar um Workspace
 
-1. Open a workspace folder in the Extension Development Host.
-2. Run `TIC Coder Lite: Analyze Project (Lite Mode)`.
-3. Wait for the progress notification to complete.
-4. Open the TIC Coder Lite activity bar view or run `TIC Coder Lite: Open 3 Modes Overview`.
-5. Review the generated `.tic-code/` files.
+1. Abra uma pasta de workspace no Extension Development Host.
+2. Execute `TIC Coder Lite: Analisar Workspace (Modo Lite)`.
+3. Aguarde a conclusão da notificação de progresso.
+4. Abra a visualização da barra de atividades TIC Coder Lite ou execute `TIC Coder Lite: Abrir Visão Geral`.
+5. Revise os arquivos `.tic-code/` gerados.
 
-Large workspaces are scanned with progress notifications, cancellation support, file count limits, file size limits, binary-file avoidance, useful logs, and a simple incremental cache based on modified time from `.tic-code/scan.json`.
+Workspaces grandes são digitalizados com notificações de progresso, suporte a cancelamento, limites de contagem de arquivos, limites de tamanho de arquivo, evitação de arquivos binários, logs úteis e um cache incremental simples baseado em tempo modificado de `.tic-code/scan.json`.
 
-Logs are written to the Output Channel named `TIC Coder Lite`.
+Os logs são escritos no Canal de Saída denominado `TIC Coder Lite`.
 
-## Generated Files
+## Programação Reversa / SDD
 
-Lite Mode generates:
+TIC Coder Lite agora inclui uma camada de **Programação Reversa** local-first, inspirada metodologicamente no [Reversa by Sandeco (MIT)](https://github.com/sandeco/reversa).
 
+O objetivo é transformar código existente em especificações técnicas, contratos operacionais, regras candidatas, gaps e rastreabilidade prontos para agentes de IA — tudo sem IA obrigatória, banco, Docker ou servidor.
+
+### O que é gerado
+
+Ao executar "Analisar Workspace", o TIC Coder Lite gera automaticamente:
+
+```
+.tic-code/
+└── reverse-engineering/
+    ├── inventory.md          — inventário completo (Scout)
+    ├── dependencies.md       — dependências externas e internas
+    ├── code-analysis.md      — módulos, controllers, services (Archaeologist)
+    ├── domain.md             — candidatos de domínio de negócio (Detective)
+    ├── business-rules.md     — regras de negócio candidatas (Detective)
+    ├── state-machines.md     — máquinas de estado + Mermaid (Detective)
+    ├── permissions.md        — permissões @PreAuthorize, hasRole (Detective)
+    ├── architecture.md       — arquitetura, C4 simplificado (Architect)
+    ├── api-contracts.md      — contratos de API REST (Writer)
+    ├── data-dictionary.md    — dicionário de dados (Data Master)
+    ├── database-analysis.md  — tabelas, migrations, SQL (Data Master)
+    ├── plsql-analysis.md     — packages, procedures, triggers (Data Master)
+    ├── confidence-report.md  — relatório de confiança (Reviewer)
+    ├── gaps.md               — lacunas e incertezas (Reviewer)
+    ├── questions.md          — perguntas para validação humana (Reviewer)
+    └── traceability/
+        ├── code-spec-matrix.md   — código ↔ spec ↔ confiança
+        └── risk-impact-matrix.md — risco ↔ módulo ↔ impacto
+```
+
+E, para cada subprojeto detectado, em `.tic-code/projects/{projectId}/reverse-engineering/`.
+
+### Níveis de Confiança
+
+Toda afirmação gerada é marcada com um dos seguintes níveis:
+
+| Nível | Significado |
+| --- | --- |
+| 🟢 CONFIRMADO | Extraído diretamente do código, SQL, anotação, import, PL/SQL, endpoint ou arquivo |
+| 🟡 INFERIDO | Deduzido por nome de classe, pasta, padrão arquitetural ou relacionamento no grafo |
+| 🔴 LACUNA | Não confirmável pelo código — exige validação humana |
+
+### Exemplo de saída
+
+```markdown
+## Regras Candidatas — Faturamento
+
+### BR-1: Acesso a FaturaController requer autorização (@PreAuthorize) 🟢 CONFIRMADO
+Evidências:
+- financeiro/FaturaController.java
+
+### BR-2: Operação de negócio detectada: calcularJuros em BoletoService 🟡 INFERIDO
+Evidências:
+- financeiro/BoletoService.java
+
+## Lacunas
+
+### GAP-3: Triggers detectadas — regras de negócio no banco podem não estar documentadas 🔴 LACUNA
+Pergunta: Quais regras de negócio cada trigger implementa?
+```
+
+### Cobertura por tipo de projeto
+
+| Tipo | Artefatos gerados |
+| --- | --- |
+| Java/Spring | Controllers, services, endpoints, permissões, entities, DTOs |
+| TypeScript/Frontend | Componentes, hooks, services, páginas |
+| Oracle PL/SQL | Packages, procedures, triggers, tabelas, dependências |
+| Docker/Infra | Evidências de infraestrutura |
+| Banco de dados | Tabelas, views, migrations, SQL |
+
+### Inspiração metodológica
+
+A camada de Programação Reversa do TIC Coder Lite foi inspirada nos agentes do **Reversa by Sandeco (MIT)**:
+
+- **Scout** → `inventory.md` e `dependencies.md`
+- **Archaeologist** → `code-analysis.md`
+- **Detective** → `domain.md`, `business-rules.md`, `state-machines.md`, `permissions.md`
+- **Architect** → `architecture.md`
+- **Writer** → `api-contracts.md`, `data-dictionary.md`
+- **Reviewer** → `confidence-report.md`, `gaps.md`, `questions.md`
+- **Data Master** → `database-analysis.md`, `plsql-analysis.md`
+
+> **Importante:** O TIC Coder Lite não é uma CLI Reversa nem um fork do Reversa. É uma extensão VS Code independente com inspiração metodológica, que grava em `.tic-code` (não em `.reversa`), funciona sem IA obrigatória e mantém créditos ao Reversa.
+
+### Instruções para agentes de IA
+
+Antes de alterar código em workspaces analisados pelo TIC Coder Lite:
+
+1. Leia `.tic-code/reverse-engineering/inventory.md`
+2. Leia `.tic-code/reverse-engineering/architecture.md`
+3. Consulte `.tic-code/reverse-engineering/business-rules.md` — 🟡 INFERIDO exige validação
+4. Verifique `.tic-code/reverse-engineering/gaps.md` para 🔴 LACUNAS
+5. Use `.tic-code/reverse-engineering/traceability/` para rastrear código ↔ spec ↔ risco
+6. Em projetos PL/SQL: leia `plsql-analysis.md` antes de alterar qualquer tabela referenciada por trigger
+
+## Detecção de Subprojetos
+
+TIC Coder Lite detecta automaticamente subprojetos reais dentro do seu workspace:
+
+- **Backend**: `pom.xml`, `build.gradle`, `src/main/java`, `application.yml`, `application.properties`
+- **Frontend**: `vite.config.ts`, `next.config.js`, `angular.json`, `src/App.tsx`, `package.json` (React/Vue/Angular/Next)
+- **Mobile**: `react-native.config.js`, `app.json` (Expo), `android/`, `ios/`, `pubspec.yaml` (Flutter)
+- **Database / PL/SQL**: `db/`, `database/`, `sql/`, arquivos `.sql`, `.pks`, `.pkb`, `.prc`, `.fnc`, `.trg`
+- **Infraestrutura**: `Dockerfile`, `docker-compose.yml`, `k8s/`, `helm/`, `terraform/`, `.github/workflows/`
+- **Shared / Libs**: `libs/`, `packages/`, `shared/`, `package.json` com escopo de biblioteca
+
+Gera artefatos separados por projeto dentro de `.tic-code/projects/{projectId}/`.
+
+## Arquivos Gerados
+
+Modo Lite gera (globais):
+
+- `.tic-code/workspace-summary.json`
 - `.tic-code/scan.json`
 - `.tic-code/modules.json`
 - `.tic-code/inventory.md`
@@ -121,7 +258,15 @@ Lite Mode generates:
 - `.tic-code/confidence-report.md`
 - `.tic-code/questions.md`
 
-Standard AI Mode may generate:
+E por projeto em `.tic-code/projects/{projectId}/`:
+
+- `scan.json`
+- `graph.json`
+- `risks.json`
+- `agent-context.md`
+- `reverse-engineering/` (mesma estrutura global, filtrada por projeto)
+
+Modo IA Padrão pode gerar:
 
 - `AGENTS.md`
 - `CLAUDE.md`
@@ -131,78 +276,149 @@ Standard AI Mode may generate:
 - `CONVENTIONS.md`
 - `.tic-code/created-files.json`
 
-Local AI Mode may generate:
+Modo IA Local pode gerar:
 
 - `.tic-code/agent-context.ai.md`
 - `.tic-code/questions.ai.md`
 - `.tic-code/module-summaries.ai.md`
 
-## Using With Codex
+## Usando com Codex
 
-1. Run `TIC Coder Lite: Analyze Project (Lite Mode)`.
-2. Run `TIC Coder Lite: Export for Codex (Standard AI Mode)`.
-3. Open `AGENTS.md`.
-4. Ask Codex to read `AGENTS.md` and the referenced `.tic-code/` files before changing code.
+1. Execute `TIC Coder Lite: Analisar Workspace (Modo Lite)`.
+2. Execute `TIC Coder Lite: Exportar para Codex (Modo IA Padrão)`.
+3. Abra `AGENTS.md`.
+4. Peça a Codex para ler `AGENTS.md` e os arquivos `.tic-code/` referenciados antes de alterar o código.
 
-## Using With Claude Code
+## Usando com Claude Code
 
-1. Run `TIC Coder Lite: Analyze Project (Lite Mode)`.
-2. Run `TIC Coder Lite: Export for Claude (Standard AI Mode)`.
-3. Claude Code should read `CLAUDE.md`, then the generated `.tic-code/` context files.
+1. Execute `TIC Coder Lite: Analisar Workspace (Modo Lite)`.
+2. Execute `TIC Coder Lite: Exportar para Claude (Modo IA Padrão)`.
+3. Claude Code deve ler `CLAUDE.md` e depois os arquivos `.tic-code/` de contexto gerados.
 
-## Using With GitHub Copilot
+## Usando com GitHub Copilot
 
-1. Run `TIC Coder Lite: Analyze Project (Lite Mode)`.
-2. Run `TIC Coder Lite: Export for Copilot (Standard AI Mode)`.
-3. Review `.github/copilot-instructions.md`.
-4. Copilot can use that file as project guidance inside VS Code and GitHub workflows.
+1. Execute `TIC Coder Lite: Analisar Workspace (Modo Lite)`.
+2. Execute `TIC Coder Lite: Exportar para Copilot (Modo IA Padrão)`.
+3. Revise `.github/copilot-instructions.md`.
+4. Copilot pode usar esse arquivo como orientação de projeto dentro do VS Code e fluxos de trabalho do GitHub.
 
-## Using With Cursor
+## Usando com Cursor
 
-1. Run `TIC Coder Lite: Analyze Project (Lite Mode)`.
-2. Run `TIC Coder Lite: Export for Cursor (Standard AI Mode)`.
-3. Review `.cursorrules`.
-4. Cursor should use the generated guidance before making project edits.
+1. Execute `TIC Coder Lite: Analisar Workspace (Modo Lite)`.
+2. Execute `TIC Coder Lite: Exportar para Cursor (Modo IA Padrão)`.
+3. Revise `.cursorrules`.
+4. Cursor deve usar a orientação gerada antes de fazer edições de projeto.
 
-## Using With Ollama Optional
+## Usando com Ollama (Opcional)
 
-1. Install and start Ollama locally.
-2. Pull a small model manually, for example:
+1. Instale e inicie Ollama localmente.
+2. Puxe o modelo fast (mínimo) manualmente:
 
 ```bash
-ollama pull qwen2.5-coder:1.5b
+ollama pull qwen2.5-coder:3b
 ```
 
-3. In VS Code settings, enable `ticCoderLite.localAi.enabled`.
-4. Run `TIC Coder Lite: Enhance with Local AI (Local AI Mode)`.
+3. Puxe o modelo quality (opcional, para tarefas complexas):
 
-If Ollama is offline, TIC Coder Lite shows a friendly message and Lite Mode remains fully usable.
+```bash
+ollama pull qwen2.5-coder:7b
+```
 
-## Commands
+4. Nas configurações do VS Code, habilite `ticCoderLite.localAi.enabled`.
+5. Execute `TIC Coder Lite: Melhorar com IA Local (Modo IA Local)`.
 
-- `TIC Coder Lite: Analyze Project (Lite Mode)`
-- `TIC Coder Lite: Open 3 Modes Overview`
-- `TIC Coder Lite: Generate Agent Context (Lite Mode)`
-- `TIC Coder Lite: Detect AI Engines (Standard AI Mode)`
-- `TIC Coder Lite: Export AGENTS.md (Standard AI Mode)`
-- `TIC Coder Lite: Export for Codex (Standard AI Mode)`
-- `TIC Coder Lite: Export for Claude (Standard AI Mode)`
-- `TIC Coder Lite: Export for Copilot (Standard AI Mode)`
-- `TIC Coder Lite: Export for Cursor (Standard AI Mode)`
-- `TIC Coder Lite: Export for Gemini (Standard AI Mode)`
-- `TIC Coder Lite: Enhance with Local AI (Local AI Mode)`
+A WebView exibe uma tabela mostrando qual modelo foi usado em cada tarefa.
 
-## Settings
+Se Ollama estiver offline, TIC Coder Lite mostra uma mensagem amigável e Modo Lite permanece totalmente utilizável.
+
+## Comandos
+
+- `TIC Coder Lite: Analisar Workspace (Modo Lite)`
+- `TIC Coder Lite: Abrir Visão Geral`
+- `TIC Coder Lite: Gerar Contexto para IA (Modo Lite)`
+- `TIC Coder Lite: Detectar Ferramentas de IA (Modo IA Padrão)`
+- `TIC Coder Lite: Exportar AGENTS.md (Modo IA Padrão)`
+- `TIC Coder Lite: Exportar para Codex (Modo IA Padrão)`
+- `TIC Coder Lite: Exportar para Claude (Modo IA Padrão)`
+- `TIC Coder Lite: Exportar para Copilot (Modo IA Padrão)`
+- `TIC Coder Lite: Exportar para Cursor (Modo IA Padrão)`
+- `TIC Coder Lite: Exportar para Gemini (Modo IA Padrão)`
+- `TIC Coder Lite: Melhorar com IA Local (Modo IA Local)`
+
+## Configurações
 
 - `ticCoderLite.scan.maxFiles`
 - `ticCoderLite.scan.maxFileSizeKb`
 - `ticCoderLite.scan.include`
 - `ticCoderLite.scan.exclude`
+- `ticCoderLite.localAi.enabled`
+- `ticCoderLite.localAi.ollamaUrl`
+- `ticCoderLite.localAi.fastModel` (padrão: `qwen2.5-coder:3b`)
+- `ticCoderLite.localAi.qualityModel` (padrão: `qwen2.5-coder:7b`)
+- `ticCoderLite.localAi.mode` (`auto` | `fast` | `quality`, padrão: `auto`)
+- `ticCoderLite.localAi.model` (legado)
+- `ticCoderLite.output.openAfterScan`
+- `ticCoderLite.exports.safeWriteMode`
+
+## Estrutura de Artefatos
+
+Cada análise gera uma estrutura hierárquica:
+
+```
+.tic-code/
+  workspace-summary.json          # Resumo global do workspace
+  scan.json                       # Resultado do scan global
+  graph.json                      # Grafo de dependências global
+  risks.json                      # Riscos globais
+  agent-context.md                # Contexto para IA (global)
+  confidence-report.md            # Relatório de confiança
+  questions.md                    # Perguntas para IA
+  projects/
+    backend/
+      scan.json
+      graph.json
+      risks.json
+      agent-context.md
+    frontend/
+      scan.json
+      graph.json
+      risks.json
+      agent-context.md
+    mobile/
+      ...
+    database/
+      ...
+    infra/
+      ...
+    shared/
+      ...
+```
+
+## Garantias do TIC Coder Lite
+
+- ✓ Sem banco de dados externo necessário
+- ✓ Sem Docker necessário
+- ✓ Sem servidor necessário
+- ✓ Sem IA necessária (Modo Lite funciona sem qualquer IA)
+- ✓ Sem Ollama necessário (IA Local é opcional)
+- ✓ Sem modificações de projeto durante análise
+- ✓ Incrementalmente cacheado para múltiplas análises rápidas
+- ✓ Suporte a cancelamento para grandes workspaces
+- ✓ Determinístico: mesmos resultado para mesma entrada
+- ✓ Seguro: nunca sobrescreve projetos sem confirmação
+
+## Licença
+
+MIT
+
 - `ticCoderLite.output.openAfterScan`
 - `ticCoderLite.exports.safeWriteMode`
 - `ticCoderLite.localAi.enabled`
 - `ticCoderLite.localAi.ollamaUrl`
-- `ticCoderLite.localAi.model`
+- `ticCoderLite.localAi.fastModel` (padrão: `qwen2.5-coder:3b`)
+- `ticCoderLite.localAi.qualityModel` (padrão: `qwen2.5-coder:7b`)
+- `ticCoderLite.localAi.mode` (`auto` | `fast` | `quality`, padrão: `auto`)
+- `ticCoderLite.localAi.model` (legado)
 
 ## Generate A Local VSIX
 

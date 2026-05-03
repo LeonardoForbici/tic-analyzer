@@ -2,6 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { yieldToEventLoop } from '../utils/fileUtils';
 import type { ArchitectureInventory, ModuleInventoryItem } from './detectStack';
+import { classifyDependency, externalDependencyLabel } from './classifyDependency';
 import {
   extractJavaClassName,
   extractJavaPackage,
@@ -14,6 +15,7 @@ import type { ScanResult } from './scanWorkspace';
 
 export type GraphEdgeType = 'IMPORTS' | 'USES_PACKAGE' | 'DEPENDS_ON' | 'CALLS' | 'READS_TABLE' | 'WRITES_TABLE' | 'TRIGGERS_ON' | 'DEFINES' | 'USES_CURSOR';
 export type GraphRiskLevel = 'low' | 'medium' | 'high';
+export type GraphNodeOrigin = 'internal' | 'external' | 'framework';
 
 export interface GraphNode {
   id: string;
@@ -23,6 +25,20 @@ export interface GraphNode {
   module: string;
   language: string;
   riskLevel?: GraphRiskLevel;
+  /** Whether this node originated inside the workspace ('internal') or is a third-party dep. */
+  origin: GraphNodeOrigin;
+  /** Set when origin === 'framework'. E.g. 'Spring', 'React'. */
+  frameworkName?: string;
+  /** Whether to show this node in the default graph view (internal=true, external/framework=false). */
+  visibleByDefault: boolean;
+}
+
+export interface ExternalDependencySummary {
+  specifier: string;
+  label: string;
+  origin: 'external' | 'framework';
+  frameworkName?: string;
+  count: number;
 }
 
 export interface GraphEdge {
@@ -46,6 +62,8 @@ export interface LightweightGraph {
     externalEdges: number;
     modules: Record<string, number>;
     centralFiles: Array<{ path: string; degree: number }>;
+    /** Summary of external/framework dependencies (for external-dependencies.json). */
+    externalDependencies: ExternalDependencySummary[];
   };
 }
 
@@ -132,7 +150,9 @@ function addPlSqlGraph(
       path: entity.file,
       type: plsqlType(entity.kind),
       module: 'database',
-      language: 'PL/SQL'
+      language: 'PL/SQL',
+      origin: 'internal',
+      visibleByDefault: true
     };
     plsqlNodes.set(entity.id, node);
     nodes.push(node);
@@ -158,7 +178,9 @@ function addPlSqlGraph(
         path: table.name,
         type: 'plsql_table',
         module: 'database',
-        language: 'PL/SQL'
+        language: 'PL/SQL',
+        origin: 'internal',
+        visibleByDefault: true
       };
       tableByName.set(table.name, node);
       nodes.push(node);
@@ -185,7 +207,9 @@ function addPlSqlGraph(
         path: dependency.targetName,
         type: 'plsql_procedure',
         module: 'database',
-        language: 'PL/SQL'
+        language: 'PL/SQL',
+        origin: 'internal',
+        visibleByDefault: true
       };
       routineByName.set(dependency.targetName.toUpperCase(), target);
       nodes.push(target);
@@ -436,7 +460,9 @@ function createFileNode(file: ScannedFile, module: string): GraphNode {
     path: file.relativePath,
     type: typeFromFile(file),
     module,
-    language: languageFromExtension(file.extension)
+    language: languageFromExtension(file.extension),
+    origin: 'internal',
+    visibleByDefault: true
   };
 }
 
@@ -447,13 +473,17 @@ function getPackageNode(packageNodes: Map<string, GraphNode>, packageName: strin
     return existing;
   }
 
+  const classification = classifyDependency(packageName, false);
   const node: GraphNode = {
     id,
     label: packageName,
     path: packageName,
     type: 'external_dependency',
     module: 'external',
-    language: 'package'
+    language: 'package',
+    origin: classification.origin === 'framework' ? 'framework' : 'external',
+    frameworkName: classification.frameworkName,
+    visibleByDefault: false
   };
   packageNodes.set(id, node);
   return node;
@@ -499,6 +529,8 @@ function buildStats(nodes: GraphNode[], edges: GraphEdge[]): LightweightGraph['s
     degree.set(edge.to, (degree.get(edge.to) ?? 0) + 1);
   }
 
+  const externalDependencies = buildExternalDependencySummary(nodes, edges);
+
   return {
     nodeCount: nodes.length,
     edgeCount: edges.length,
@@ -509,8 +541,39 @@ function buildStats(nodes: GraphNode[], edges: GraphEdge[]): LightweightGraph['s
       .filter(([id]) => !id.startsWith('package:'))
       .sort((a, b) => b[1] - a[1])
       .slice(0, 20)
-      .map(([filePath, value]) => ({ path: filePath, degree: value }))
+      .map(([filePath, value]) => ({ path: filePath, degree: value })),
+    externalDependencies
   };
+}
+
+function buildExternalDependencySummary(nodes: GraphNode[], edges: GraphEdge[]): ExternalDependencySummary[] {
+  const incomingEdgeCount = new Map<string, number>();
+  for (const edge of edges) {
+    incomingEdgeCount.set(edge.to, (incomingEdgeCount.get(edge.to) ?? 0) + 1);
+  }
+
+  const summaryMap = new Map<string, ExternalDependencySummary>();
+  for (const node of nodes) {
+    if (node.origin === 'internal') {
+      continue;
+    }
+    const count = incomingEdgeCount.get(node.id) ?? 0;
+    const existing = summaryMap.get(node.label);
+    if (existing) {
+      existing.count += count;
+    } else {
+      summaryMap.set(node.label, {
+        specifier: node.label,
+        label: externalDependencyLabel(node.label),
+        origin: node.origin as 'external' | 'framework',
+        frameworkName: node.frameworkName,
+        count
+      });
+    }
+  }
+
+  return [...summaryMap.values()]
+    .sort((a, b) => b.count - a.count || a.specifier.localeCompare(b.specifier));
 }
 
 function summarizeDependencies(graph: LightweightGraph): Array<{ from: string; to: string; count: number }> {

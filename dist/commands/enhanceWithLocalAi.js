@@ -58,10 +58,27 @@ async function enhanceWithLocalAi() {
         vscode.window.showInformationMessage(status.message);
         return;
     }
-    const client = new ollamaClient_1.OllamaClient({ baseUrl: settings.ollamaUrl, model: settings.model });
+    const taskLog = [];
+    /** Returns a resolved OllamaClient for the given task, or throws if no model is available. */
+    function clientForTask(task) {
+        // If user explicitly set localAi.model, honour it as an override
+        const override = settings.model !== settings.fastModel ? settings.model : undefined;
+        const resolution = (0, ollamaClient_1.resolveModelForTask)(task, settings.mode, settings.fastModel, settings.qualityModel, status.models, override);
+        taskLog.push({
+            task,
+            taskLabel: ollamaClient_1.TASK_LABELS[task],
+            model: resolution.label,
+            reason: resolution.reason,
+            timestamp: new Date().toISOString()
+        });
+        if (!resolution.model) {
+            throw new Error(`Modelo local não encontrado. Instale com: ollama pull ${settings.fastModel}`);
+        }
+        return new ollamaClient_1.OllamaClient({ baseUrl: settings.ollamaUrl, model: resolution.model });
+    }
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
-        title: `TIC Coder Lite: melhorando com ${settings.model}`,
+        title: `TIC Coder Lite: IA Local (modo ${settings.mode})`,
         cancellable: false
     }, async (progress) => {
         const projectName = root.name;
@@ -74,7 +91,8 @@ async function enhanceWithLocalAi() {
         const graphJson = await readText(vscode.Uri.joinPath(ticCodeDir, 'graph.json'));
         const risksJson = await readText(vscode.Uri.joinPath(ticCodeDir, 'risks.json'));
         progress.report({ message: 'Melhorando contexto para IA' });
-        const agentContextAi = await (0, enhanceAgentContext_1.enhanceAgentContext)(client, {
+        const agentContextClient = clientForTask('agent-context');
+        const agentContextAi = await (0, enhanceAgentContext_1.enhanceAgentContext)(agentContextClient, {
             projectName,
             agentContext,
             risksMarkdown,
@@ -82,7 +100,8 @@ async function enhanceWithLocalAi() {
             confidenceReport
         });
         progress.report({ message: 'Gerando perguntas de validação humana' });
-        const questionsAi = await (0, enhanceAgentContext_1.enhanceQuestions)(client, {
+        const questionsClient = clientForTask('questions-gaps');
+        const questionsAi = await (0, enhanceAgentContext_1.enhanceQuestions)(questionsClient, {
             projectName,
             agentContext,
             risksMarkdown,
@@ -90,7 +109,8 @@ async function enhanceWithLocalAi() {
             confidenceReport
         });
         progress.report({ message: 'Resumindo módulos' });
-        const moduleSummariesAi = await (0, enhanceModuleSummary_1.enhanceModuleSummary)(client, {
+        const modulesClient = clientForTask('module-summary');
+        const moduleSummariesAi = await (0, enhanceModuleSummary_1.enhanceModuleSummary)(modulesClient, {
             projectName,
             modulesJson,
             graphJson,
@@ -99,8 +119,11 @@ async function enhanceWithLocalAi() {
         await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(ticCodeDir, 'agent-context.ai.md'), Buffer.from(agentContextAi, 'utf8'));
         await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(ticCodeDir, 'questions.ai.md'), Buffer.from(questionsAi, 'utf8'));
         await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(ticCodeDir, 'module-summaries.ai.md'), Buffer.from(moduleSummariesAi, 'utf8'));
+        // Persist task log so the WebView can display which model was used
+        await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(ticCodeDir, 'local-ai-log.json'), Buffer.from(JSON.stringify(taskLog, null, 2), 'utf8'));
     });
-    vscode.window.showInformationMessage('Modo IA Local gerou melhorias opcionais com Ollama em .tic-code.');
+    const modelsUsed = [...new Set(taskLog.map((e) => e.model))].join(', ');
+    vscode.window.showInformationMessage(`Modo IA Local concluído. Modelos usados: ${modelsUsed}. Resultados em .tic-code/`);
 }
 async function exists(uri) {
     try {

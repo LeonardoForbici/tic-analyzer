@@ -351,14 +351,6 @@ function extractCommentText(line) {
     }
     return line.slice(Math.min(...indexes));
 }
-function forEachLineMatch(content, pattern, callback) {
-    const lines = content.split(/\r\n|\r|\n/);
-    lines.forEach((text, index) => {
-        if (pattern.test(text)) {
-            callback(index + 1, text);
-        }
-    });
-}
 function firstLineOf(content, pattern) {
     const match = pattern.exec(content);
     return match ? lineAt(content, match.index) : undefined;

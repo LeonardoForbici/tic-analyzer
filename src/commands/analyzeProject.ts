@@ -80,7 +80,7 @@ export async function analyzeProject(context: vscode.ExtensionContext): Promise<
   }
 
   const config = getTicCoderLiteConfig();
-  logInfo(`Análise iniciada em ${root.uri.fsPath}`);
+  logInfo(`Análise do workspace iniciada em ${root.uri.fsPath}`);
   logInfo(`Limites do scan: maxFiles=${config.scan.maxFiles}, maxFileSizeKb=${config.scan.maxFileSizeKb}`);
 
   try {
@@ -90,7 +90,7 @@ export async function analyzeProject(context: vscode.ExtensionContext): Promise<
         title: 'TIC Coder Lite: analisando workspace',
         cancellable: true
       },
-      async (progress, token) => analyzeWorkspace(root, { progress, token })
+      async (progress, token) => analyzeWorkspaceInternal(root, { progress, token })
     );
 
     progressLogWriteArtifacts();
@@ -102,8 +102,10 @@ export async function analyzeProject(context: vscode.ExtensionContext): Promise<
       showOutputChannel();
     }
 
-    logInfo(`Análise concluída: ${summary.totalFiles} arquivos, ${summary.totalLines} linhas, ${summary.risks.summary.total} riscos.`);
-    vscode.window.showInformationMessage(`Modo Lite concluído: ${summary.totalFiles} arquivos analisados sem IA, banco, Docker ou servidor.`);
+    logInfo(`Análise do workspace concluída: ${summary.totalFiles} arquivos, ${summary.totalLines} linhas, ${summary.risks.summary.total} riscos, ${summary.detectedProjects?.length ?? 0} projetos detectados.`);
+    vscode.window.showInformationMessage(
+      `✓ Modo Lite: ${summary.totalFiles} arquivos analisados sem IA, banco, Docker ou servidor. ${summary.detectedProjects?.length ?? 0} subprojeto(s) detectado(s).`
+    );
     return summary;
   } catch (error) {
     if (isCancellation(error)) {
@@ -112,7 +114,7 @@ export async function analyzeProject(context: vscode.ExtensionContext): Promise<
       return undefined;
     }
 
-    logError('Falha na análise.', error);
+    logError('Falha na análise do workspace.', error);
     showOutputChannel();
     vscode.window.showErrorMessage('O TIC Coder Lite não conseguiu analisar este workspace. Veja a saída "TIC Coder Lite" para detalhes.');
     return undefined;
@@ -124,7 +126,12 @@ export interface AnalyzeWorkspaceOptions {
   token?: vscode.CancellationToken;
 }
 
+// Exportar com nome original para compatibilidade
 export async function analyzeWorkspace(root: vscode.WorkspaceFolder, options: AnalyzeWorkspaceOptions = {}): Promise<ProjectSummary> {
+  return analyzeWorkspaceInternal(root, options);
+}
+
+export async function analyzeWorkspaceInternal(root: vscode.WorkspaceFolder, options: AnalyzeWorkspaceOptions = {}): Promise<ProjectSummary> {
   const config = getTicCoderLiteConfig();
   options.progress?.report({ message: 'Escaneando arquivos', increment: 5 });
   const scan = await scanWorkspace(root, {
@@ -169,6 +176,10 @@ export async function analyzeWorkspace(root: vscode.WorkspaceFolder, options: An
     }
   }
 
+  // Detectar subprojetos e adicionar à summary
+  const { detectProjects } = await import('../scanner/detectProjects');
+  const detectedProjects = detectProjects(scan, risks);
+
   return {
     workspaceName: scan.projectName,
     rootPath: scan.rootPath,
@@ -183,6 +194,7 @@ export async function analyzeWorkspace(root: vscode.WorkspaceFolder, options: An
     packageManagers: await detectPackageManagers(root.uri),
     detectedAgentEngines: await detectAgentEngines(root.uri),
     keyFiles: keyFiles.sort().slice(0, 40),
+    detectedProjects,
     scan,
     inventory,
     graph,

@@ -411,15 +411,6 @@ function extractCommentText(line: string): string | undefined {
   return line.slice(Math.min(...indexes));
 }
 
-function forEachLineMatch(content: string, pattern: RegExp, callback: (line: number, text: string) => void): void {
-  const lines = content.split(/\r\n|\r|\n/);
-  lines.forEach((text, index) => {
-    if (pattern.test(text)) {
-      callback(index + 1, text);
-    }
-  });
-}
-
 function firstLineOf(content: string, pattern: RegExp): number | undefined {
   const match = pattern.exec(content);
   return match ? lineAt(content, match.index) : undefined;

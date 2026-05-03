@@ -13,29 +13,18 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:ticCoderLite.analyzeProject",
-    "onCommand:ticCoderLite.openOverview",
-    "onCommand:ticCoderLite.generateAgentContext",
-    "onCommand:ticCoderLite.exportAgentsMd",
-    "onCommand:ticCoderLite.detectAiEngines",
-    "onCommand:ticCoderLite.exportForCodex",
-    "onCommand:ticCoderLite.exportForClaude",
-    "onCommand:ticCoderLite.exportForCopilot",
-    "onCommand:ticCoderLite.exportForCursor",
-    "onCommand:ticCoderLite.exportForGemini",
-    "onCommand:ticCoderLite.enhanceWithLocalAi",
-    "onView:ticCoderLite.sidebar"
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "ticCoderLite.analyzeProject",
-        "title": "TIC Coder Lite: Analisar Projeto (Modo Lite)"
+        "title": "TIC Coder Lite: Analisar Workspace (Modo Lite)"
       },
       {
         "command": "ticCoderLite.openOverview",
-        "title": "TIC Coder Lite: Abrir Visão dos 3 Modos"
+        "title": "TIC Coder Lite: Abrir Visão Geral"
       },
       {
         "command": "ticCoderLite.generateAgentContext",
@@ -47,7 +36,7 @@
       },
       {
         "command": "ticCoderLite.detectAiEngines",
-        "title": "TIC Coder Lite: Detectar Engines de IA (IA Padrão)"
+        "title": "TIC Coder Lite: Detectar Ferramentas de IA (IA Padrão)"
       },
       {
         "command": "ticCoderLite.exportForCodex",
@@ -89,8 +78,29 @@
         },
         "ticCoderLite.localAi.model": {
           "type": "string",
-          "default": "qwen2.5-coder:1.5b",
-          "description": "Modelo do Ollama para melhoria opcional com IA Local. O TIC Coder Lite nunca baixa modelos automaticamente."
+          "default": "qwen2.5-coder:3b",
+          "description": "Modelo do Ollama para IA Local. Sobrescreve fastModel/qualityModel se definido explicitamente."
+        },
+        "ticCoderLite.localAi.fastModel": {
+          "type": "string",
+          "default": "qwen2.5-coder:3b",
+          "description": "Modelo usado para tarefas simples (resumo de módulos, explicação de riscos, perguntas, contexto). Deve ser pequeno e rápido."
+        },
+        "ticCoderLite.localAi.qualityModel": {
+          "type": "string",
+          "default": "qwen2.5-coder:7b",
+          "description": "Modelo usado para tarefas complexas (PL/SQL, regras de negócio, domínio, state machines, permissões, arquivos críticos). Pode ser maior."
+        },
+        "ticCoderLite.localAi.mode": {
+          "type": "string",
+          "enum": ["auto", "fast", "quality"],
+          "enumDescriptions": [
+            "Seleção automática: fastModel para tarefas simples, qualityModel para tarefas complexas.",
+            "Usa sempre fastModel independentemente da tarefa.",
+            "Usa sempre qualityModel independentemente da tarefa."
+          ],
+          "default": "fast",
+          "description": "Estratégia de seleção de modelo da IA Local. 'auto' escolhe o modelo certo para cada tarefa automaticamente."
         },
         "ticCoderLite.scan.maxFiles": {
           "type": "number",

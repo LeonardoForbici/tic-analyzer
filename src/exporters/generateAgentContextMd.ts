@@ -149,6 +149,34 @@ ${readingOrder || '1. README.md\n2. package.json\n3. .tic-code/inventory.md\n4. 
 - Mantenha arquivos gerados dentro de .tic-code, salvo quando o usuário pedir exportação para outro lugar.
 - Lembrete: fatos do Modo Lite funcionam sem IA; IA Padrão só exporta contexto; IA Local é opcional.
 
+## Programação Reversa / SDD
+
+Antes de alterar código, leia também:
+
+- .tic-code/reverse-engineering/inventory.md
+- .tic-code/reverse-engineering/architecture.md
+- .tic-code/reverse-engineering/business-rules.md
+- .tic-code/reverse-engineering/confidence-report.md
+- .tic-code/reverse-engineering/gaps.md
+- .tic-code/reverse-engineering/questions.md
+- .tic-code/reverse-engineering/traceability/code-spec-matrix.md
+- .tic-code/reverse-engineering/traceability/risk-impact-matrix.md
+
+### Instruções para Agentes (Programação Reversa)
+
+- Não trate 🟡 INFERIDO como verdade absoluta.
+- Valide itens 🟡 INFERIDO antes de alterar regra crítica.
+- Pergunte ao usuário sobre itens 🔴 LACUNA antes de prosseguir.
+- Nunca altere módulo crítico sem consultar riscos e a matriz de impacto.
+- Em projetos com PL/SQL, verifique triggers, procedures e packages antes de alterar regra de negócio no backend.
+- Consulte .tic-code/reverse-engineering/plsql-analysis.md antes de alterar qualquer tabela referenciada por trigger.
+
+### Níveis de Confiança
+
+- 🟢 CONFIRMADO: extraído diretamente do código, SQL, anotação ou arquivo.
+- 🟡 INFERIDO: deduzido por nome, padrão, fluxo ou grafo.
+- 🔴 LACUNA: não confirmável, exige validação humana.
+
 ## Não Fazer Sem Validação Humana
 
 - Não remova APIs públicas, endpoints, scripts de banco, migrations ou checagens de segurança apenas por inferência.
@@ -159,7 +187,7 @@ ${readingOrder || '1. README.md\n2. package.json\n3. .tic-code/inventory.md\n4. 
 
 ## Créditos
 
-- Reversa by Sandeco, MIT License.
+- Reversa by Sandeco, MIT License. Programação Reversa do TIC Coder Lite foi inspirada metodologicamente no Reversa.
 - TIC Coder Lite by TIC / Leonardo Forbici.
 - InsightGraph concepts used as internal reference, not bundled as dependency.
 `;

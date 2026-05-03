@@ -178,6 +178,7 @@ function getOverviewStyles() {
     .node.config, .node.security { color: #f97316; }
     .node.database { color: #34d399; }
     .node.external { color: #94a3b8; }
+    .node.framework { color: #6b7280; }
     .node.unknown { color: #a3e635; }
     .node.high, .node.critical { color: var(--danger); }
     .graph-side {
@@ -225,6 +226,7 @@ function getOverviewScript(nonce) {
       labels: true,
       density: 65,
       module: 'todos',
+      origin: 'internal',
       search: '',
       draggingNode: null,
       draggingCanvas: false,
@@ -268,14 +270,27 @@ function getOverviewScript(nonce) {
       }[module] || 'unknown';
     }
 
+    function nodeColorClass(node) {
+      if (node.origin === 'framework') return 'framework';
+      if (node.origin === 'external') return 'external';
+      return moduleColor(node.module);
+    }
+
     function filteredGraph() {
       const search = graphState.search.toLowerCase();
       const maxEdges = Math.max(20, Math.round(state.graph.edges.length * graphState.density / 100));
       const module = graphState.module;
+      const originMode = graphState.origin;
       const nodes = state.graph.nodes.filter((node) => {
         const moduleOk = module === 'todos' || matchesProjectType(node, module) || node.module === module;
         const searchOk = !search || node.label.toLowerCase().includes(search) || node.path.toLowerCase().includes(search);
-        return moduleOk && searchOk;
+        let originOk = true;
+        if (originMode === 'internal') originOk = node.origin === 'internal';
+        else if (originMode === 'external') originOk = node.origin === 'external';
+        else if (originMode === 'framework') originOk = node.origin === 'framework';
+        else if (originMode === 'high-risk') originOk = node.origin === 'internal' && (node.riskLevel === 'high' || node.riskLevel === 'critical');
+        // 'all' shows everything
+        return moduleOk && searchOk && originOk;
       });
       const ids = new Set(nodes.map((node) => node.id));
       const edges = state.graph.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)).slice(0, maxEdges);
@@ -349,7 +364,7 @@ function getOverviewScript(nonce) {
         const related = connectedToSelected.has(node.id);
         const dim = graphState.selectedNodeId && !selected && !related;
         const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        group.setAttribute('class', 'node ' + moduleColor(node.module) + ' ' + (node.riskLevel || '') + (selected ? ' selected' : '') + (dim ? ' dim' : ''));
+        group.setAttribute('class', 'node ' + nodeColorClass(node) + ' ' + (node.riskLevel || '') + (selected ? ' selected' : '') + (dim ? ' dim' : ''));
         group.setAttribute('data-id', node.id);
         group.setAttribute('transform', 'translate(' + node.x + ',' + node.y + ')');
 
@@ -396,10 +411,24 @@ function getOverviewScript(nonce) {
         ['Módulo', moduleLabel(node.module)],
         ['Tipo', typeLabel(node.type)],
         ['Linguagem', node.language],
+        ['Origem', originLabel(node.origin, node.frameworkName)],
         ['Risco', riskLabel(node.riskLevel || 'normal')],
         ['Conexões', String(node.degree)],
         ['Arestas exibidas', String(edges.length)]
       ].map(([k, v]) => '<li><strong>' + escapeHtml(k) + '</strong><span class="mono">' + escapeHtml(v) + '</span></li>').join('') : '';
+      // Show external deps for the selected internal node
+      const extDepsEl = $('nodeExternalDeps');
+      if (extDepsEl) {
+        if (node && node.origin === 'internal') {
+          const extTargetIds = edges.filter((e) => e.from === id).map((e) => e.to);
+          const extNodes = extTargetIds.map((eid) => state.graph.nodes.find((n) => n.id === eid)).filter((n) => n && n.origin !== 'internal');
+          extDepsEl.innerHTML = extNodes.length
+            ? extNodes.map((n) => '<li class="caption"><span class="mono">' + escapeHtml(n.label) + '</span>' + (n.frameworkName ? ' <em>(' + escapeHtml(n.frameworkName) + ')</em>' : '') + '</li>').join('')
+            : '<li class="caption muted">Nenhuma dependência externa direta</li>';
+        } else {
+          extDepsEl.innerHTML = '';
+        }
+      }
       $('nodeEdges').innerHTML = edges.slice(0, 16).map((edge) => '<li><span class="mono">' + escapeHtml(edge.type) + '</span><span class="mono">' + escapeHtml(edge.from === id ? edge.to : edge.from) + '</span></li>').join('') || '<li><span>Sem arestas no grafo</span></li>';
       renderGraph();
     }
@@ -443,6 +472,12 @@ function getOverviewScript(nonce) {
 
     function riskLabel(value) {
       return { critical: 'crítico', high: 'alto', medium: 'médio', low: 'baixo', normal: 'normal' }[value] || value;
+    }
+
+    function originLabel(origin, frameworkName) {
+      if (origin === 'framework') return 'Framework' + (frameworkName ? ' (' + frameworkName + ')' : '');
+      if (origin === 'external') return 'Externo';
+      return 'Interno';
     }
 
     function escapeHtml(value) {
@@ -523,6 +558,21 @@ function getOverviewScript(nonce) {
     $('fitGraph').addEventListener('click', fitGraph);
     $('toggleLabels').addEventListener('click', () => { graphState.labels = !graphState.labels; renderGraph(); });
     $('moduleFilter').addEventListener('change', (event) => { graphState.module = event.target.value; renderGraph(); });
+    const originFilterEl = $('originFilter');
+    if (originFilterEl) {
+      originFilterEl.addEventListener('change', (event) => {
+        graphState.origin = event.target.value;
+        const info = $('graphOriginInfo');
+        if (info) {
+          if (graphState.origin === 'internal') {
+            info.style.display = '';
+          } else {
+            info.style.display = 'none';
+          }
+        }
+        renderGraph();
+      });
+    }
     $('graphSearch').addEventListener('input', (event) => { graphState.search = event.target.value; renderGraph(); });
     $('density').addEventListener('input', (event) => { graphState.density = Number(event.target.value); renderGraph(); });
     $('layoutSelect').addEventListener('change', (event) => applyLayout(event.target.value));

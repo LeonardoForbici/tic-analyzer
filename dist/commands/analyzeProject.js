@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getWorkspaceRoot = void 0;
 exports.analyzeProject = analyzeProject;
 exports.analyzeWorkspace = analyzeWorkspace;
+exports.analyzeWorkspaceInternal = analyzeWorkspaceInternal;
 exports.getLastAnalysis = getLastAnalysis;
 const path = __importStar(require("node:path"));
 const vscode = __importStar(require("vscode"));
@@ -112,14 +113,14 @@ async function analyzeProject(context) {
         return undefined;
     }
     const config = (0, config_1.getTicCoderLiteConfig)();
-    (0, outputChannel_1.logInfo)(`Análise iniciada em ${root.uri.fsPath}`);
+    (0, outputChannel_1.logInfo)(`Análise do workspace iniciada em ${root.uri.fsPath}`);
     (0, outputChannel_1.logInfo)(`Limites do scan: maxFiles=${config.scan.maxFiles}, maxFileSizeKb=${config.scan.maxFileSizeKb}`);
     try {
         const summary = await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: 'TIC Coder Lite: analisando workspace',
             cancellable: true
-        }, async (progress, token) => analyzeWorkspace(root, { progress, token }));
+        }, async (progress, token) => analyzeWorkspaceInternal(root, { progress, token }));
         progressLogWriteArtifacts();
         await (0, writeTicCodeFolder_1.writeTicCodeFolder)(root, summary);
         await context.globalState.update('ticCoderLite.lastAnalysis', summary);
@@ -127,8 +128,8 @@ async function analyzeProject(context) {
         if (config.output.openAfterScan) {
             (0, outputChannel_1.showOutputChannel)();
         }
-        (0, outputChannel_1.logInfo)(`Análise concluída: ${summary.totalFiles} arquivos, ${summary.totalLines} linhas, ${summary.risks.summary.total} riscos.`);
-        vscode.window.showInformationMessage(`Modo Lite concluído: ${summary.totalFiles} arquivos analisados sem IA, banco, Docker ou servidor.`);
+        (0, outputChannel_1.logInfo)(`Análise do workspace concluída: ${summary.totalFiles} arquivos, ${summary.totalLines} linhas, ${summary.risks.summary.total} riscos, ${summary.detectedProjects?.length ?? 0} projetos detectados.`);
+        vscode.window.showInformationMessage(`✓ Modo Lite: ${summary.totalFiles} arquivos analisados sem IA, banco, Docker ou servidor. ${summary.detectedProjects?.length ?? 0} subprojeto(s) detectado(s).`);
         return summary;
     }
     catch (error) {
@@ -137,13 +138,17 @@ async function analyzeProject(context) {
             vscode.window.showInformationMessage('Análise do TIC Coder Lite cancelada. Nenhum arquivo do projeto foi alterado.');
             return undefined;
         }
-        (0, outputChannel_1.logError)('Falha na análise.', error);
+        (0, outputChannel_1.logError)('Falha na análise do workspace.', error);
         (0, outputChannel_1.showOutputChannel)();
         vscode.window.showErrorMessage('O TIC Coder Lite não conseguiu analisar este workspace. Veja a saída "TIC Coder Lite" para detalhes.');
         return undefined;
     }
 }
+// Exportar com nome original para compatibilidade
 async function analyzeWorkspace(root, options = {}) {
+    return analyzeWorkspaceInternal(root, options);
+}
+async function analyzeWorkspaceInternal(root, options = {}) {
     const config = (0, config_1.getTicCoderLiteConfig)();
     options.progress?.report({ message: 'Escaneando arquivos', increment: 5 });
     const scan = await (0, scanWorkspace_1.scanWorkspace)(root, {
@@ -183,6 +188,9 @@ async function analyzeWorkspace(root, options = {}) {
             keyFiles.push(relative);
         }
     }
+    // Detectar subprojetos e adicionar à summary
+    const { detectProjects } = await Promise.resolve().then(() => __importStar(require('../scanner/detectProjects')));
+    const detectedProjects = detectProjects(scan, risks);
     return {
         workspaceName: scan.projectName,
         rootPath: scan.rootPath,
@@ -197,6 +205,7 @@ async function analyzeWorkspace(root, options = {}) {
         packageManagers: await detectPackageManagers(root.uri),
         detectedAgentEngines: await detectAgentEngines(root.uri),
         keyFiles: keyFiles.sort().slice(0, 40),
+        detectedProjects,
         scan,
         inventory,
         graph,

@@ -11,6 +11,12 @@ export interface WebviewGraphNode {
   degree: number;
   x: number;
   y: number;
+  /** Origin classification: 'internal' | 'external' | 'framework' */
+  origin: string;
+  /** Framework name when origin === 'framework', e.g. 'Spring' */
+  frameworkName?: string;
+  /** Whether the node is shown in the default "Internos" filter. */
+  visibleByDefault: boolean;
 }
 
 export interface WebviewGraphEdge {
@@ -28,6 +34,9 @@ export interface WebviewGraphData {
     visibleNodes: number;
     visibleEdges: number;
     modules: Record<string, number>;
+    internalCount: number;
+    externalCount: number;
+    frameworkCount: number;
   };
 }
 
@@ -38,21 +47,28 @@ export function buildWebviewGraphData(graph: LightweightGraph): WebviewGraphData
     degree.set(edge.to, (degree.get(edge.to) ?? 0) + 1);
   }
 
+  // Internal nodes only for default view
+  const internalNodes = graph.nodes.filter((node) => node.visibleByDefault);
+
   const centralPaths = new Set(graph.stats.centralFiles.slice(0, 60).map((file) => file.path));
   const connectedIds = new Set<string>();
   for (const edge of graph.edges) {
-    if (centralPaths.has(edge.sourcePath) || centralPaths.has(edge.targetPath)) {
+    const fromInternal = graph.nodes.find((n) => n.id === edge.from)?.visibleByDefault ?? false;
+    const toInternal = graph.nodes.find((n) => n.id === edge.to)?.visibleByDefault ?? false;
+    if ((fromInternal || toInternal) && (centralPaths.has(edge.sourcePath) || centralPaths.has(edge.targetPath))) {
       connectedIds.add(edge.from);
       connectedIds.add(edge.to);
     }
   }
 
-  const selectedNodes = graph.nodes
+  // Select up to 180 nodes from internal set, prioritised by degree and risk
+  const selectedNodes = internalNodes
     .filter((node) => centralPaths.has(node.path) || connectedIds.has(node.id) || node.riskLevel || node.module !== 'unknown')
     .sort((a, b) => (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.path.localeCompare(b.path))
     .slice(0, 180);
 
   const selectedIds = new Set(selectedNodes.map((node) => node.id));
+  // Edges between internal nodes only
   const visibleEdges = graph.edges
     .filter((edge) => selectedIds.has(edge.from) && selectedIds.has(edge.to))
     .sort((a, b) => (degree.get(b.from) ?? 0) + (degree.get(b.to) ?? 0) - ((degree.get(a.from) ?? 0) + (degree.get(a.to) ?? 0)))
@@ -72,8 +88,12 @@ export function buildWebviewGraphData(graph: LightweightGraph): WebviewGraphData
 
   const moduleCounts: Record<string, number> = {};
 
+  const internalCount = graph.nodes.filter((n) => n.origin === 'internal').length;
+  const externalCount = graph.nodes.filter((n) => n.origin === 'external').length;
+  const frameworkCount = graph.nodes.filter((n) => n.origin === 'framework').length;
+
   return {
-    nodes: selectedNodes.map((node, index) => {
+    nodes: selectedNodes.map((node) => {
       const moduleIndex = moduleCounts[node.module] ?? 0;
       moduleCounts[node.module] = moduleIndex + 1;
       const center = moduleCenters.get(node.module) ?? { x: 360, y: 220 };
@@ -89,7 +109,10 @@ export function buildWebviewGraphData(graph: LightweightGraph): WebviewGraphData
         riskLevel: node.riskLevel,
         degree: degree.get(node.id) ?? 0,
         x: Math.round(center.x + Math.cos(angle) * ring),
-        y: Math.round(center.y + Math.sin(angle) * ring)
+        y: Math.round(center.y + Math.sin(angle) * ring),
+        origin: node.origin,
+        frameworkName: node.frameworkName,
+        visibleByDefault: node.visibleByDefault
       };
     }),
     edges: visibleEdges.map((edge) => ({ from: edge.from, to: edge.to, type: edge.type })),
@@ -98,7 +121,11 @@ export function buildWebviewGraphData(graph: LightweightGraph): WebviewGraphData
       totalEdges: graph.edges.length,
       visibleNodes: selectedNodes.length,
       visibleEdges: visibleEdges.length,
-      modules: graph.stats.modules
+      modules: graph.stats.modules,
+      internalCount,
+      externalCount,
+      frameworkCount
     }
   };
 }
+

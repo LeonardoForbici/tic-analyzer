@@ -26,7 +26,32 @@ export interface AgentEngine {
   detected: boolean;
 }
 
-export interface ProjectSummary {
+/**
+ * Resumo de análise de um projeto específico dentro do workspace.
+ * Contém contexto e artefatos focados em um único subprojeto.
+ */
+export interface ProjectContextSummary {
+  projectId: string;
+  projectName: string;
+  projectKind: DetectedProjectKind;
+  rootPath: string;
+  relativePath: string;
+  generatedAt: string;
+  files: number;
+  lines: number;
+  languages: LanguageStats;
+  stack: string[];
+  scan: ScanResult;
+  inventory: ArchitectureInventory;
+  graph: LightweightGraph;
+  risks: RiskReport;
+}
+
+/**
+ * Resumo global do workspace, com informações consolidadas.
+ * Contém metadados globais e referências para artefatos por projeto.
+ */
+export interface WorkspaceSummary {
   workspaceName: string;
   rootPath: string;
   generatedAt: string;
@@ -37,11 +62,21 @@ export interface ProjectSummary {
   packageManagers: string[];
   detectedAgentEngines: AgentEngine[];
   keyFiles: string[];
+  detectedProjects: DetectedProject[];
+  // Artefatos globais
   scan: ScanResult;
   inventory: ArchitectureInventory;
   graph: LightweightGraph;
   risks: RiskReport;
+  // Metadados de projetos
+  projectSummaries?: Record<string, ProjectContextSummary>;
 }
+
+/**
+ * Legado: ProjectSummary agora aponta para WorkspaceSummary.
+ * Mantido para compatibilidade.
+ */
+export type ProjectSummary = WorkspaceSummary;
 
 export interface AgentContext {
   summary: ProjectSummary;
@@ -50,4 +85,6 @@ export interface AgentContext {
 
 export interface SidebarState {
   lastAnalysis?: ProjectSummary;
+  selectedProjectId?: string;
 }
+

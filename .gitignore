@@ -1,2 +1,6 @@
 node_modules/
+dist/
+.tic-code/
 *.vsix
+*.map
+.DS_Store
