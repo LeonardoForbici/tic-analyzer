@@ -1,15 +1,47 @@
 {
   "projectName": "tic-coder-lite",
-  "rootPath": "C:\\git\\tic-coder-lite",
-  "generatedAt": "2026-04-30T23:12:27.901Z",
+  "rootPath": "c:\\Git\\tic-coder-lite",
+  "generatedAt": "2026-05-04T14:16:10.885Z",
   "nodes": [
+    {
+      "id": "AGENTS.md",
+      "label": "AGENTS.md",
+      "path": "AGENTS.md",
+      "type": "documentation",
+      "module": "unknown",
+      "language": "Markdown",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "CHANGELOG.md",
+      "label": "CHANGELOG.md",
+      "path": "CHANGELOG.md",
+      "type": "documentation",
+      "module": "unknown",
+      "language": "Markdown",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "CLAUDE.md",
+      "label": "CLAUDE.md",
+      "path": "CLAUDE.md",
+      "type": "documentation",
+      "module": "unknown",
+      "language": "Markdown",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
     {
       "id": "NOTICE.md",
       "label": "NOTICE.md",
       "path": "NOTICE.md",
       "type": "documentation",
       "module": "unknown",
-      "language": "Markdown"
+      "language": "Markdown",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "package-lock.json",
@@ -17,7 +49,9 @@
       "path": "package-lock.json",
       "type": "config",
       "module": "unknown",
-      "language": "JSON"
+      "language": "JSON",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "package:@types/node",
@@ -25,7 +59,10 @@
       "path": "@types/node",
       "type": "external_dependency",
       "module": "external",
-      "language": "package"
+      "language": "package",
+      "origin": "framework",
+      "frameworkName": "TypeScript Types",
+      "visibleByDefault": false
     },
     {
       "id": "package:@types/vscode",
@@ -33,7 +70,20 @@
       "path": "@types/vscode",
       "type": "external_dependency",
       "module": "external",
-      "language": "package"
+      "language": "package",
+      "origin": "framework",
+      "frameworkName": "TypeScript Types",
+      "visibleByDefault": false
+    },
+    {
+      "id": "package:@vscode/vsce",
+      "label": "@vscode/vsce",
+      "path": "@vscode/vsce",
+      "type": "external_dependency",
+      "module": "external",
+      "language": "package",
+      "origin": "external",
+      "visibleByDefault": false
     },
     {
       "id": "package:node:child_process",
@@ -41,7 +91,21 @@
       "path": "node:child_process",
       "type": "external_dependency",
       "module": "external",
-      "language": "package"
+      "language": "package",
+      "origin": "framework",
+      "frameworkName": "Node.js Built-in",
+      "visibleByDefault": false
+    },
+    {
+      "id": "package:node:crypto",
+      "label": "node:crypto",
+      "path": "node:crypto",
+      "type": "external_dependency",
+      "module": "external",
+      "language": "package",
+      "origin": "framework",
+      "frameworkName": "Node.js Built-in",
+      "visibleByDefault": false
     },
     {
       "id": "package:node:fs",
@@ -50,6 +114,9 @@
       "type": "external_dependency",
       "module": "external",
       "language": "package",
+      "origin": "framework",
+      "frameworkName": "Node.js Built-in",
+      "visibleByDefault": false,
       "riskLevel": "medium"
     },
     {
@@ -59,6 +126,9 @@
       "type": "external_dependency",
       "module": "external",
       "language": "package",
+      "origin": "framework",
+      "frameworkName": "Node.js Built-in",
+      "visibleByDefault": false,
       "riskLevel": "high"
     },
     {
@@ -67,7 +137,10 @@
       "path": "node:util",
       "type": "external_dependency",
       "module": "external",
-      "language": "package"
+      "language": "package",
+      "origin": "framework",
+      "frameworkName": "Node.js Built-in",
+      "visibleByDefault": false
     },
     {
       "id": "package:typescript",
@@ -75,7 +148,10 @@
       "path": "typescript",
       "type": "external_dependency",
       "module": "external",
-      "language": "package"
+      "language": "package",
+      "origin": "framework",
+      "frameworkName": "TypeScript",
+      "visibleByDefault": false
     },
     {
       "id": "package:vscode",
@@ -84,6 +160,9 @@
       "type": "external_dependency",
       "module": "external",
       "language": "package",
+      "origin": "framework",
+      "frameworkName": "VS Code API",
+      "visibleByDefault": false,
       "riskLevel": "high"
     },
     {
@@ -92,7 +171,9 @@
       "path": "package.json",
       "type": "package_manifest",
       "module": "unknown",
-      "language": "JSON"
+      "language": "JSON",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "README.md",
@@ -100,7 +181,9 @@
       "path": "README.md",
       "type": "documentation",
       "module": "unknown",
-      "language": "Markdown"
+      "language": "Markdown",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/commands/analyzeProject.ts",
@@ -109,6 +192,8 @@
       "type": "script_source",
       "module": "unknown",
       "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
       "riskLevel": "high"
     },
     {
@@ -118,6 +203,8 @@
       "type": "script_source",
       "module": "unknown",
       "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
       "riskLevel": "medium"
     },
     {
@@ -126,7 +213,9 @@
       "path": "src/commands/exportAgentsMd.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/commands/generateAgentContext.ts",
@@ -135,6 +224,8 @@
       "type": "script_source",
       "module": "unknown",
       "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
       "riskLevel": "medium"
     },
     {
@@ -143,7 +234,9 @@
       "path": "src/commands/openOverview.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/exporters/generateAgentContextMd.ts",
@@ -151,7 +244,9 @@
       "path": "src/exporters/generateAgentContextMd.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/exporters/generateConfidenceReportMd.ts",
@@ -159,7 +254,9 @@
       "path": "src/exporters/generateConfidenceReportMd.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/exporters/generateQuestionsMd.ts",
@@ -167,7 +264,190 @@
       "path": "src/exporters/generateQuestionsMd.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateApiContracts.ts",
+      "label": "generateApiContracts.ts",
+      "path": "src/exporters/reverseEngineering/generateApiContracts.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateArchitecture.ts",
+      "label": "generateArchitecture.ts",
+      "path": "src/exporters/reverseEngineering/generateArchitecture.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateBusinessRules.ts",
+      "label": "generateBusinessRules.ts",
+      "path": "src/exporters/reverseEngineering/generateBusinessRules.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateCodeAnalysis.ts",
+      "label": "generateCodeAnalysis.ts",
+      "path": "src/exporters/reverseEngineering/generateCodeAnalysis.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateConfidenceReport.ts",
+      "label": "generateConfidenceReport.ts",
+      "path": "src/exporters/reverseEngineering/generateConfidenceReport.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateDatabaseAnalysis.ts",
+      "label": "generateDatabaseAnalysis.ts",
+      "path": "src/exporters/reverseEngineering/generateDatabaseAnalysis.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateDataDictionary.ts",
+      "label": "generateDataDictionary.ts",
+      "path": "src/exporters/reverseEngineering/generateDataDictionary.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateDependencies.ts",
+      "label": "generateDependencies.ts",
+      "path": "src/exporters/reverseEngineering/generateDependencies.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateDomain.ts",
+      "label": "generateDomain.ts",
+      "path": "src/exporters/reverseEngineering/generateDomain.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateGaps.ts",
+      "label": "generateGaps.ts",
+      "path": "src/exporters/reverseEngineering/generateGaps.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateInventory.ts",
+      "label": "generateInventory.ts",
+      "path": "src/exporters/reverseEngineering/generateInventory.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generatePermissions.ts",
+      "label": "generatePermissions.ts",
+      "path": "src/exporters/reverseEngineering/generatePermissions.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generatePlSqlAnalysis.ts",
+      "label": "generatePlSqlAnalysis.ts",
+      "path": "src/exporters/reverseEngineering/generatePlSqlAnalysis.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateQuestions.ts",
+      "label": "generateQuestions.ts",
+      "path": "src/exporters/reverseEngineering/generateQuestions.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "label": "generateReverseEngineering.ts",
+      "path": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
+      "riskLevel": "high"
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateStateMachines.ts",
+      "label": "generateStateMachines.ts",
+      "path": "src/exporters/reverseEngineering/generateStateMachines.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/generateTraceability.ts",
+      "label": "generateTraceability.ts",
+      "path": "src/exporters/reverseEngineering/generateTraceability.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/exporters/reverseEngineering/reverseEngineeringTypes.ts",
+      "label": "reverseEngineeringTypes.ts",
+      "path": "src/exporters/reverseEngineering/reverseEngineeringTypes.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/exporters/writeTicCodeFolder.ts",
@@ -176,6 +456,8 @@
       "type": "script_source",
       "module": "unknown",
       "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
       "riskLevel": "high"
     },
     {
@@ -185,6 +467,8 @@
       "type": "script_source",
       "module": "unknown",
       "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
       "riskLevel": "medium"
     },
     {
@@ -193,7 +477,9 @@
       "path": "src/local-ai/checkOllamaStatus.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/local-ai/enhanceAgentContext.ts",
@@ -201,7 +487,9 @@
       "path": "src/local-ai/enhanceAgentContext.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/local-ai/enhanceModuleSummary.ts",
@@ -209,7 +497,9 @@
       "path": "src/local-ai/enhanceModuleSummary.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/local-ai/ollamaClient.ts",
@@ -217,7 +507,9 @@
       "path": "src/local-ai/ollamaClient.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/reversa-adapter/detectEngines.ts",
@@ -226,6 +518,8 @@
       "type": "script_source",
       "module": "unknown",
       "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
       "riskLevel": "medium"
     },
     {
@@ -234,7 +528,9 @@
       "path": "src/reversa-adapter/engineTypes.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/reversa-adapter/exportForEngines.ts",
@@ -243,6 +539,8 @@
       "type": "script_source",
       "module": "unknown",
       "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
       "riskLevel": "high"
     },
     {
@@ -252,6 +550,8 @@
       "type": "script_source",
       "module": "unknown",
       "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
       "riskLevel": "medium"
     },
     {
@@ -260,7 +560,9 @@
       "path": "src/reversa-adapter/generateClaudeMd.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/reversa-adapter/generateCopilotInstructions.ts",
@@ -268,7 +570,9 @@
       "path": "src/reversa-adapter/generateCopilotInstructions.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/reversa-adapter/generateCursorRules.ts",
@@ -276,7 +580,9 @@
       "path": "src/reversa-adapter/generateCursorRules.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/reversa-adapter/generateGeminiMd.ts",
@@ -284,7 +590,9 @@
       "path": "src/reversa-adapter/generateGeminiMd.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/reversa-adapter/safeWriter.ts",
@@ -292,7 +600,9 @@
       "path": "src/reversa-adapter/safeWriter.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/scanner/buildGraph.ts",
@@ -301,7 +611,39 @@
       "type": "script_source",
       "module": "unknown",
       "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
       "riskLevel": "medium"
+    },
+    {
+      "id": "src/scanner/classifyDependency.ts",
+      "label": "classifyDependency.ts",
+      "path": "src/scanner/classifyDependency.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/scanner/databaseIndex.ts",
+      "label": "databaseIndex.ts",
+      "path": "src/scanner/databaseIndex.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/scanner/databaseLargeMode.ts",
+      "label": "databaseLargeMode.ts",
+      "path": "src/scanner/databaseLargeMode.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/scanner/detectJavaSpring.ts",
@@ -309,7 +651,29 @@
       "path": "src/scanner/detectJavaSpring.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/scanner/detectPlSql.ts",
+      "label": "detectPlSql.ts",
+      "path": "src/scanner/detectPlSql.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/scanner/detectProjects.ts",
+      "label": "detectProjects.ts",
+      "path": "src/scanner/detectProjects.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/scanner/detectRisks.ts",
@@ -317,7 +681,10 @@
       "path": "src/scanner/detectRisks.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
+      "riskLevel": "medium"
     },
     {
       "id": "src/scanner/detectStack.ts",
@@ -326,6 +693,8 @@
       "type": "script_source",
       "module": "unknown",
       "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
       "riskLevel": "medium"
     },
     {
@@ -334,7 +703,9 @@
       "path": "src/scanner/detectTypeScriptProject.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/scanner/ignoreRules.ts",
@@ -342,7 +713,9 @@
       "path": "src/scanner/ignoreRules.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/scanner/parseImports.ts",
@@ -350,7 +723,19 @@
       "path": "src/scanner/parseImports.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/scanner/rankDatabaseObjects.ts",
+      "label": "rankDatabaseObjects.ts",
+      "path": "src/scanner/rankDatabaseObjects.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/scanner/scanFiles.ts",
@@ -359,6 +744,8 @@
       "type": "script_source",
       "module": "unknown",
       "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
       "riskLevel": "medium"
     },
     {
@@ -367,7 +754,10 @@
       "path": "src/scanner/scanWorkspace.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
+      "riskLevel": "medium"
     },
     {
       "id": "src/types.ts",
@@ -375,7 +765,71 @@
       "path": "src/types.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/utils/config.ts",
+      "label": "config.ts",
+      "path": "src/utils/config.ts",
+      "type": "script_source",
+      "module": "config",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
+      "riskLevel": "medium"
+    },
+    {
+      "id": "src/utils/fileUtils.ts",
+      "label": "fileUtils.ts",
+      "path": "src/utils/fileUtils.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
+      "riskLevel": "medium"
+    },
+    {
+      "id": "src/utils/hash.ts",
+      "label": "hash.ts",
+      "path": "src/utils/hash.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/utils/outputChannel.ts",
+      "label": "outputChannel.ts",
+      "path": "src/utils/outputChannel.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/utils/workspace.ts",
+      "label": "workspace.ts",
+      "path": "src/utils/workspace.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
+    },
+    {
+      "id": "src/webview/databaseSearch.ts",
+      "label": "databaseSearch.ts",
+      "path": "src/webview/databaseSearch.ts",
+      "type": "script_source",
+      "module": "unknown",
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/webview/graphRenderer.ts",
@@ -383,7 +837,9 @@
       "path": "src/webview/graphRenderer.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "src/webview/overviewHtml.ts",
@@ -391,7 +847,10 @@
       "path": "src/webview/overviewHtml.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
+      "riskLevel": "medium"
     },
     {
       "id": "src/webview/overviewPanel.ts",
@@ -400,6 +859,8 @@
       "type": "script_source",
       "module": "unknown",
       "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true,
       "riskLevel": "medium"
     },
     {
@@ -408,7 +869,9 @@
       "path": "src/webview/webviewAssets.ts",
       "type": "script_source",
       "module": "unknown",
-      "language": "TypeScript"
+      "language": "TypeScript",
+      "origin": "internal",
+      "visibleByDefault": true
     },
     {
       "id": "tsconfig.json",
@@ -416,7 +879,9 @@
       "path": "tsconfig.json",
       "type": "config",
       "module": "unknown",
-      "language": "JSON"
+      "language": "JSON",
+      "origin": "internal",
+      "visibleByDefault": true
     }
   ],
   "edges": [
@@ -433,6 +898,13 @@
       "type": "DEPENDS_ON",
       "sourcePath": "package.json",
       "targetPath": "@types/vscode"
+    },
+    {
+      "from": "package.json",
+      "to": "package:@vscode/vsce",
+      "type": "DEPENDS_ON",
+      "sourcePath": "package.json",
+      "targetPath": "@vscode/vsce"
     },
     {
       "from": "package.json",
@@ -471,6 +943,13 @@
     },
     {
       "from": "src/commands/analyzeProject.ts",
+      "to": "src/scanner/detectProjects.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/commands/analyzeProject.ts",
+      "targetPath": "src/scanner/detectProjects.ts"
+    },
+    {
+      "from": "src/commands/analyzeProject.ts",
       "to": "src/scanner/detectRisks.ts",
       "type": "IMPORTS",
       "sourcePath": "src/commands/analyzeProject.ts",
@@ -496,6 +975,27 @@
       "type": "IMPORTS",
       "sourcePath": "src/commands/analyzeProject.ts",
       "targetPath": "src/types.ts"
+    },
+    {
+      "from": "src/commands/analyzeProject.ts",
+      "to": "src/utils/config.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/commands/analyzeProject.ts",
+      "targetPath": "src/utils/config.ts"
+    },
+    {
+      "from": "src/commands/analyzeProject.ts",
+      "to": "src/utils/outputChannel.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/commands/analyzeProject.ts",
+      "targetPath": "src/utils/outputChannel.ts"
+    },
+    {
+      "from": "src/commands/analyzeProject.ts",
+      "to": "src/utils/workspace.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/commands/analyzeProject.ts",
+      "targetPath": "src/utils/workspace.ts"
     },
     {
       "from": "src/commands/enhanceWithLocalAi.ts",
@@ -603,6 +1103,125 @@
       "targetPath": "src/webview/overviewPanel.ts"
     },
     {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "package:vscode",
+      "type": "USES_PACKAGE",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "vscode"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateApiContracts.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateApiContracts.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateArchitecture.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateArchitecture.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateBusinessRules.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateBusinessRules.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateCodeAnalysis.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateCodeAnalysis.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateConfidenceReport.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateConfidenceReport.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateDatabaseAnalysis.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateDatabaseAnalysis.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateDataDictionary.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateDataDictionary.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateDependencies.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateDependencies.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateDomain.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateDomain.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateGaps.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateGaps.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateInventory.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateInventory.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generatePermissions.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generatePermissions.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generatePlSqlAnalysis.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generatePlSqlAnalysis.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateQuestions.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateQuestions.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateStateMachines.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateStateMachines.ts"
+    },
+    {
+      "from": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "to": "src/exporters/reverseEngineering/generateTraceability.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateTraceability.ts"
+    },
+    {
       "from": "src/exporters/writeTicCodeFolder.ts",
       "to": "package:vscode",
       "type": "USES_PACKAGE",
@@ -632,10 +1251,31 @@
     },
     {
       "from": "src/exporters/writeTicCodeFolder.ts",
+      "to": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/writeTicCodeFolder.ts",
+      "targetPath": "src/exporters/reverseEngineering/generateReverseEngineering.ts"
+    },
+    {
+      "from": "src/exporters/writeTicCodeFolder.ts",
       "to": "src/scanner/buildGraph.ts",
       "type": "IMPORTS",
       "sourcePath": "src/exporters/writeTicCodeFolder.ts",
       "targetPath": "src/scanner/buildGraph.ts"
+    },
+    {
+      "from": "src/exporters/writeTicCodeFolder.ts",
+      "to": "src/scanner/databaseLargeMode.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/writeTicCodeFolder.ts",
+      "targetPath": "src/scanner/databaseLargeMode.ts"
+    },
+    {
+      "from": "src/exporters/writeTicCodeFolder.ts",
+      "to": "src/scanner/detectProjects.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/writeTicCodeFolder.ts",
+      "targetPath": "src/scanner/detectProjects.ts"
     },
     {
       "from": "src/exporters/writeTicCodeFolder.ts",
@@ -650,6 +1290,13 @@
       "type": "IMPORTS",
       "sourcePath": "src/exporters/writeTicCodeFolder.ts",
       "targetPath": "src/scanner/detectStack.ts"
+    },
+    {
+      "from": "src/exporters/writeTicCodeFolder.ts",
+      "to": "src/utils/config.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/exporters/writeTicCodeFolder.ts",
+      "targetPath": "src/utils/config.ts"
     },
     {
       "from": "src/extension.ts",
@@ -862,6 +1509,13 @@
       "targetPath": "vscode"
     },
     {
+      "from": "src/reversa-adapter/safeWriter.ts",
+      "to": "src/utils/config.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/reversa-adapter/safeWriter.ts",
+      "targetPath": "src/utils/config.ts"
+    },
+    {
       "from": "src/scanner/buildGraph.ts",
       "to": "package:node:fs",
       "type": "USES_PACKAGE",
@@ -874,6 +1528,13 @@
       "type": "USES_PACKAGE",
       "sourcePath": "src/scanner/buildGraph.ts",
       "targetPath": "node:path"
+    },
+    {
+      "from": "src/scanner/buildGraph.ts",
+      "to": "src/scanner/classifyDependency.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/scanner/buildGraph.ts",
+      "targetPath": "src/scanner/classifyDependency.ts"
     },
     {
       "from": "src/scanner/buildGraph.ts",
@@ -883,6 +1544,27 @@
       "targetPath": "src/scanner/parseImports.ts"
     },
     {
+      "from": "src/scanner/buildGraph.ts",
+      "to": "src/utils/fileUtils.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/scanner/buildGraph.ts",
+      "targetPath": "src/utils/fileUtils.ts"
+    },
+    {
+      "from": "src/scanner/databaseIndex.ts",
+      "to": "src/scanner/rankDatabaseObjects.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/scanner/databaseIndex.ts",
+      "targetPath": "src/scanner/rankDatabaseObjects.ts"
+    },
+    {
+      "from": "src/scanner/databaseLargeMode.ts",
+      "to": "src/scanner/databaseIndex.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/scanner/databaseLargeMode.ts",
+      "targetPath": "src/scanner/databaseIndex.ts"
+    },
+    {
       "from": "src/scanner/detectJavaSpring.ts",
       "to": "package:node:fs",
       "type": "USES_PACKAGE",
@@ -894,6 +1576,20 @@
       "to": "package:node:path",
       "type": "USES_PACKAGE",
       "sourcePath": "src/scanner/detectJavaSpring.ts",
+      "targetPath": "node:path"
+    },
+    {
+      "from": "src/scanner/detectPlSql.ts",
+      "to": "package:node:fs",
+      "type": "USES_PACKAGE",
+      "sourcePath": "src/scanner/detectPlSql.ts",
+      "targetPath": "node:fs"
+    },
+    {
+      "from": "src/scanner/detectPlSql.ts",
+      "to": "package:node:path",
+      "type": "USES_PACKAGE",
+      "sourcePath": "src/scanner/detectPlSql.ts",
       "targetPath": "node:path"
     },
     {
@@ -909,6 +1605,20 @@
       "type": "USES_PACKAGE",
       "sourcePath": "src/scanner/detectRisks.ts",
       "targetPath": "node:path"
+    },
+    {
+      "from": "src/scanner/detectRisks.ts",
+      "to": "src/scanner/detectPlSql.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/scanner/detectRisks.ts",
+      "targetPath": "src/scanner/detectPlSql.ts"
+    },
+    {
+      "from": "src/scanner/detectRisks.ts",
+      "to": "src/utils/fileUtils.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/scanner/detectRisks.ts",
+      "targetPath": "src/utils/fileUtils.ts"
     },
     {
       "from": "src/scanner/detectStack.ts",
@@ -933,6 +1643,13 @@
     },
     {
       "from": "src/scanner/detectStack.ts",
+      "to": "src/scanner/detectPlSql.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/scanner/detectStack.ts",
+      "targetPath": "src/scanner/detectPlSql.ts"
+    },
+    {
+      "from": "src/scanner/detectStack.ts",
       "to": "src/scanner/detectTypeScriptProject.ts",
       "type": "IMPORTS",
       "sourcePath": "src/scanner/detectStack.ts",
@@ -944,6 +1661,13 @@
       "type": "IMPORTS",
       "sourcePath": "src/scanner/detectStack.ts",
       "targetPath": "src/scanner/ignoreRules.ts"
+    },
+    {
+      "from": "src/scanner/detectStack.ts",
+      "to": "src/utils/fileUtils.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/scanner/detectStack.ts",
+      "targetPath": "src/utils/fileUtils.ts"
     },
     {
       "from": "src/scanner/detectTypeScriptProject.ts",
@@ -1009,6 +1733,13 @@
       "targetPath": "src/scanner/ignoreRules.ts"
     },
     {
+      "from": "src/scanner/scanFiles.ts",
+      "to": "src/utils/fileUtils.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/scanner/scanFiles.ts",
+      "targetPath": "src/utils/fileUtils.ts"
+    },
+    {
       "from": "src/scanner/scanWorkspace.ts",
       "to": "package:node:path",
       "type": "USES_PACKAGE",
@@ -1028,6 +1759,83 @@
       "type": "IMPORTS",
       "sourcePath": "src/scanner/scanWorkspace.ts",
       "targetPath": "src/scanner/scanFiles.ts"
+    },
+    {
+      "from": "src/scanner/scanWorkspace.ts",
+      "to": "src/utils/config.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/scanner/scanWorkspace.ts",
+      "targetPath": "src/utils/config.ts"
+    },
+    {
+      "from": "src/scanner/scanWorkspace.ts",
+      "to": "src/utils/workspace.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/scanner/scanWorkspace.ts",
+      "targetPath": "src/utils/workspace.ts"
+    },
+    {
+      "from": "src/utils/config.ts",
+      "to": "package:vscode",
+      "type": "USES_PACKAGE",
+      "sourcePath": "src/utils/config.ts",
+      "targetPath": "vscode"
+    },
+    {
+      "from": "src/utils/fileUtils.ts",
+      "to": "package:node:path",
+      "type": "USES_PACKAGE",
+      "sourcePath": "src/utils/fileUtils.ts",
+      "targetPath": "node:path"
+    },
+    {
+      "from": "src/utils/hash.ts",
+      "to": "package:node:crypto",
+      "type": "USES_PACKAGE",
+      "sourcePath": "src/utils/hash.ts",
+      "targetPath": "node:crypto"
+    },
+    {
+      "from": "src/utils/outputChannel.ts",
+      "to": "package:vscode",
+      "type": "USES_PACKAGE",
+      "sourcePath": "src/utils/outputChannel.ts",
+      "targetPath": "vscode"
+    },
+    {
+      "from": "src/utils/workspace.ts",
+      "to": "package:vscode",
+      "type": "USES_PACKAGE",
+      "sourcePath": "src/utils/workspace.ts",
+      "targetPath": "vscode"
+    },
+    {
+      "from": "src/webview/overviewHtml.ts",
+      "to": "src/scanner/databaseIndex.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/webview/overviewHtml.ts",
+      "targetPath": "src/scanner/databaseIndex.ts"
+    },
+    {
+      "from": "src/webview/overviewHtml.ts",
+      "to": "src/scanner/databaseLargeMode.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/webview/overviewHtml.ts",
+      "targetPath": "src/scanner/databaseLargeMode.ts"
+    },
+    {
+      "from": "src/webview/overviewHtml.ts",
+      "to": "src/utils/config.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/webview/overviewHtml.ts",
+      "targetPath": "src/utils/config.ts"
+    },
+    {
+      "from": "src/webview/overviewHtml.ts",
+      "to": "src/webview/databaseSearch.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/webview/overviewHtml.ts",
+      "targetPath": "src/webview/databaseSearch.ts"
     },
     {
       "from": "src/webview/overviewHtml.ts",
@@ -1066,6 +1874,20 @@
     },
     {
       "from": "src/webview/overviewPanel.ts",
+      "to": "src/local-ai/checkOllamaStatus.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/webview/overviewPanel.ts",
+      "targetPath": "src/local-ai/checkOllamaStatus.ts"
+    },
+    {
+      "from": "src/webview/overviewPanel.ts",
+      "to": "src/local-ai/ollamaClient.ts",
+      "type": "IMPORTS",
+      "sourcePath": "src/webview/overviewPanel.ts",
+      "targetPath": "src/local-ai/ollamaClient.ts"
+    },
+    {
+      "from": "src/webview/overviewPanel.ts",
       "to": "src/reversa-adapter/detectEngines.ts",
       "type": "IMPORTS",
       "sourcePath": "src/webview/overviewPanel.ts",
@@ -1080,33 +1902,46 @@
     }
   ],
   "stats": {
-    "nodeCount": 50,
-    "edgeCount": 94,
-    "internalEdges": 57,
-    "externalEdges": 37,
+    "nodeCount": 85,
+    "edgeCount": 145,
+    "internalEdges": 99,
+    "externalEdges": 46,
     "modules": {
-      "unknown": 42,
-      "external": 8
+      "unknown": 74,
+      "external": 10,
+      "config": 1
     },
     "centralFiles": [
       {
+        "path": "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+        "degree": 18
+      },
+      {
         "path": "src/commands/analyzeProject.ts",
-        "degree": 13
+        "degree": 17
+      },
+      {
+        "path": "src/exporters/writeTicCodeFolder.ts",
+        "degree": 15
       },
       {
         "path": "src/reversa-adapter/exportForEngines.ts",
         "degree": 12
       },
       {
-        "path": "src/exporters/writeTicCodeFolder.ts",
-        "degree": 11
+        "path": "src/scanner/detectStack.ts",
+        "degree": 9
+      },
+      {
+        "path": "src/webview/overviewPanel.ts",
+        "degree": 8
       },
       {
         "path": "src/extension.ts",
         "degree": 8
       },
       {
-        "path": "src/scanner/detectStack.ts",
+        "path": "src/scanner/buildGraph.ts",
         "degree": 7
       },
       {
@@ -1114,11 +1949,23 @@
         "degree": 7
       },
       {
-        "path": "src/commands/generateAgentContext.ts",
+        "path": "src/webview/overviewHtml.ts",
+        "degree": 7
+      },
+      {
+        "path": "src/scanner/detectRisks.ts",
         "degree": 6
       },
       {
-        "path": "src/webview/overviewPanel.ts",
+        "path": "src/scanner/scanWorkspace.ts",
+        "degree": 6
+      },
+      {
+        "path": "src/utils/config.ts",
+        "degree": 6
+      },
+      {
+        "path": "src/commands/generateAgentContext.ts",
         "degree": 6
       },
       {
@@ -1126,48 +1973,95 @@
         "degree": 6
       },
       {
-        "path": "src/scanner/buildGraph.ts",
-        "degree": 5
+        "path": "src/scanner/scanFiles.ts",
+        "degree": 6
       },
       {
         "path": "src/reversa-adapter/generateAgentsMd.ts",
         "degree": 5
       },
       {
-        "path": "src/scanner/scanFiles.ts",
+        "path": "src/utils/fileUtils.ts",
         "degree": 5
       },
       {
-        "path": "src/scanner/detectRisks.ts",
-        "degree": 4
-      },
-      {
-        "path": "src/scanner/scanWorkspace.ts",
-        "degree": 4
-      },
-      {
-        "path": "src/scanner/parseImports.ts",
-        "degree": 4
-      },
-      {
         "path": "package.json",
-        "degree": 3
-      },
-      {
-        "path": "src/types.ts",
-        "degree": 3
+        "degree": 4
       },
       {
         "path": "src/local-ai/checkOllamaStatus.ts",
-        "degree": 3
+        "degree": 4
+      }
+    ],
+    "externalDependencies": [
+      {
+        "specifier": "vscode",
+        "label": "VS Code API (vscode)",
+        "origin": "framework",
+        "frameworkName": "VS Code API",
+        "count": 16
       },
       {
-        "path": "src/commands/exportAgentsMd.ts",
-        "degree": 3
+        "specifier": "node:path",
+        "label": "Node.js Built-in (node:)",
+        "origin": "framework",
+        "frameworkName": "Node.js Built-in",
+        "count": 14
       },
       {
-        "path": "src/commands/openOverview.ts",
-        "degree": 3
+        "specifier": "node:fs",
+        "label": "Node.js Built-in (node:)",
+        "origin": "framework",
+        "frameworkName": "Node.js Built-in",
+        "count": 9
+      },
+      {
+        "specifier": "@types/node",
+        "label": "TypeScript Types (@types/)",
+        "origin": "framework",
+        "frameworkName": "TypeScript Types",
+        "count": 1
+      },
+      {
+        "specifier": "@types/vscode",
+        "label": "TypeScript Types (@types/)",
+        "origin": "framework",
+        "frameworkName": "TypeScript Types",
+        "count": 1
+      },
+      {
+        "specifier": "@vscode/vsce",
+        "label": "vscode.vsce",
+        "origin": "external",
+        "count": 1
+      },
+      {
+        "specifier": "node:child_process",
+        "label": "Node.js Built-in (node:)",
+        "origin": "framework",
+        "frameworkName": "Node.js Built-in",
+        "count": 1
+      },
+      {
+        "specifier": "node:crypto",
+        "label": "Node.js Built-in (node:)",
+        "origin": "framework",
+        "frameworkName": "Node.js Built-in",
+        "count": 1
+      },
+      {
+        "specifier": "node:util",
+        "label": "Node.js Built-in (node:)",
+        "origin": "framework",
+        "frameworkName": "Node.js Built-in",
+        "count": 1
+      },
+      {
+        "specifier": "typescript",
+        "label": "TypeScript (typescript)",
+        "origin": "framework",
+        "frameworkName": "TypeScript",
+        "count": 1
       }
     ]
   }

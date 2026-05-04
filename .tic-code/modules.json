@@ -1,7 +1,7 @@
 {
   "projectName": "tic-coder-lite",
-  "rootPath": "C:\\git\\tic-coder-lite",
-  "generatedAt": "2026-04-30T23:12:27.888Z",
+  "rootPath": "c:\\Git\\tic-coder-lite",
+  "generatedAt": "2026-05-04T14:16:10.850Z",
   "stack": [
     {
       "id": "java-maven",
@@ -64,6 +64,12 @@
       "name": "SQL / Database",
       "detected": false,
       "evidence": []
+    },
+    {
+      "id": "oracle-plsql",
+      "name": "Oracle PL/SQL",
+      "detected": false,
+      "evidence": []
     }
   ],
   "javaSpring": {
@@ -78,6 +84,7 @@
       "dto": 0,
       "config": 0,
       "security": 0,
+      "database": 0,
       "unknown": 0
     }
   },
@@ -91,14 +98,17 @@
     "devDependencies": {
       "@types/node": "^20.14.10",
       "@types/vscode": "^1.92.0",
+      "@vscode/vsce": "^3.9.1",
       "typescript": "^5.5.4"
     },
     "sourceFiles": {
-      "total": 37,
+      "total": 67,
       "components": [],
       "pages": [],
       "services": [],
-      "configs": []
+      "configs": [
+        "src/utils/config.ts"
+      ]
     }
   },
   "modules": [
@@ -124,10 +134,16 @@
     },
     {
       "kind": "config",
-      "files": []
+      "files": [
+        "src/utils/config.ts"
+      ]
     },
     {
       "kind": "security",
+      "files": []
+    },
+    {
+      "kind": "database",
       "files": []
     },
     {
@@ -141,6 +157,24 @@
         "src/exporters/generateAgentContextMd.ts",
         "src/exporters/generateConfidenceReportMd.ts",
         "src/exporters/generateQuestionsMd.ts",
+        "src/exporters/reverseEngineering/generateApiContracts.ts",
+        "src/exporters/reverseEngineering/generateArchitecture.ts",
+        "src/exporters/reverseEngineering/generateBusinessRules.ts",
+        "src/exporters/reverseEngineering/generateCodeAnalysis.ts",
+        "src/exporters/reverseEngineering/generateConfidenceReport.ts",
+        "src/exporters/reverseEngineering/generateDataDictionary.ts",
+        "src/exporters/reverseEngineering/generateDatabaseAnalysis.ts",
+        "src/exporters/reverseEngineering/generateDependencies.ts",
+        "src/exporters/reverseEngineering/generateDomain.ts",
+        "src/exporters/reverseEngineering/generateGaps.ts",
+        "src/exporters/reverseEngineering/generateInventory.ts",
+        "src/exporters/reverseEngineering/generatePermissions.ts",
+        "src/exporters/reverseEngineering/generatePlSqlAnalysis.ts",
+        "src/exporters/reverseEngineering/generateQuestions.ts",
+        "src/exporters/reverseEngineering/generateReverseEngineering.ts",
+        "src/exporters/reverseEngineering/generateStateMachines.ts",
+        "src/exporters/reverseEngineering/generateTraceability.ts",
+        "src/exporters/reverseEngineering/reverseEngineeringTypes.ts",
         "src/exporters/writeTicCodeFolder.ts",
         "src/extension.ts",
         "src/local-ai/checkOllamaStatus.ts",
@@ -157,15 +191,26 @@
         "src/reversa-adapter/generateGeminiMd.ts",
         "src/reversa-adapter/safeWriter.ts",
         "src/scanner/buildGraph.ts",
+        "src/scanner/classifyDependency.ts",
+        "src/scanner/databaseIndex.ts",
+        "src/scanner/databaseLargeMode.ts",
         "src/scanner/detectJavaSpring.ts",
+        "src/scanner/detectPlSql.ts",
+        "src/scanner/detectProjects.ts",
         "src/scanner/detectRisks.ts",
         "src/scanner/detectStack.ts",
         "src/scanner/detectTypeScriptProject.ts",
         "src/scanner/ignoreRules.ts",
         "src/scanner/parseImports.ts",
+        "src/scanner/rankDatabaseObjects.ts",
         "src/scanner/scanFiles.ts",
         "src/scanner/scanWorkspace.ts",
         "src/types.ts",
+        "src/utils/fileUtils.ts",
+        "src/utils/hash.ts",
+        "src/utils/outputChannel.ts",
+        "src/utils/workspace.ts",
+        "src/webview/databaseSearch.ts",
         "src/webview/graphRenderer.ts",
         "src/webview/overviewHtml.ts",
         "src/webview/overviewPanel.ts",
@@ -180,5 +225,24 @@
   "docker": {
     "detected": false,
     "evidence": []
+  },
+  "plsql": {
+    "detected": false,
+    "files": [],
+    "entities": [],
+    "dependencies": [],
+    "tableReferences": [],
+    "counts": {
+      "package": 0,
+      "package_body": 0,
+      "procedure": 0,
+      "function": 0,
+      "trigger": 0,
+      "view": 0,
+      "table": 0,
+      "cursor": 0,
+      "type": 0,
+      "synonym": 0
+    }
   }
 }

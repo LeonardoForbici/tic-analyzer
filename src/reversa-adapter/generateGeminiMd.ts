@@ -1,11 +1,13 @@
+import * as vscode from 'vscode';
 import type { ProjectSummary } from '../types';
-import { baseEngineContext } from './generateAgentsMd';
+import type { ReversaAssets } from './reversaAssetLoader';
+import { generateAgentContract } from '../reversa-engine/generateReversaAgentContracts';
 
-export function generateGeminiMd(summary: ProjectSummary): string {
-  return baseEngineContext(
-    'Gemini CLI',
-    'GEMINI.md',
-    summary,
-    'Use this local context before answering or modifying files through Gemini CLI.'
-  );
+export function generateGeminiMd(summary: ProjectSummary, _assets: ReversaAssets, extensionUri?: vscode.Uri): string {
+  return generateAgentContract(summary, {
+    engine: 'gemini-cli',
+    targetFile: 'GEMINI.md',
+    engineInstruction: 'Use this local context before answering or modifying files through Gemini CLI.',
+    compact: false
+  }, extensionUri);
 }

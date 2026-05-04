@@ -12,6 +12,7 @@ import { generateQuestionsMd } from './generateQuestionsMd';
 import { writeReverseEngineering } from './reverseEngineering/generateReverseEngineering';
 import { buildDatabaseLargeModeData } from '../scanner/databaseLargeMode';
 import { getTicCoderLiteConfig } from '../utils/config';
+import { runReversaLikePipeline } from '../reversa-engine/runReversaLikePipeline';
 
 export interface TicCodeArtifacts {
   scanJson: vscode.Uri;
@@ -26,7 +27,7 @@ export interface TicCodeArtifacts {
   questionsMd: vscode.Uri;
 }
 
-export async function writeTicCodeFolder(root: vscode.WorkspaceFolder, summary: ProjectSummary): Promise<TicCodeArtifacts> {
+export async function writeTicCodeFolder(root: vscode.WorkspaceFolder, summary: ProjectSummary, extensionUri?: vscode.Uri): Promise<TicCodeArtifacts> {
   const ticCodeDir = vscode.Uri.joinPath(root.uri, '.tic-code');
   const artifacts: TicCodeArtifacts = {
     scanJson: vscode.Uri.joinPath(ticCodeDir, 'scan.json'),
@@ -57,6 +58,8 @@ export async function writeTicCodeFolder(root: vscode.WorkspaceFolder, summary: 
   await writeText(externalDepsJson, `${JSON.stringify(summary.graph.stats.externalDependencies, null, 2)}\n`);
   await writeProjectArtifacts(root, summary);
   await writeReverseEngineering(root, summary);
+  // Motor Reversa — gera .tic-code/reversa/ e expande .tic-code/reverse-engineering/
+  await runReversaLikePipeline(root, summary, extensionUri);
 
   return artifacts;
 }

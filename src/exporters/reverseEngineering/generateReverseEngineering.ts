@@ -34,6 +34,7 @@ import { renderConfidenceReportMd } from './generateConfidenceReport';
 import { generateGaps, renderGapsMd } from './generateGaps';
 import { generateQuestions, renderQuestionsMd } from './generateQuestions';
 import { generateTraceability, renderCodeSpecMatrixMd, renderRiskImpactMatrixMd } from './generateTraceability';
+import { generateOperationalContracts, renderOperationalContractsMd } from './generateOperationalContracts';
 
 /** Gera todos os artefatos de programação reversa globais e por projeto */
 export async function writeReverseEngineering(
@@ -81,6 +82,7 @@ async function writeReverseEngineeringDir(
   const gaps = generateGaps(input);
   const questions = generateQuestions(input, gaps);
   const { codeSpecMatrix, riskImpactMatrix } = generateTraceability(input, businessRules);
+  const operationalContracts = generateOperationalContracts(input, businessRules);
 
   // Renderizar markdowns
   await writeText(vscode.Uri.joinPath(dir, 'inventory.md'), renderInventoryMd(inventoryData, projectName));
@@ -97,6 +99,7 @@ async function writeReverseEngineeringDir(
   await writeText(vscode.Uri.joinPath(dir, 'confidence-report.md'), renderConfidenceReportMd(input, businessRules, projectName));
   await writeText(vscode.Uri.joinPath(dir, 'gaps.md'), renderGapsMd(gaps, projectName));
   await writeText(vscode.Uri.joinPath(dir, 'questions.md'), renderQuestionsMd(questions, projectName));
+  await writeText(vscode.Uri.joinPath(dir, 'operational-contracts.md'), renderOperationalContractsMd(operationalContracts, projectName));
 
   if (input.plsql.detected) {
     await writeText(vscode.Uri.joinPath(dir, 'plsql-analysis.md'), renderPlSqlAnalysisMd(input, projectName));

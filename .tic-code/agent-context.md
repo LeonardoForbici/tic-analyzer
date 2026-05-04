@@ -1,97 +1,173 @@
-# TIC Coder Lite Agent Context
+# Contexto para IA do TIC Coder Lite
 
-Generated at: 2026-04-30T23:12:27.919Z
-Project: tic-coder-lite
-Root: C:\git\tic-coder-lite
+Gerado em: 2026-05-04T14:16:10.959Z
+Projeto: tic-coder-lite
+Raiz: c:\Git\tic-coder-lite
 
-## Purpose
+## Objetivo
 
-This file is an operational context for Codex, Claude Code, Copilot, Cursor, and local AI agents before changing code. It is generated locally from deterministic scan, stack, graph, and risk data.
+Este arquivo é um contexto operacional para Codex, Claude Code, Copilot, Cursor e agentes locais de IA antes de alterar código. Ele é gerado localmente a partir de scan determinístico, stack, grafo e dados de risco.
 
-## TIC Coder Lite Modes
+## Modos do TIC Coder Lite
 
-1. Lite Mode: deterministic scanner, graph, risks, and context. No AI, no database, no Docker, no server.
-2. Standard AI Mode: exports context for existing AI tools. Codex uses AGENTS.md, Claude Code uses CLAUDE.md, Copilot uses .github/copilot-instructions.md, Cursor uses .cursorrules, Gemini uses GEMINI.md.
-3. Local AI Mode: optional Ollama enhancement. Recommended starter model: qwen2.5-coder:1.5b. It can be disabled and does not require large 60GB models.
+1. Modo Lite: scanner determinístico, grafo, riscos e contexto. Sem IA, sem banco, sem Docker e sem servidor.
+2. IA Padrão: exporta contexto para ferramentas de IA existentes. Codex usa AGENTS.md, Claude Code usa CLAUDE.md, Copilot usa .github/copilot-instructions.md, Cursor usa .cursorrules, Gemini usa GEMINI.md.
+3. IA Local: melhoria opcional com Ollama. Modelo inicial recomendado: qwen2.5-coder:1.5b. Pode ser desativada e não exige modelos grandes de 60GB.
 
-## Detected Stack
+## Stack Detectada
 
 - Node.js: package.json
 
-## Project Snapshot
+## Resumo do Projeto
 
-- Files scanned: 42
-- Lines scanned: 4399
-- Graph nodes: 50
-- Graph edges: 94
-- Risks detected: 0
+- Arquivos analisados: 75
+- Linhas analisadas: 16002
+- Nós do grafo: 85
+- Arestas do grafo: 145
+- Riscos detectados: 6
 
-## Critical Modules
+## Módulos Críticos
 
-- unknown: 42 graph node(s)
+- unknown: 17 ponto(s) ponderados de risco
+- config: 1 nó(s) no grafo
 
-## High Risk Files
+## Arquivos de Alto Risco
 
-- src/commands/analyzeProject.ts: high graph centrality
-- src/exporters/writeTicCodeFolder.ts: high graph centrality
-- src/reversa-adapter/exportForEngines.ts: high graph centrality
+- package-lock.json: risco critical: Arquivo tem mais de 1500 linhas
+- src/webview/webviewAssets.ts: risco critical: SQL concatenado em string
+- src/commands/analyzeProject.ts: alta centralidade no grafo
+- src/exporters/reverseEngineering/generateReverseEngineering.ts: alta centralidade no grafo
+- src/exporters/writeTicCodeFolder.ts: alta centralidade no grafo
+- src/reversa-adapter/exportForEngines.ts: alta centralidade no grafo
 
-## Important Dependencies
+## Dependências Importantes
 
-- node:path: 12 connection(s)
-- vscode: 12 connection(s)
-- node:fs: 8 connection(s)
-- @types/node: 1 connection(s)
-- @types/vscode: 1 connection(s)
-- node:child_process: 1 connection(s)
-- node:util: 1 connection(s)
-- typescript: 1 connection(s)
+- vscode: 16 conexão(ões)
+- node:path: 14 conexão(ões)
+- node:fs: 9 conexão(ões)
+- @types/node: 1 conexão(ões)
+- @types/vscode: 1 conexão(ões)
+- @vscode/vsce: 1 conexão(ões)
+- node:child_process: 1 conexão(ões)
+- node:crypto: 1 conexão(ões)
+- node:util: 1 conexão(ões)
+- typescript: 1 conexão(ões)
 
-## Main Risks
+## Principais Riscos
 
-- No deterministic risks detected
+- CRITICAL Arquivo tem mais de 1500 linhas (package-lock.json)
+- CRITICAL SQL concatenado em string (src/webview/webviewAssets.ts:357)
+- CRITICAL SQL concatenado em string (src/webview/webviewAssets.ts:402)
+- MEDIUM Uso de any no TypeScript (src/exporters/writeTicCodeFolder.ts:192)
+- MEDIUM Uso de any no TypeScript (src/exporters/writeTicCodeFolder.ts:262)
+- LOW Marcador TODO/FIXME encontrado (src/exporters/reverseEngineering/generateBusinessRules.ts:8)
 
-## Recommended Reading Order
+## Banco / PL/SQL
 
-1. NOTICE.md
-2. README.md
-3. package.json
-4. tsconfig.json
-5. .tic-code/inventory.md
-6. .tic-code/architecture.md
-7. .tic-code/risks.md
-8. src/commands/analyzeProject.ts
-9. src/reversa-adapter/exportForEngines.ts
-10. src/exporters/writeTicCodeFolder.ts
-11. src/extension.ts
-12. src/scanner/detectStack.ts
-13. src/commands/enhanceWithLocalAi.ts
-14. src/commands/generateAgentContext.ts
+- Arquivos PL/SQL: 0
+- Packages: 0
+- Package bodies: 0
+- Procedures: 0
+- Functions: 0
+- Triggers: 0
+- Tabelas referenciadas: 0
+
+### Packages detectados
+
+- Nenhum package detectado.
+
+### Procedures e functions criticas
+
+- Nenhuma procedure/function detectada.
+
+### Triggers
+
+- Nenhum trigger detectado.
+
+### Tabelas mais referenciadas
+
+- Nenhuma tabela referenciada.
+
+### Riscos transacionais e PL/SQL
+
+- Nenhum risco PL/SQL detectado.
+
+### Aviso para IA
+
+- Regras de negocio criticas podem estar escondidas no banco.
+- Packages, procedures e triggers podem executar validacoes que nao aparecem no backend/frontend.
+- Nao altere COMMIT, ROLLBACK, autonomous transaction, triggers ou SQL dinamico sem validacao humana.
+- Use .tic-code/projects/database/agent-context.md para o contexto focado em PL/SQL.
+
+## Ordem Recomendada de Leitura
+
+1. AGENTS.md
+2. CLAUDE.md
+3. README.md
+4. package.json
+5. tsconfig.json
+6. .tic-code/inventory.md
+7. .tic-code/architecture.md
+8. .tic-code/risks.md
+9. .tic-code/projects/database/agent-context.md
+10. src/exporters/reverseEngineering/generateReverseEngineering.ts
+11. src/commands/analyzeProject.ts
+12. src/exporters/writeTicCodeFolder.ts
+13. src/reversa-adapter/exportForEngines.ts
+14. src/scanner/detectStack.ts
 15. src/webview/overviewPanel.ts
-16. src/reversa-adapter/detectEngines.ts
+16. src/extension.ts
 17. src/scanner/buildGraph.ts
-18. src/reversa-adapter/generateAgentsMd.ts
+18. src/commands/enhanceWithLocalAi.ts
 
-## Instructions For AI Agents
+## Instruções para Agentes de IA
 
-- Read this file, .tic-code/inventory.md, .tic-code/architecture.md, and .tic-code/risks.md before editing.
-- Treat confirmed facts as local project truth unless source files changed after this scan.
-- Open cited source files before modifying behavior.
-- Prefer narrow edits around the module and dependencies involved in the request.
-- Re-run TIC Coder Lite analysis after meaningful code changes.
-- Keep generated files inside .tic-code unless the user asks to export context elsewhere.
-- Remember: Lite Mode facts work without IA; Standard AI Mode only exports context; Local AI Mode is optional.
+- Leia este arquivo, .tic-code/inventory.md, .tic-code/architecture.md e .tic-code/risks.md antes de editar.
+- Trate fatos confirmados como verdade local do projeto, a menos que os fontes tenham mudado após este scan.
+- Abra os arquivos citados antes de modificar comportamento.
+- Prefira edições estreitas ao redor do módulo e das dependências envolvidas no pedido.
+- Rode novamente a análise do TIC Coder Lite após mudanças relevantes de código.
+- Mantenha arquivos gerados dentro de .tic-code, salvo quando o usuário pedir exportação para outro lugar.
+- Lembrete: fatos do Modo Lite funcionam sem IA; IA Padrão só exporta contexto; IA Local é opcional.
 
-## Do Not Do Without Human Validation
+## Programação Reversa / SDD
 
-- Do not remove public APIs, endpoints, database scripts, migrations, or security checks based only on inference.
-- Do not rename modules, packages, routes, or environment variables without validating callers.
-- Do not assume an inferred module boundary is an intentional architecture rule.
-- Do not treat graph risk as proof of a bug; use it as a priority signal for inspection.
-- Do not add external services, databases, AI runtimes, RAG, or servers to TIC Coder Lite workflows.
+Antes de alterar código, leia também:
 
-## Credits
+- .tic-code/reverse-engineering/inventory.md
+- .tic-code/reverse-engineering/architecture.md
+- .tic-code/reverse-engineering/business-rules.md
+- .tic-code/reverse-engineering/confidence-report.md
+- .tic-code/reverse-engineering/gaps.md
+- .tic-code/reverse-engineering/questions.md
+- .tic-code/reverse-engineering/traceability/code-spec-matrix.md
+- .tic-code/reverse-engineering/traceability/risk-impact-matrix.md
 
-- Reversa by Sandeco, MIT License.
+### Instruções para Agentes (Programação Reversa)
+
+- Não trate 🟡 INFERIDO como verdade absoluta.
+- Valide itens 🟡 INFERIDO antes de alterar regra crítica.
+- Pergunte ao usuário sobre itens 🔴 LACUNA antes de prosseguir.
+- Nunca altere módulo crítico sem consultar riscos e a matriz de impacto.
+- Em projetos com PL/SQL, verifique triggers, procedures e packages antes de alterar regra de negócio no backend.
+- Consulte .tic-code/reverse-engineering/plsql-analysis.md antes de alterar qualquer tabela referenciada por trigger.
+
+### Níveis de Confiança
+
+- 🟢 CONFIRMADO: extraído diretamente do código, SQL, anotação ou arquivo.
+- 🟡 INFERIDO: deduzido por nome, padrão, fluxo ou grafo.
+- 🔴 LACUNA: não confirmável, exige validação humana.
+
+## Não Fazer Sem Validação Humana
+
+- Não remova APIs públicas, endpoints, scripts de banco, migrations ou checagens de segurança apenas por inferência.
+- Não renomeie módulos, pacotes, rotas ou variáveis de ambiente sem validar chamadores.
+- Não assuma que uma fronteira de módulo inferida é uma regra arquitetural intencional.
+- Não trate risco do grafo como prova de bug; use como sinal de prioridade para inspeção.
+- Não adicione serviços externos, bancos, runtimes de IA, RAG ou servidores aos fluxos do TIC Coder Lite.
+
+## Créditos
+
+- Reversa by Sandeco, MIT License. Programação Reversa do TIC Coder Lite foi inspirada metodologicamente no Reversa.
 - TIC Coder Lite by TIC / Leonardo Forbici.
 - InsightGraph concepts used as internal reference, not bundled as dependency.

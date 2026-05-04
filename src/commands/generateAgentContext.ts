@@ -13,7 +13,7 @@ export async function generateAgentContext(context: vscode.ExtensionContext): Pr
 
   const summary = getLastAnalysis(context) ?? await analyzeWorkspace(root);
   const agentContext = buildAgentContext(summary);
-  const artifacts = await writeTicCodeFolder(root, summary);
+  const artifacts = await writeTicCodeFolder(root, summary, context.extensionUri);
 
   await context.globalState.update('ticCoderLite.lastAnalysis', summary);
   vscode.commands.executeCommand('ticCoderLite.refreshSidebar');

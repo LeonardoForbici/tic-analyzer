@@ -1,9 +1,17 @@
-/**
+﻿/**
  * Gerador de matrizes de rastreabilidade para Programação Reversa
  * Inspiração: Writer / Reversa Tracer do Reversa by Sandeco (MIT)
+ *
+ * Regra: risco técnico → risks.md / risk-impact-matrix.md
+ *        regra de negócio → business-rules.md
+ *        contrato operacional → operational-contracts.md
+ *        lacuna → gaps.md
+ *        pergunta → questions.md
+ * Nunca mapear package-lock.json para business-rules.md.
  */
 
 import type { ReverseEngineeringInput, CodeSpecMatrixRow, RiskImpactMatrixRow, BusinessRuleCandidate } from './reverseEngineeringTypes';
+import { classifyFileToModule } from './generateCodeAnalysis';
 
 export function generateTraceability(
   input: ReverseEngineeringInput,
@@ -18,21 +26,30 @@ function buildCodeSpecMatrix(input: ReverseEngineeringInput, businessRules: Busi
   const rows: CodeSpecMatrixRow[] = [];
   const { inventory } = input;
 
-  // Controllers -> contratos de API
+  // Controllers → contratos de API
   for (const controller of inventory.javaSpring.files.filter((f) => f.kind === 'controller')) {
     rows.push({
       code: controller.path,
       spec: `api-contracts.md#${controller.className}`,
-      kind: 'controller',
+      kind: 'contrato-api',
       confidence: 'confirmado',
       risk: controller.endpoints.length > 10 ? 'alto' : 'baixo',
       notes: `${controller.endpoints.length} endpoint(s)`
     });
   }
 
-  // Regras de negócio
+  // Regras de negócio confirmadas/inferidas → business-rules.md
   for (const rule of businessRules.slice(0, 20)) {
     for (const file of rule.sourceFiles) {
+      // Nunca mapear lock files para business-rules.md
+      const lower = file.toLowerCase();
+      if (
+        lower.endsWith('package-lock.json') ||
+        lower.endsWith('yarn.lock') ||
+        lower.endsWith('pnpm-lock.yaml')
+      ) {
+        continue;
+      }
       rows.push({
         code: file,
         spec: `business-rules.md#${rule.id}`,
@@ -44,7 +61,7 @@ function buildCodeSpecMatrix(input: ReverseEngineeringInput, businessRules: Busi
     }
   }
 
-  // PL/SQL triggers -> regras de negócio no banco
+  // PL/SQL triggers → regras de negócio no banco
   for (const trigger of inventory.plsql.entities.filter((e) => e.kind === 'trigger').slice(0, 10)) {
     rows.push({
       code: `${trigger.file}:${trigger.line}`,
@@ -56,19 +73,50 @@ function buildCodeSpecMatrix(input: ReverseEngineeringInput, businessRules: Busi
     });
   }
 
+  // Riscos técnicos críticos → risks.md (NÃO business-rules.md)
+  for (const risk of input.risks.filter((r) => r.level === 'critical' || r.level === 'high').slice(0, 15)) {
+    const lower = risk.file.toLowerCase();
+    if (
+      lower.endsWith('package-lock.json') ||
+      lower.endsWith('yarn.lock') ||
+      lower.endsWith('pnpm-lock.yaml')
+    ) {
+      continue;
+    }
+    const { name: moduleName } = classifyFileToModule(risk.file);
+    rows.push({
+      code: risk.file + (risk.line ? `:${risk.line}` : ''),
+      spec: `traceability/risk-impact-matrix.md`,
+      kind: 'risco-tecnico',
+      confidence: 'confirmado',
+      risk: risk.level === 'critical' ? 'critico' : 'alto',
+      notes: `${moduleName}: ${risk.title.slice(0, 50)}`
+    });
+  }
+
   return rows;
 }
 
 function buildRiskImpactMatrix(input: ReverseEngineeringInput): RiskImpactMatrixRow[] {
   const rows: RiskImpactMatrixRow[] = [];
-  const { risks, inventory } = input;
+  const { risks } = input;
 
   for (const risk of risks.slice(0, 30)) {
-    const module = inferModuleForFile(risk.file, inventory);
+    // Excluir lock files do matrix de risco (ruído sem valor operacional)
+    const lower = risk.file.toLowerCase();
+    if (
+      lower.endsWith('package-lock.json') ||
+      lower.endsWith('yarn.lock') ||
+      lower.endsWith('pnpm-lock.yaml')
+    ) {
+      continue;
+    }
+
+    const { name: moduleName } = classifyFileToModule(risk.file);
     rows.push({
       risk: `${risk.level.toUpperCase()}: ${risk.title}`,
       file: risk.file + (risk.line ? `:${risk.line}` : ''),
-      module,
+      module: moduleName,
       impact: riskLevelToImpact(risk.level),
       relatedSpec: inferRelatedSpec(risk),
       recommendation: risk.recommendation
@@ -85,17 +133,71 @@ export function renderCodeSpecMatrixMd(rows: CodeSpecMatrixRow[], projectName: s
   lines.push('> Gerado por TIC Coder Lite — Modo Lite.');
   lines.push('> Inspiração metodológica: Writer/Tracer do Reversa by Sandeco (MIT).');
   lines.push('');
+  lines.push('> **Legenda de tipo:**');
+  lines.push('> - `regra-negocio` → `business-rules.md`');
+  lines.push('> - `risco-tecnico` → `traceability/risk-impact-matrix.md` e `risks.md`');
+  lines.push('> - `contrato-api` → `api-contracts.md`');
+  lines.push('> - `trigger-plsql` → `plsql-analysis.md`');
+  lines.push('');
 
   if (rows.length === 0) {
     lines.push('- Nenhuma rastreabilidade detectada 🔴 LACUNA');
     return lines.join('\n');
   }
 
-  lines.push('| Código | Spec Gerada | Tipo | Confiança | Risco | Observações |');
-  lines.push('| --- | --- | --- | --- | --- | --- |');
-  for (const row of rows) {
-    const badge = row.confidence === 'confirmado' ? '🟢' : row.confidence === 'inferido' ? '🟡' : '🔴';
-    lines.push(`| ${row.code} | ${row.spec} | ${row.kind} | ${badge} | ${row.risk} | ${row.notes} |`);
+  // Separar por tipo
+  const businessRuleRows = rows.filter((r) => r.kind === 'regra-negocio');
+  const technicalRiskRows = rows.filter((r) => r.kind === 'risco-tecnico');
+  const apiRows = rows.filter((r) => r.kind === 'contrato-api');
+  const otherRows = rows.filter((r) => !['regra-negocio', 'risco-tecnico', 'contrato-api'].includes(r.kind));
+
+  if (apiRows.length > 0) {
+    lines.push('## Contratos de API');
+    lines.push('');
+    lines.push('| Código | Spec | Confiança | Risco | Observações |');
+    lines.push('| --- | --- | --- | --- | --- |');
+    for (const row of apiRows) {
+      const badge = row.confidence === 'confirmado' ? '🟢' : row.confidence === 'inferido' ? '🟡' : '🔴';
+      lines.push(`| ${row.code} | ${row.spec} | ${badge} | ${row.risk} | ${row.notes} |`);
+    }
+    lines.push('');
+  }
+
+  if (businessRuleRows.length > 0) {
+    lines.push('## Regras de Negócio');
+    lines.push('');
+    lines.push('| Código | Spec | Confiança | Observações |');
+    lines.push('| --- | --- | --- | --- |');
+    for (const row of businessRuleRows) {
+      const badge = row.confidence === 'confirmado' ? '🟢' : row.confidence === 'inferido' ? '🟡' : '🔴';
+      lines.push(`| ${row.code} | ${row.spec} | ${badge} | ${row.notes} |`);
+    }
+    lines.push('');
+  }
+
+  if (technicalRiskRows.length > 0) {
+    lines.push('## Riscos Técnicos');
+    lines.push('');
+    lines.push('> ℹ️ Riscos técnicos NÃO são regras de negócio. Consulte `risks.md` para detalhes.');
+    lines.push('');
+    lines.push('| Código | Spec | Severidade | Módulo |');
+    lines.push('| --- | --- | --- | --- |');
+    for (const row of technicalRiskRows) {
+      lines.push(`| ${row.code} | ${row.spec} | ${row.risk} | ${row.notes} |`);
+    }
+    lines.push('');
+  }
+
+  if (otherRows.length > 0) {
+    lines.push('## Outros');
+    lines.push('');
+    lines.push('| Código | Spec | Tipo | Confiança | Observações |');
+    lines.push('| --- | --- | --- | --- | --- |');
+    for (const row of otherRows) {
+      const badge = row.confidence === 'confirmado' ? '🟢' : row.confidence === 'inferido' ? '🟡' : '🔴';
+      lines.push(`| ${row.code} | ${row.spec} | ${row.kind} | ${badge} | ${row.notes} |`);
+    }
+    lines.push('');
   }
 
   return lines.join('\n');
@@ -107,6 +209,9 @@ export function renderRiskImpactMatrixMd(rows: RiskImpactMatrixRow[], projectNam
   lines.push('');
   lines.push('> Gerado por TIC Coder Lite — Modo Lite.');
   lines.push('> Inspiração metodológica: Reviewer do Reversa by Sandeco (MIT).');
+  lines.push('');
+  lines.push('> ℹ️ Esta matriz lista **riscos técnicos** — não regras de negócio.');
+  lines.push('> Para regras de negócio, consulte `business-rules.md`.');
   lines.push('');
 
   if (rows.length === 0) {
@@ -123,26 +228,6 @@ export function renderRiskImpactMatrixMd(rows: RiskImpactMatrixRow[], projectNam
   return lines.join('\n');
 }
 
-function inferModuleForFile(file: string, inventory: ArchitectureInventory): string {
-  for (const mod of inventory.modules) {
-    if (mod.files.includes(file)) return mod.kind;
-  }
-
-  for (const jsFile of inventory.javaSpring.files) {
-    if (jsFile.path === file) return jsFile.kind;
-  }
-
-  const lower = file.toLowerCase();
-  if (lower.includes('controller')) return 'controller';
-  if (lower.includes('service')) return 'service';
-  if (lower.includes('repository') || lower.includes('repo')) return 'repository';
-  if (lower.includes('entity') || lower.endsWith('.entity.ts')) return 'entity';
-  if (lower.includes('frontend') || lower.includes('/src/')) return 'frontend';
-  if (['.sql', '.pks', '.pkb', '.prc', '.fnc', '.trg'].some((ext) => lower.endsWith(ext))) return 'database';
-
-  return 'desconhecido';
-}
-
 function riskLevelToImpact(level: string): string {
   switch (level) {
     case 'critical': return 'Crítico — bloqueia operação';
@@ -155,10 +240,7 @@ function riskLevelToImpact(level: string): string {
 function inferRelatedSpec(risk: { title: string; file: string; category?: string }): string {
   if (risk.category === 'plsql') return 'plsql-analysis.md';
   if (risk.title.toLowerCase().includes('sql')) return 'database-analysis.md';
-  if (risk.title.toLowerCase().includes('permiss') || risk.title.toLowerCase().includes('role')) return 'permissions.md';
-  if (risk.title.toLowerCase().includes('arquitetura') || risk.title.toLowerCase().includes('import')) return 'architecture.md';
+  if (risk.title.toLowerCase().includes('circular') || risk.title.toLowerCase().includes('dependênc')) return 'architecture.md';
+  if (risk.title.toLowerCase().includes('endpoint') || risk.title.toLowerCase().includes('controller')) return 'api-contracts.md';
   return 'code-analysis.md';
 }
-
-// Import necessário
-import type { ArchitectureInventory } from '../../scanner/detectStack';

@@ -6,3 +6,4 @@ mockup.html
 *.vsix
 tsconfig.json
 package-lock.json
+reversa-main/**

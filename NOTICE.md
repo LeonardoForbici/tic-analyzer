@@ -8,17 +8,39 @@ MIT License
 
 Copyright (c) 2026 Sandeco
 
-TIC Coder Lite uses Reversa as a conceptual and code-structure reference for:
+TIC Coder Lite includes and adapts the Reversa engine by Sandeco (MIT License) as its embedded reverse engineering motor.
 
-- AI engine detection concepts
-- safe writer behavior for generated agent entry files
-- engine entry-file conventions such as `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `GEMINI.md`, and `.github/copilot-instructions.md`
-- operational-context ideas for AI agents
-- confidence-report ideas
+### Components incorporated/adapted:
 
-TIC Coder Lite does not bundle Reversa agents, installer, update flow, uninstall flow, `.reversa/`, or `_reversa_sdd/`.
+- **agents/** — Complete SKILL.md files for all Reversa agents (Scout, Archaeologist, Detective, Architect, Writer, Reviewer, Data Master, Visor, Reconstructor, Design System)
+- **docs/agents/** — Agent documentation in PT/EN/ES
+- **templates/** — SDD template and structural templates
+- **lib/** — Engine manifest and configuration schemas
+- **Confidence scale methodology** — 🟢 CONFIRMADO / 🟡 INFERIDO / 🔴 LACUNA
+- **SDD generation pipeline** — Scout → Archaeologist → Detective → Architect → Writer → Reviewer → Data Master
+- **Agent operational contracts** — Specs as operational contracts concept
 
-Where applicable, adapted concepts preserve MIT license attribution.
+### Path adaptations:
+
+| Reversa Original | TIC Coder Lite |
+| --- | --- |
+| `.reversa/` | `.tic-code/reversa/` |
+| `_reversa_sdd/` | `.tic-code/reverse-engineering/` |
+| `/reversa` (slash command) | "TIC Coder Lite: Analisar Workspace" |
+| `npx reversa install` | Install TIC Coder Lite extension |
+| Reversa CLI | TIC Coder Lite VS Code Extension |
+
+### What is NOT included:
+
+- Reversa CLI runner (`bin/reversa.js`)
+- Installation/update/uninstall flows
+- `.reversa/` as direct workspace output
+- `_reversa_sdd/` as output folder name
+- External downloads
+- Database connections
+- SQL execution
+
+TIC Coder Lite is a separate VS Code extension. The Reversa engine is used as an embedded methodology and asset base.
 
 ## InsightGraph
 

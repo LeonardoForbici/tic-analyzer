@@ -186,6 +186,22 @@ export interface RiskImpactMatrixRow {
   recommendation: string;
 }
 
+/** Contrato operacional de um módulo */
+export interface OperationalContract {
+  module: string;
+  kind: string;
+  responsibility: string;
+  inputs: string[];
+  outputs: string[];
+  mainFiles: string[];
+  internalDeps: string[];
+  externalDeps: string[];
+  knownRules: string[];
+  risks: string[];
+  gaps: string[];
+  agentInstructions: string[];
+}
+
 /** Resultado completo da engenharia reversa */
 export interface ReverseEngineeringResult {
   generatedAt: string;

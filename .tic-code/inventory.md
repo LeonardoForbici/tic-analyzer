@@ -1,20 +1,24 @@
-# TIC Coder Lite Inventory
+# Inventario do TIC Coder Lite
 
-Generated at: 2026-04-30T23:12:27.888Z
-Project: tic-coder-lite
-Root: C:\git\tic-coder-lite
+Gerado em: 2026-05-04T14:16:10.850Z
+Projeto: tic-coder-lite
+Raiz: c:\Git\tic-coder-lite
 
-## Scan Summary
+## Resumo do Scan
 
-- Files scanned: 42
-- Lines scanned: 4399
-- Bytes scanned: 161701
+- Arquivos analisados: 75
+- Linhas analisadas: 16002
+- Bytes analisados: 595740
 
-## Detected Stack
+## Stack Detectada
 
 - Node.js: package.json
 
-## Architecture By Convention
+## Arquitetura por Convencao
+
+### Config
+
+- src/utils/config.ts
 
 ### Unknown
 
@@ -26,51 +30,60 @@ Root: C:\git\tic-coder-lite
 - src/exporters/generateAgentContextMd.ts
 - src/exporters/generateConfidenceReportMd.ts
 - src/exporters/generateQuestionsMd.ts
-- src/exporters/writeTicCodeFolder.ts
-- src/extension.ts
-- src/local-ai/checkOllamaStatus.ts
-- src/local-ai/enhanceAgentContext.ts
-- src/local-ai/enhanceModuleSummary.ts
-- src/local-ai/ollamaClient.ts
-- src/reversa-adapter/detectEngines.ts
-- src/reversa-adapter/engineTypes.ts
-- src/reversa-adapter/exportForEngines.ts
-- src/reversa-adapter/generateAgentsMd.ts
-- src/reversa-adapter/generateClaudeMd.ts
-- src/reversa-adapter/generateCopilotInstructions.ts
-- src/reversa-adapter/generateCursorRules.ts
-- src/reversa-adapter/generateGeminiMd.ts
-- src/reversa-adapter/safeWriter.ts
-- src/scanner/buildGraph.ts
-- src/scanner/detectJavaSpring.ts
+- src/exporters/reverseEngineering/generateApiContracts.ts
+- src/exporters/reverseEngineering/generateArchitecture.ts
+- src/exporters/reverseEngineering/generateBusinessRules.ts
+- src/exporters/reverseEngineering/generateCodeAnalysis.ts
+- src/exporters/reverseEngineering/generateConfidenceReport.ts
+- src/exporters/reverseEngineering/generateDataDictionary.ts
+- src/exporters/reverseEngineering/generateDatabaseAnalysis.ts
+- src/exporters/reverseEngineering/generateDependencies.ts
+- src/exporters/reverseEngineering/generateDomain.ts
+- src/exporters/reverseEngineering/generateGaps.ts
+- src/exporters/reverseEngineering/generateInventory.ts
+- src/exporters/reverseEngineering/generatePermissions.ts
+- src/exporters/reverseEngineering/generatePlSqlAnalysis.ts
+- src/exporters/reverseEngineering/generateQuestions.ts
+- src/exporters/reverseEngineering/generateReverseEngineering.ts
+- src/exporters/reverseEngineering/generateStateMachines.ts
+- src/exporters/reverseEngineering/generateTraceability.ts
 
-## Java / Spring Signals
+## Sinais Java / Spring
 
-- Spring annotations detected: no
-- Java files classified: 0
+- Anotacoes Spring detectadas: nao
+- Arquivos Java classificados: 0
 
-- No Spring annotations found
+- Nenhuma anotacao Spring encontrada
 
-## HTTP Endpoints
+## Endpoints HTTP
 
-- No Spring mapping annotations detected
+- Nenhuma anotacao de mapeamento Spring detectada
 
-## TypeScript / Node Signals
+## Sinais TypeScript / Node
 
 - Node.js
 
-### Runtime Dependencies
+### Dependencias de Runtime
 
-- No package.json dependencies detected
+- Nenhuma dependencia de package.json detectada
 
-## Data And Infrastructure
+## Dados e Infraestrutura
 
-- Database/SQL evidence: none
-- Docker evidence: none
+- Evidencia de banco/SQL: nenhuma
+- Evidencia de Docker: nenhuma
 
-## Guidance For AI Agents
+## Banco / PL/SQL
 
-- Treat this file as a local, convention-based inventory, not a complete semantic graph.
-- Prefer files listed under Architecture By Convention when changing behavior in a specific layer.
-- Confirm inferred modules by opening the cited source files before editing.
-- This inventory was generated without AI, databases, RAG, servers, or remote services.
+- Nenhum PL/SQL detectado
+
+### Tabelas mais referenciadas
+
+- Nenhuma referencia a tabela detectada
+
+## Orientacao para Agentes de IA
+
+- Trate este arquivo como inventario local baseado em convencoes, nao como grafo semantico completo.
+- Prefira arquivos listados em Arquitetura por Convencao ao alterar comportamento em uma camada especifica.
+- Confirme modulos inferidos abrindo os arquivos citados antes de editar.
+- Regras criticas podem estar escondidas em packages, triggers e procedures PL/SQL.
+- Este inventario foi gerado sem IA, bancos, RAG, servidores ou servicos remotos.

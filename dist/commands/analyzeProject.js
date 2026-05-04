@@ -122,7 +122,7 @@ async function analyzeProject(context) {
             cancellable: true
         }, async (progress, token) => analyzeWorkspaceInternal(root, { progress, token }));
         progressLogWriteArtifacts();
-        await (0, writeTicCodeFolder_1.writeTicCodeFolder)(root, summary);
+        await (0, writeTicCodeFolder_1.writeTicCodeFolder)(root, summary, context.extensionUri);
         await context.globalState.update('ticCoderLite.lastAnalysis', summary);
         vscode.commands.executeCommand('ticCoderLite.refreshSidebar');
         if (config.output.openAfterScan) {

@@ -1,8 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateGeminiMd = generateGeminiMd;
-const generateAgentsMd_1 = require("./generateAgentsMd");
-function generateGeminiMd(summary) {
-    return (0, generateAgentsMd_1.baseEngineContext)('Gemini CLI', 'GEMINI.md', summary, 'Use this local context before answering or modifying files through Gemini CLI.');
+const generateReversaAgentContracts_1 = require("../reversa-engine/generateReversaAgentContracts");
+function generateGeminiMd(summary, _assets, extensionUri) {
+    return (0, generateReversaAgentContracts_1.generateAgentContract)(summary, {
+        engine: 'gemini-cli',
+        targetFile: 'GEMINI.md',
+        engineInstruction: 'Use this local context before answering or modifying files through Gemini CLI.',
+        compact: false
+    }, extensionUri);
 }
 //# sourceMappingURL=generateGeminiMd.js.map

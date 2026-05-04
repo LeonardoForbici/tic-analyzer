@@ -94,7 +94,7 @@ export async function analyzeProject(context: vscode.ExtensionContext): Promise<
     );
 
     progressLogWriteArtifacts();
-    await writeTicCodeFolder(root, summary);
+    await writeTicCodeFolder(root, summary, context.extensionUri);
     await context.globalState.update('ticCoderLite.lastAnalysis', summary);
     vscode.commands.executeCommand('ticCoderLite.refreshSidebar');
 

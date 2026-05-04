@@ -1,94 +1,95 @@
-# TIC Coder Lite Architecture
+# Arquitetura do TIC Coder Lite
 
-Generated at: 2026-04-30T23:12:27.901Z
-Project: tic-coder-lite
-Root: C:\git\tic-coder-lite
+Gerado em: 2026-05-04T14:16:10.885Z
+Projeto: tic-coder-lite
+Raiz: c:\Git\tic-coder-lite
 
-## Graph Summary
+## Resumo do Grafo
 
-- Nodes: 50
-- Edges: 94
-- Internal edges: 57
-- External/package edges: 37
+- Nós: 85
+- Arestas: 145
+- Arestas internas: 99
+- Arestas externas/pacotes: 46
 
-## Detected Stack
+## Stack Detectada
 
 - Node.js: package.json
 
-## Modules Found
+## Módulos Encontrados
 
-- unknown: 42 nodes
-- external: 8 nodes
+- unknown: 74 nós
+- external: 10 nós
+- config: 1 nós
 
-## Main Dependencies
+## Principais Dependências
 
-- package.json -> @types/node: 1 dependency edge(s)
-- package.json -> @types/vscode: 1 dependency edge(s)
-- package.json -> typescript: 1 dependency edge(s)
-- src/commands/analyzeProject.ts -> node:path: 1 dependency edge(s)
-- src/commands/analyzeProject.ts -> vscode: 1 dependency edge(s)
-- src/commands/analyzeProject.ts -> src/exporters/writeTicCodeFolder.ts: 1 dependency edge(s)
-- src/commands/analyzeProject.ts -> src/scanner/buildGraph.ts: 1 dependency edge(s)
-- src/commands/analyzeProject.ts -> src/scanner/detectRisks.ts: 1 dependency edge(s)
-- src/commands/analyzeProject.ts -> src/scanner/detectStack.ts: 1 dependency edge(s)
-- src/commands/analyzeProject.ts -> src/scanner/scanWorkspace.ts: 1 dependency edge(s)
-- src/commands/analyzeProject.ts -> src/types.ts: 1 dependency edge(s)
-- src/commands/enhanceWithLocalAi.ts -> vscode: 1 dependency edge(s)
-- src/commands/enhanceWithLocalAi.ts -> src/commands/analyzeProject.ts: 1 dependency edge(s)
-- src/commands/enhanceWithLocalAi.ts -> src/local-ai/checkOllamaStatus.ts: 1 dependency edge(s)
-- src/commands/enhanceWithLocalAi.ts -> src/local-ai/enhanceAgentContext.ts: 1 dependency edge(s)
-- src/commands/enhanceWithLocalAi.ts -> src/local-ai/enhanceModuleSummary.ts: 1 dependency edge(s)
-- src/commands/enhanceWithLocalAi.ts -> src/local-ai/ollamaClient.ts: 1 dependency edge(s)
-- src/commands/exportAgentsMd.ts -> vscode: 1 dependency edge(s)
-- src/commands/exportAgentsMd.ts -> src/reversa-adapter/exportForEngines.ts: 1 dependency edge(s)
-- src/commands/generateAgentContext.ts -> vscode: 1 dependency edge(s)
-- src/commands/generateAgentContext.ts -> src/commands/analyzeProject.ts: 1 dependency edge(s)
-- src/commands/generateAgentContext.ts -> src/exporters/generateAgentContextMd.ts: 1 dependency edge(s)
-- src/commands/generateAgentContext.ts -> src/exporters/writeTicCodeFolder.ts: 1 dependency edge(s)
-- src/commands/generateAgentContext.ts -> src/types.ts: 1 dependency edge(s)
-- src/commands/openOverview.ts -> vscode: 1 dependency edge(s)
-- src/commands/openOverview.ts -> src/webview/overviewPanel.ts: 1 dependency edge(s)
-- src/exporters/writeTicCodeFolder.ts -> vscode: 1 dependency edge(s)
-- src/exporters/writeTicCodeFolder.ts -> src/exporters/generateAgentContextMd.ts: 1 dependency edge(s)
-- src/exporters/writeTicCodeFolder.ts -> src/exporters/generateConfidenceReportMd.ts: 1 dependency edge(s)
-- src/exporters/writeTicCodeFolder.ts -> src/exporters/generateQuestionsMd.ts: 1 dependency edge(s)
-- src/exporters/writeTicCodeFolder.ts -> src/scanner/buildGraph.ts: 1 dependency edge(s)
-- src/exporters/writeTicCodeFolder.ts -> src/scanner/detectRisks.ts: 1 dependency edge(s)
-- src/exporters/writeTicCodeFolder.ts -> src/scanner/detectStack.ts: 1 dependency edge(s)
-- src/extension.ts -> vscode: 1 dependency edge(s)
-- src/extension.ts -> src/commands/analyzeProject.ts: 1 dependency edge(s)
-- src/extension.ts -> src/commands/enhanceWithLocalAi.ts: 1 dependency edge(s)
-- src/extension.ts -> src/commands/exportAgentsMd.ts: 1 dependency edge(s)
-- src/extension.ts -> src/commands/generateAgentContext.ts: 1 dependency edge(s)
-- src/extension.ts -> src/commands/openOverview.ts: 1 dependency edge(s)
-- src/extension.ts -> src/reversa-adapter/exportForEngines.ts: 1 dependency edge(s)
+- package.json -> @types/node: 1 aresta(s) de dependência
+- package.json -> @types/vscode: 1 aresta(s) de dependência
+- package.json -> @vscode/vsce: 1 aresta(s) de dependência
+- package.json -> typescript: 1 aresta(s) de dependência
+- src/commands/analyzeProject.ts -> node:path: 1 aresta(s) de dependência
+- src/commands/analyzeProject.ts -> vscode: 1 aresta(s) de dependência
+- src/commands/analyzeProject.ts -> src/exporters/writeTicCodeFolder.ts: 1 aresta(s) de dependência
+- src/commands/analyzeProject.ts -> src/scanner/buildGraph.ts: 1 aresta(s) de dependência
+- src/commands/analyzeProject.ts -> src/scanner/detectProjects.ts: 1 aresta(s) de dependência
+- src/commands/analyzeProject.ts -> src/scanner/detectRisks.ts: 1 aresta(s) de dependência
+- src/commands/analyzeProject.ts -> src/scanner/detectStack.ts: 1 aresta(s) de dependência
+- src/commands/analyzeProject.ts -> src/scanner/scanWorkspace.ts: 1 aresta(s) de dependência
+- src/commands/analyzeProject.ts -> src/types.ts: 1 aresta(s) de dependência
+- src/commands/analyzeProject.ts -> src/utils/config.ts: 1 aresta(s) de dependência
+- src/commands/analyzeProject.ts -> src/utils/outputChannel.ts: 1 aresta(s) de dependência
+- src/commands/analyzeProject.ts -> src/utils/workspace.ts: 1 aresta(s) de dependência
+- src/commands/enhanceWithLocalAi.ts -> vscode: 1 aresta(s) de dependência
+- src/commands/enhanceWithLocalAi.ts -> src/commands/analyzeProject.ts: 1 aresta(s) de dependência
+- src/commands/enhanceWithLocalAi.ts -> src/local-ai/checkOllamaStatus.ts: 1 aresta(s) de dependência
+- src/commands/enhanceWithLocalAi.ts -> src/local-ai/enhanceAgentContext.ts: 1 aresta(s) de dependência
+- src/commands/enhanceWithLocalAi.ts -> src/local-ai/enhanceModuleSummary.ts: 1 aresta(s) de dependência
+- src/commands/enhanceWithLocalAi.ts -> src/local-ai/ollamaClient.ts: 1 aresta(s) de dependência
+- src/commands/exportAgentsMd.ts -> vscode: 1 aresta(s) de dependência
+- src/commands/exportAgentsMd.ts -> src/reversa-adapter/exportForEngines.ts: 1 aresta(s) de dependência
+- src/commands/generateAgentContext.ts -> vscode: 1 aresta(s) de dependência
+- src/commands/generateAgentContext.ts -> src/commands/analyzeProject.ts: 1 aresta(s) de dependência
+- src/commands/generateAgentContext.ts -> src/exporters/generateAgentContextMd.ts: 1 aresta(s) de dependência
+- src/commands/generateAgentContext.ts -> src/exporters/writeTicCodeFolder.ts: 1 aresta(s) de dependência
+- src/commands/generateAgentContext.ts -> src/types.ts: 1 aresta(s) de dependência
+- src/commands/openOverview.ts -> vscode: 1 aresta(s) de dependência
+- src/commands/openOverview.ts -> src/webview/overviewPanel.ts: 1 aresta(s) de dependência
+- src/exporters/reverseEngineering/generateReverseEngineering.ts -> vscode: 1 aresta(s) de dependência
+- src/exporters/reverseEngineering/generateReverseEngineering.ts -> src/exporters/reverseEngineering/generateApiContracts.ts: 1 aresta(s) de dependência
+- src/exporters/reverseEngineering/generateReverseEngineering.ts -> src/exporters/reverseEngineering/generateArchitecture.ts: 1 aresta(s) de dependência
+- src/exporters/reverseEngineering/generateReverseEngineering.ts -> src/exporters/reverseEngineering/generateBusinessRules.ts: 1 aresta(s) de dependência
+- src/exporters/reverseEngineering/generateReverseEngineering.ts -> src/exporters/reverseEngineering/generateCodeAnalysis.ts: 1 aresta(s) de dependência
+- src/exporters/reverseEngineering/generateReverseEngineering.ts -> src/exporters/reverseEngineering/generateConfidenceReport.ts: 1 aresta(s) de dependência
+- src/exporters/reverseEngineering/generateReverseEngineering.ts -> src/exporters/reverseEngineering/generateDatabaseAnalysis.ts: 1 aresta(s) de dependência
+- src/exporters/reverseEngineering/generateReverseEngineering.ts -> src/exporters/reverseEngineering/generateDataDictionary.ts: 1 aresta(s) de dependência
+- src/exporters/reverseEngineering/generateReverseEngineering.ts -> src/exporters/reverseEngineering/generateDependencies.ts: 1 aresta(s) de dependência
 
-## Central Files
+## Arquivos Centrais
 
-- src/commands/analyzeProject.ts: 13 connection(s)
-- src/reversa-adapter/exportForEngines.ts: 12 connection(s)
-- src/exporters/writeTicCodeFolder.ts: 11 connection(s)
-- src/extension.ts: 8 connection(s)
-- src/scanner/detectStack.ts: 7 connection(s)
-- src/commands/enhanceWithLocalAi.ts: 7 connection(s)
-- src/commands/generateAgentContext.ts: 6 connection(s)
-- src/webview/overviewPanel.ts: 6 connection(s)
-- src/reversa-adapter/detectEngines.ts: 6 connection(s)
-- src/scanner/buildGraph.ts: 5 connection(s)
-- src/reversa-adapter/generateAgentsMd.ts: 5 connection(s)
-- src/scanner/scanFiles.ts: 5 connection(s)
-- src/scanner/detectRisks.ts: 4 connection(s)
-- src/scanner/scanWorkspace.ts: 4 connection(s)
-- src/scanner/parseImports.ts: 4 connection(s)
+- src/exporters/reverseEngineering/generateReverseEngineering.ts: 18 conexão(ões)
+- src/commands/analyzeProject.ts: 17 conexão(ões)
+- src/exporters/writeTicCodeFolder.ts: 15 conexão(ões)
+- src/reversa-adapter/exportForEngines.ts: 12 conexão(ões)
+- src/scanner/detectStack.ts: 9 conexão(ões)
+- src/webview/overviewPanel.ts: 8 conexão(ões)
+- src/extension.ts: 8 conexão(ões)
+- src/scanner/buildGraph.ts: 7 conexão(ões)
+- src/commands/enhanceWithLocalAi.ts: 7 conexão(ões)
+- src/webview/overviewHtml.ts: 7 conexão(ões)
+- src/scanner/detectRisks.ts: 6 conexão(ões)
+- src/scanner/scanWorkspace.ts: 6 conexão(ões)
+- src/utils/config.ts: 6 conexão(ões)
+- src/commands/generateAgentContext.ts: 6 conexão(ões)
+- src/reversa-adapter/detectEngines.ts: 6 conexão(ões)
 
-## Possible Couplings
+## Acoplamentos Possíveis
 
-- No cross-module coupling detected
+- unknown -> config: 5 aresta(s)
 
-## Reading Notes For AI Agents
+## Notas de Leitura para Agentes de IA
 
-- graph.json is a lightweight file graph inspired by in-memory graph concepts, not a database.
-- IMPORTS means a source file imports another workspace file.
-- USES_PACKAGE means a source file imports a package that could not be resolved to a local file.
-- DEPENDS_ON means package metadata declares a dependency.
-- Files marked with medium or high risk have more graph connections and deserve extra care before edits.
+- graph.json é um grafo leve de arquivos inspirado em conceitos de grafo em memória, não um banco de dados.
+- IMPORTS significa que um arquivo fonte importa outro arquivo do workspace.
+- USES_PACKAGE significa que um arquivo fonte importa um pacote que não foi resolvido como arquivo local.
+- DEPENDS_ON significa que metadados de pacote declaram uma dependência.
+- Arquivos marcados com risco médio ou alto têm mais conexões no grafo e merecem cuidado extra antes de edições.

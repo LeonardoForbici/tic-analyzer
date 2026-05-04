@@ -132,40 +132,75 @@ Os logs são escritos no Canal de Saída denominado `TIC Coder Lite`.
 
 ## Programação Reversa / SDD
 
-TIC Coder Lite agora inclui uma camada de **Programação Reversa** local-first, inspirada metodologicamente no [Reversa by Sandeco (MIT)](https://github.com/sandeco/reversa).
+TIC Coder Lite usa o **motor Reversa embutido** como base completa de programação reversa. O Reversa by Sandeco (MIT) é incorporado em `resources/reversa/` e adaptado para funcionar como extensão VS Code.
 
-O objetivo é transformar código existente em especificações técnicas, contratos operacionais, regras candidatas, gaps e rastreabilidade prontos para agentes de IA — tudo sem IA obrigatória, banco, Docker ou servidor.
+**TIC Coder Lite NÃO é o Reversa CLI.** É uma extensão VS Code que usa o motor/metodologia do Reversa adaptado internamente.
 
-### O que é gerado
-
-Ao executar "Analisar Workspace", o TIC Coder Lite gera automaticamente:
+### Saída principal
 
 ```
-.tic-code/
-└── reverse-engineering/
-    ├── inventory.md          — inventário completo (Scout)
-    ├── dependencies.md       — dependências externas e internas
-    ├── code-analysis.md      — módulos, controllers, services (Archaeologist)
-    ├── domain.md             — candidatos de domínio de negócio (Detective)
-    ├── business-rules.md     — regras de negócio candidatas (Detective)
-    ├── state-machines.md     — máquinas de estado + Mermaid (Detective)
-    ├── permissions.md        — permissões @PreAuthorize, hasRole (Detective)
-    ├── architecture.md       — arquitetura, C4 simplificado (Architect)
-    ├── api-contracts.md      — contratos de API REST (Writer)
-    ├── data-dictionary.md    — dicionário de dados (Data Master)
-    ├── database-analysis.md  — tabelas, migrations, SQL (Data Master)
-    ├── plsql-analysis.md     — packages, procedures, triggers (Data Master)
-    ├── confidence-report.md  — relatório de confiança (Reviewer)
-    ├── gaps.md               — lacunas e incertezas (Reviewer)
-    ├── questions.md          — perguntas para validação humana (Reviewer)
-    └── traceability/
-        ├── code-spec-matrix.md   — código ↔ spec ↔ confiança
-        └── risk-impact-matrix.md — risco ↔ módulo ↔ impacto
+.tic-code/reversa/              — estado do motor Reversa
+├── state.json                  — fases, checkpoints, status
+├── config.json                 — configuração da análise
+├── plan.md                     — plano de programação reversa
+├── version                     — versão do motor
+├── context/
+│   ├── surface.json            — mapeamento de superfície
+│   ├── modules.json            — módulos detectados
+│   ├── graph.json              — grafo de dependências
+│   ├── risks.json              — riscos detectados
+│   └── workspace-summary.json  — resumo compacto
+└── _config/
+    ├── manifest.yaml           — configuração do motor
+    └── sdd-template.md         — template SDD
+
+.tic-code/reverse-engineering/  — especificações extraídas (equivalente ao _reversa_sdd/)
+├── inventory.md                — inventário (Scout)
+├── dependencies.md             — dependências
+├── code-analysis.md            — módulos e acoplamento (Archaeologist)
+├── data-dictionary.md          — dicionário de dados
+├── domain.md                   — domínio (Detective)
+├── state-machines.md           — máquinas de estado
+├── permissions.md              — permissões e papéis
+├── business-rules.md           — regras de negócio candidatas
+├── operational-contracts.md    — contratos operacionais por módulo
+├── architecture.md             — arquitetura (Architect)
+├── c4-context.md               — diagrama C4 contexto
+├── c4-containers.md            — diagrama C4 containers
+├── c4-components.md            — diagrama C4 componentes
+├── erd-complete.md             — ERD completo
+├── confidence-report.md        — relatório de confiança (Reviewer)
+├── gaps.md                     — lacunas 🔴
+├── questions.md                — perguntas para validação humana
+├── dynamic.md                  — análise dinâmica
+├── sdd/                        — specs detalhadas por componente
+├── openapi/                    — contratos OpenAPI
+├── user-stories/               — user stories
+├── adrs/                       — Architecture Decision Records
+├── flowcharts/                 — diagramas de fluxo
+├── sequences/                  — diagramas de sequência
+├── ui/                         — specs de interface
+├── database/                   — análise de banco
+├── design-system/              — design system
+└── traceability/
+    ├── code-spec-matrix.md     — código ↔ spec
+    ├── risk-impact-matrix.md   — risco ↔ impacto
+    └── spec-impact-matrix.md   — spec ↔ componentes
 ```
 
-E, para cada subprojeto detectado, em `.tic-code/projects/{projectId}/reverse-engineering/`.
+### Pipeline Reversa Engine
 
-### Níveis de Confiança
+| Fase | Agente | Tipo |
+| --- | --- | --- |
+| **Scout** | reversa-scout | ✅ Determinístico |
+| **Archaeologist** | reversa-archaeologist | 🔄 Parcial |
+| **Detective** | reversa-detective | ⏳ Requer IA |
+| **Architect** | reversa-architect | 🔄 Parcial |
+| **Writer** | reversa-writer | 🔄 Parcial |
+| **Reviewer** | reversa-reviewer | ✅ Determinístico |
+| **Data Master** | reversa-data-master | 🔄 Se PL/SQL detectado |
+
+### Escala de Confiança (Reversa)
 
 Toda afirmação gerada é marcada com um dos seguintes níveis:
 

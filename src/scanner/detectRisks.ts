@@ -55,6 +55,12 @@ export async function detectRisks(scan: ScanResult, inventory: ArchitectureInven
 
   for (const [index, file] of scan.files.entries()) {
     throwIfCancelled(options.token);
+
+    // Arquivos de lock, minificados e mapas não produzem riscos de domínio úteis
+    if (isNoisyMetaFile(file.relativePath)) {
+      continue;
+    }
+
     detectFileSizeRisks(file.relativePath, file.lines, risks);
 
     if (isCodeFile(file.extension)) {
@@ -182,12 +188,33 @@ function detectEmptyCatch(file: string, content: string, risks: RiskFinding[]): 
 }
 
 function detectSqlConcatenation(file: string, content: string, risks: RiskFinding[]): void {
-  const pattern = /(["'`][\s\S]{0,220}\b(?:select|insert|update|delete|merge|where|from)\b[\s\S]{0,220}["'`])\s*\+/gi;
+  // Arquivos de webview/UI/template/assets geram falsos positivos porque o HTML usa <select>,
+  // textos usam "from"/"where" como preposições, e CSS usa seletores com essas palavras.
+  if (isWebviewOrUiFile(file)) {
+    return;
+  }
+
+  // Requer estrutura DML real: SELECT col FROM / INSERT INTO / UPDATE tbl SET / DELETE FROM / MERGE INTO
+  // seguida de concatenação com variável — não apenas qualquer string contendo palavra SQL
+  const pattern = /["'`][^"'`\n]{0,150}\b(SELECT\s+[\w\s*,]+FROM\s+\w|INSERT\s+INTO\s+\w|UPDATE\s+\w[\s\S]{0,60}\bSET\b|DELETE\s+FROM\s+\w|MERGE\s+INTO\s+\w)[\s\S]{0,180}["'`]\s*\+/gi;
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(content)) !== null) {
-    risks.push(createRisk('sql-concatenation', 'critical', 'SQL concatenado em string', file, lineAt(content, match.index), 'SQL parece ser montado com concatenação de strings, o que pode causar injection e consultas frágeis.', 'Use consultas parametrizadas, prepared statements ou query builder com valores vinculados.', trimEvidence(match[0])));
+    risks.push(createRisk('sql-concatenation', 'critical', 'SQL concatenado em string', file, lineAt(content, match.index), 'SQL parece ser montado com concatenação de strings, o que pode causar SQL injection e consultas frágeis.', 'Use consultas parametrizadas, prepared statements ou query builder com valores vinculados.', trimEvidence(match[0])));
   }
+}
+
+function isWebviewOrUiFile(file: string): boolean {
+  const lower = file.toLowerCase();
+  return (
+    lower.includes('webview') ||
+    lower.includes('/html') ||
+    lower.includes('assets') ||
+    lower.includes('template') ||
+    lower.endsWith('.html') ||
+    lower.endsWith('.min.js') ||
+    lower.endsWith('.map')
+  );
 }
 
 function detectHardcodedRoles(file: string, content: string, risks: RiskFinding[]): void {
@@ -423,6 +450,23 @@ async function readFile(rootPath: string, relativePath: string, cache: Map<strin
 
 function isCodeFile(extension: string): boolean {
   return ['.java', '.ts', '.tsx', '.js', '.jsx', '.sql'].includes(extension);
+}
+
+/** Retorna true para arquivos que geram ruído mas não fornecem riscos de domínio úteis */
+function isNoisyMetaFile(file: string): boolean {
+  const lower = file.toLowerCase();
+  const basename = lower.split('/').pop() ?? lower;
+  return (
+    basename === 'package-lock.json' ||
+    basename === 'yarn.lock' ||
+    basename === 'pnpm-lock.yaml' ||
+    lower.endsWith('.min.js') ||
+    lower.endsWith('.map') ||
+    lower.includes('node_modules/') ||
+    lower.includes('/dist/') ||
+    lower.includes('/build/') ||
+    lower.includes('/out/')
+  );
 }
 
 function isConfigFile(file: string): boolean {

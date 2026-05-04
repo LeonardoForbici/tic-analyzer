@@ -98,6 +98,8 @@ function renderOverviewHtml(input) {
       ${metric('Database / PL/SQL', plsql.files.length)}
     </section>
 
+    ${renderReversaEngineSection(summary)}
+
     <section class="section">
       <h2>Configuração Fácil</h2>
       <div class="setup-grid">
@@ -418,6 +420,52 @@ function riskLabel(value) {
 }
 function safeJson(value) {
     return JSON.stringify(value).replaceAll('</', '<\\/');
+}
+function renderReversaEngineSection(summary) {
+    const phases = [
+        { id: 'scout', label: 'Scout', icon: '🔍', status: 'completed' },
+        { id: 'archaeologist', label: 'Archaeologist', icon: '⛏️', status: 'partial' },
+        { id: 'detective', label: 'Detective', icon: '🕵️', status: summary.risks.risks.length > 0 ? 'partial' : 'pending' },
+        { id: 'architect', label: 'Architect', icon: '🏗️', status: 'partial' },
+        { id: 'writer', label: 'Writer', icon: '📝', status: 'partial' },
+        { id: 'reviewer', label: 'Reviewer', icon: '🔬', status: 'completed' },
+        { id: 'data-master', label: 'Data Master', icon: '🗄️', status: summary.inventory.plsql.detected ? 'partial' : 'pending' }
+    ];
+    const statusBadge = (s) => {
+        if (s === 'completed')
+            return '<span class="badge badge-green">✅ Executado</span>';
+        if (s === 'partial')
+            return '<span class="badge badge-yellow">🔄 Parcial</span>';
+        return '<span class="badge badge-gray">⏳ Pendente</span>';
+    };
+    return `<section class="section">
+    <h2>Reversa Engine</h2>
+    <div class="card">
+      <p><strong>Motor de programação reversa embutido</strong> — Metodologia Reversa by Sandeco (MIT).</p>
+      <p class="caption">Pipeline gera contexto em <code>.tic-code/reversa/</code> e especificações em <code>.tic-code/reverse-engineering/</code></p>
+      <div class="phase-grid">
+        ${phases.map((p) => `<div class="phase-item"><span>${p.icon}</span><span><strong>${p.label}</strong></span>${statusBadge(p.status)}</div>`).join('\n        ')}
+      </div>
+      <div class="links-grid">
+        <div class="link-item"><span>📋</span> <code>.tic-code/reversa/plan.md</code></div>
+        <div class="link-item"><span>📊</span> <code>.tic-code/reversa/state.json</code></div>
+        <div class="link-item"><span>📁</span> <code>.tic-code/reverse-engineering/</code></div>
+      </div>
+      <h3>JSON Context</h3>
+      <div class="links-grid">
+        <div class="link-item"><span>🗺️</span> <code>surface.json</code></div>
+        <div class="link-item"><span>📦</span> <code>modules.json</code></div>
+        <div class="link-item"><span>🕸️</span> <code>graph.json</code></div>
+        <div class="link-item"><span>⚠️</span> <code>risks.json</code></div>
+      </div>
+      <h3>Escala de Confiança</h3>
+      <div class="confidence-legend">
+        <span class="badge badge-green">🟢 CONFIRMADO</span>
+        <span class="badge badge-yellow">🟡 INFERIDO</span>
+        <span class="badge badge-red">🔴 LACUNA</span>
+      </div>
+    </div>
+  </section>`;
 }
 function escapeHtml(value) {
     return value

@@ -26,7 +26,7 @@ export async function openOverviewPanel(context: vscode.ExtensionContext): Promi
       return;
     }
     summary = newSummary;
-    await writeTicCodeFolder(root, summary);
+    await writeTicCodeFolder(root, summary, context.extensionUri);
     await context.globalState.update('ticCoderLite.lastAnalysis', summary);
   }
 

@@ -45,7 +45,8 @@ const generateQuestionsMd_1 = require("./generateQuestionsMd");
 const generateReverseEngineering_1 = require("./reverseEngineering/generateReverseEngineering");
 const databaseLargeMode_1 = require("../scanner/databaseLargeMode");
 const config_1 = require("../utils/config");
-async function writeTicCodeFolder(root, summary) {
+const runReversaLikePipeline_1 = require("../reversa-engine/runReversaLikePipeline");
+async function writeTicCodeFolder(root, summary, extensionUri) {
     const ticCodeDir = vscode.Uri.joinPath(root.uri, '.tic-code');
     const artifacts = {
         scanJson: vscode.Uri.joinPath(ticCodeDir, 'scan.json'),
@@ -75,6 +76,8 @@ async function writeTicCodeFolder(root, summary) {
     await writeText(externalDepsJson, `${JSON.stringify(summary.graph.stats.externalDependencies, null, 2)}\n`);
     await writeProjectArtifacts(root, summary);
     await (0, generateReverseEngineering_1.writeReverseEngineering)(root, summary);
+    // Motor Reversa — gera .tic-code/reversa/ e expande .tic-code/reverse-engineering/
+    await (0, runReversaLikePipeline_1.runReversaLikePipeline)(root, summary, extensionUri);
     return artifacts;
 }
 async function writeProjectArtifacts(root, summary) {

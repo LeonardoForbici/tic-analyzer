@@ -1,8 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateCursorRules = generateCursorRules;
-const generateAgentsMd_1 = require("./generateAgentsMd");
-function generateCursorRules(summary) {
-    return (0, generateAgentsMd_1.baseEngineContext)('Cursor', '.cursorrules', summary, 'Apply these project rules when proposing edits or generating code in Cursor.');
+const generateReversaAgentContracts_1 = require("../reversa-engine/generateReversaAgentContracts");
+function generateCursorRules(summary, _assets, extensionUri) {
+    return (0, generateReversaAgentContracts_1.generateAgentContract)(summary, {
+        engine: 'cursor',
+        targetFile: '.cursorrules',
+        engineInstruction: 'Apply these project rules when proposing edits or generating code in Cursor.',
+        compact: true
+    }, extensionUri);
 }
 //# sourceMappingURL=generateCursorRules.js.map

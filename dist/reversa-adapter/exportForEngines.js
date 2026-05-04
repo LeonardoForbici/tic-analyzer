@@ -45,6 +45,7 @@ const generateClaudeMd_1 = require("./generateClaudeMd");
 const generateCopilotInstructions_1 = require("./generateCopilotInstructions");
 const generateCursorRules_1 = require("./generateCursorRules");
 const generateGeminiMd_1 = require("./generateGeminiMd");
+const reversaAssetLoader_1 = require("./reversaAssetLoader");
 const safeWriter_1 = require("./safeWriter");
 async function detectAiEnginesCommand() {
     const root = (0, analyzeProject_1.getWorkspaceRoot)();
@@ -67,13 +68,14 @@ async function exportForEngineCommand(context, engineId) {
         return undefined;
     }
     const summary = (0, analyzeProject_1.getLastAnalysis)(context) ?? await (0, analyzeProject_1.analyzeWorkspace)(root);
-    await (0, writeTicCodeFolder_1.writeTicCodeFolder)(root, summary);
+    await (0, writeTicCodeFolder_1.writeTicCodeFolder)(root, summary, context.extensionUri);
     const engine = await (0, detectEngines_1.detectEngineById)(root.uri.fsPath, engineId);
     if (!engine) {
         vscode.window.showErrorMessage(`Exportação de engine não suportada pelo TIC Coder Lite: ${engineId}`);
         return undefined;
     }
-    const result = await exportForEngine(root, summary, engine);
+    const assets = (0, reversaAssetLoader_1.loadReversaAssets)(context.extensionUri);
+    const result = await exportForEngine(root, summary, engine, assets, context.extensionUri);
     await context.globalState.update('ticCoderLite.lastAnalysis', summary);
     vscode.commands.executeCommand('ticCoderLite.refreshSidebar');
     vscode.window.showInformationMessage(`IA Padrão: ${engine.name} ${translateAction(result.action)} ${result.targetFile}.`);
@@ -88,9 +90,10 @@ function translateAction(action) {
         overwritten: 'sobrescreveu'
     }[action] ?? action;
 }
-async function exportForEngine(root, summary, engine) {
+async function exportForEngine(root, summary, engine, assets, extensionUri) {
     const writer = new safeWriter_1.SafeWriter(root);
-    const content = generateEngineContent(engine.id, summary);
+    const resolvedAssets = assets ?? (0, reversaAssetLoader_1.loadReversaAssets)();
+    const content = generateEngineContent(engine.id, summary, resolvedAssets, extensionUri);
     const result = await writer.writeFile(engine.entryFile, content);
     return {
         engine,
@@ -98,20 +101,20 @@ async function exportForEngine(root, summary, engine) {
         action: result.action
     };
 }
-function generateEngineContent(engineId, summary) {
+function generateEngineContent(engineId, summary, assets, extensionUri) {
     switch (engineId) {
         case 'claude-code':
-            return (0, generateClaudeMd_1.generateClaudeMd)(summary);
+            return (0, generateClaudeMd_1.generateClaudeMd)(summary, assets, extensionUri);
         case 'codex':
-            return (0, generateAgentsMd_1.generateAgentsMd)(summary);
+            return (0, generateAgentsMd_1.generateAgentsMd)(summary, assets, extensionUri);
         case 'cursor':
-            return (0, generateCursorRules_1.generateCursorRules)(summary);
+            return (0, generateCursorRules_1.generateCursorRules)(summary, assets, extensionUri);
         case 'github-copilot':
-            return (0, generateCopilotInstructions_1.generateCopilotInstructions)(summary);
+            return (0, generateCopilotInstructions_1.generateCopilotInstructions)(summary, assets, extensionUri);
         case 'gemini-cli':
-            return (0, generateGeminiMd_1.generateGeminiMd)(summary);
+            return (0, generateGeminiMd_1.generateGeminiMd)(summary, assets, extensionUri);
         case 'aider':
-            return (0, generateAgentsMd_1.generateAgentsMd)(summary).replace('Context For Codex', 'Context For Aider').replace('AGENTS.md', 'CONVENTIONS.md');
+            return (0, generateAgentsMd_1.generateAgentsMd)(summary, assets, extensionUri).replace('para Codex', 'para Aider');
     }
 }
 //# sourceMappingURL=exportForEngines.js.map

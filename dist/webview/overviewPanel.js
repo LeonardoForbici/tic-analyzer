@@ -59,7 +59,7 @@ async function openOverviewPanel(context) {
             return;
         }
         summary = newSummary;
-        await (0, writeTicCodeFolder_1.writeTicCodeFolder)(root, summary);
+        await (0, writeTicCodeFolder_1.writeTicCodeFolder)(root, summary, context.extensionUri);
         await context.globalState.update('ticCoderLite.lastAnalysis', summary);
     }
     const panel = vscode.window.createWebviewPanel('ticCoderLiteOverview', 'TIC Coder Lite', vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true });

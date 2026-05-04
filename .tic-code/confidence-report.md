@@ -1,62 +1,63 @@
-# TIC Coder Lite Confidence Report
+# Relatório de Confiança do TIC Coder Lite
 
-Generated at: 2026-04-30T23:12:27.920Z
-Project: tic-coder-lite
+Gerado em: 2026-05-04T14:16:10.961Z
+Projeto: tic-coder-lite
 
-## Confidence Scale
+## Escala de Confiança
 
-🟢 CONFIRMED — detectado diretamente no código
-🟡 INFERRED — inferido por nome/convenção
-🔴 GAP — precisa validação humana
+CONFIRMADO: detectado diretamente no código
+INFERIDO: inferido por nome/convenção
+LACUNA: precisa validação humana
 
-## 🟢 CONFIRMED
+## Confirmado
 
-- Project name: tic-coder-lite
-- Root path: C:\git\tic-coder-lite
-- Files scanned: 42
-- Lines scanned: 4399
-- Graph nodes: 50
-- Graph edges: 94
-- Risk findings: 0
+- Nome do projeto: tic-coder-lite
+- Caminho raiz: c:\Git\tic-coder-lite
+- Arquivos analisados: 75
+- Linhas analisadas: 16002
+- Nós do grafo: 85
+- Arestas do grafo: 145
+- Riscos encontrados: 6
 - Node.js: package.json
-- TIC Coder Lite has three modes: Lite Mode, Standard AI Mode, and Local AI Mode.
-- Lite Mode does not require AI, database, Docker, server, or Ollama.
+- O TIC Coder Lite tem três modos: Modo Lite, IA Padrão e IA Local.
+- O Modo Lite não exige IA, banco, Docker, servidor ou Ollama.
 
-## 🟡 INFERRED
+## Inferido
 
-- unknown: 37 file(s) by naming/path convention
-- src/commands/analyzeProject.ts: central by graph degree 13
-- src/reversa-adapter/exportForEngines.ts: central by graph degree 12
-- src/exporters/writeTicCodeFolder.ts: central by graph degree 11
-- src/extension.ts: central by graph degree 8
-- src/scanner/detectStack.ts: central by graph degree 7
-- src/commands/enhanceWithLocalAi.ts: central by graph degree 7
-- src/commands/generateAgentContext.ts: central by graph degree 6
-- src/webview/overviewPanel.ts: central by graph degree 6
-- src/reversa-adapter/detectEngines.ts: central by graph degree 6
-- src/scanner/buildGraph.ts: central by graph degree 5
-- node:fs: medium graph risk by connection count
-- node:path: high graph risk by connection count
-- vscode: high graph risk by connection count
-- src/commands/analyzeProject.ts: high graph risk by connection count
-- src/commands/enhanceWithLocalAi.ts: medium graph risk by connection count
-- src/commands/generateAgentContext.ts: medium graph risk by connection count
-- src/exporters/writeTicCodeFolder.ts: high graph risk by connection count
-- src/extension.ts: medium graph risk by connection count
-- src/reversa-adapter/detectEngines.ts: medium graph risk by connection count
-- src/reversa-adapter/exportForEngines.ts: high graph risk by connection count
+- config: 1 arquivo(s) por convenção de nome/caminho
+- unknown: 66 arquivo(s) por convenção de nome/caminho
+- src/exporters/reverseEngineering/generateReverseEngineering.ts: central por grau no grafo 18
+- src/commands/analyzeProject.ts: central por grau no grafo 17
+- src/exporters/writeTicCodeFolder.ts: central por grau no grafo 15
+- src/reversa-adapter/exportForEngines.ts: central por grau no grafo 12
+- src/scanner/detectStack.ts: central por grau no grafo 9
+- src/webview/overviewPanel.ts: central por grau no grafo 8
+- src/extension.ts: central por grau no grafo 8
+- src/scanner/buildGraph.ts: central por grau no grafo 7
+- src/commands/enhanceWithLocalAi.ts: central por grau no grafo 7
+- src/webview/overviewHtml.ts: central por grau no grafo 7
+- node:fs: risco medium no grafo por quantidade de conexões
+- node:path: risco high no grafo por quantidade de conexões
+- vscode: risco high no grafo por quantidade de conexões
+- src/commands/analyzeProject.ts: risco high no grafo por quantidade de conexões
+- src/commands/enhanceWithLocalAi.ts: risco medium no grafo por quantidade de conexões
+- src/commands/generateAgentContext.ts: risco medium no grafo por quantidade de conexões
+- src/exporters/reverseEngineering/generateReverseEngineering.ts: risco high no grafo por quantidade de conexões
+- src/exporters/writeTicCodeFolder.ts: risco high no grafo por quantidade de conexões
+- src/extension.ts: risco medium no grafo por quantidade de conexões
+- src/reversa-adapter/detectEngines.ts: risco medium no grafo por quantidade de conexões
 
-## 🔴 GAP
+## Lacunas
 
-- Runtime behavior was not executed or traced.
-- Business rules were not semantically validated by a human.
-- Import graph does not prove all runtime dependencies or reflection-based calls.
-- Security roles and permissions require human validation.
-- Database schema meaning and migration safety require human validation.
-- Test coverage and production usage were not measured.
+- O comportamento em runtime não foi executado nem rastreado.
+- Regras de negócio não foram validadas semanticamente por uma pessoa.
+- O grafo de imports não prova todas as dependências em runtime ou chamadas por reflexão.
+- Papéis e permissões de segurança exigem validação humana.
+- Significado do schema de banco e segurança de migrations exigem validação humana.
+- Cobertura de testes e uso em produção não foram medidos.
 
-## Notes
+## Observações
 
-- Confirmed facts are extracted from files, manifests, imports, graph edges, and deterministic risk rules.
-- Inferred facts are useful for navigation, but should be checked against source before architectural edits.
-- Gaps are validation prompts for humans or a deeper project-specific review.
+- Fatos confirmados são extraídos de arquivos, manifests, imports, arestas do grafo e regras determinísticas de risco.
+- Fatos inferidos ajudam na navegação, mas devem ser verificados no código antes de edições arquiteturais.
+- Lacunas são prompts de validação para pessoas ou para uma revisão específica mais profunda do projeto.

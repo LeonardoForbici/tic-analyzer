@@ -1,34 +1,40 @@
-# TIC Coder Lite Questions
+# Perguntas do TIC Coder Lite
 
-Generated at: 2026-04-30T23:12:27.921Z
-Project: tic-coder-lite
+Gerado em: 2026-05-04T14:16:10.963Z
+Projeto: tic-coder-lite
 
-## Architecture Validation
+## Validação de Arquitetura
 
-- Is Node.js still an active part of the project, or is it legacy residue?
-- Does the unknown module boundary match the intended architecture?
+- Node.js ainda é parte ativa do projeto ou é resíduo legado?
+- A fronteira do módulo config corresponde à arquitetura pretendida?
+- A fronteira do módulo unknown corresponde à arquitetura pretendida?
 
-## Risk Validation
+## Validação de Riscos
 
-- No deterministic risks were found. Are there known project-specific risks TIC Coder Lite should learn to detect?
+- package-lock.json deve ser tratado como risco obrigatório na próxima alteração? (Arquivo tem mais de 1500 linhas)
+- src/webview/webviewAssets.ts:357 deve ser tratado como risco obrigatório na próxima alteração? (SQL concatenado em string)
+- src/webview/webviewAssets.ts:402 deve ser tratado como risco obrigatório na próxima alteração? (SQL concatenado em string)
+- src/exporters/writeTicCodeFolder.ts:192 deve ser tratado como risco obrigatório na próxima alteração? (Uso de any no TypeScript)
+- src/exporters/writeTicCodeFolder.ts:262 deve ser tratado como risco obrigatório na próxima alteração? (Uso de any no TypeScript)
+- src/exporters/reverseEngineering/generateBusinessRules.ts:8 deve ser tratado como risco obrigatório na próxima alteração? (Marcador TODO/FIXME encontrado)
 
-## Graph And Impact Validation
+## Validação de Grafo e Impacto
 
-- Is src/commands/analyzeProject.ts intentionally central, or should its responsibilities be split?
-- Is src/reversa-adapter/exportForEngines.ts intentionally central, or should its responsibilities be split?
-- Is src/exporters/writeTicCodeFolder.ts intentionally central, or should its responsibilities be split?
-- Is src/extension.ts intentionally central, or should its responsibilities be split?
-- Is src/scanner/detectStack.ts intentionally central, or should its responsibilities be split?
-- Is src/commands/enhanceWithLocalAi.ts intentionally central, or should its responsibilities be split?
-- Is src/commands/generateAgentContext.ts intentionally central, or should its responsibilities be split?
-- Is src/webview/overviewPanel.ts intentionally central, or should its responsibilities be split?
+- src/exporters/reverseEngineering/generateReverseEngineering.ts é central de propósito ou suas responsabilidades deveriam ser separadas?
+- src/commands/analyzeProject.ts é central de propósito ou suas responsabilidades deveriam ser separadas?
+- src/exporters/writeTicCodeFolder.ts é central de propósito ou suas responsabilidades deveriam ser separadas?
+- src/reversa-adapter/exportForEngines.ts é central de propósito ou suas responsabilidades deveriam ser separadas?
+- src/scanner/detectStack.ts é central de propósito ou suas responsabilidades deveriam ser separadas?
+- src/webview/overviewPanel.ts é central de propósito ou suas responsabilidades deveriam ser separadas?
+- src/extension.ts é central de propósito ou suas responsabilidades deveriam ser separadas?
+- src/scanner/buildGraph.ts é central de propósito ou suas responsabilidades deveriam ser separadas?
 
-## Human Decisions Needed
+## Decisões Humanas Necessárias
 
-- Should this project use Lite Mode only, Standard AI exports, or optional Local AI Mode?
-- Which Standard AI engine files should be committed: AGENTS.md, CLAUDE.md, Copilot instructions, Cursor rules, or GEMINI.md?
-- Is Local AI Mode allowed for this workspace, and which small Ollama model should be used?
-- Which generated facts should become project rules for AI agents?
-- Which modules are safe for automated edits, and which require manual review?
-- Are there endpoints, migrations, auth rules, or public contracts that must never change without approval?
-- Are there local conventions not visible through file names, imports, or manifests?
+- Este projeto deve usar apenas Modo Lite, exportações de IA Padrão ou IA Local opcional?
+- Quais arquivos de IA Padrão devem ser commitados: AGENTS.md, CLAUDE.md, instruções do Copilot, regras do Cursor ou GEMINI.md?
+- A IA Local é permitida neste workspace, e qual modelo pequeno do Ollama deve ser usado?
+- Quais fatos gerados devem virar regras de projeto para agentes de IA?
+- Quais módulos são seguros para edições automatizadas e quais exigem revisão manual?
+- Existem endpoints, migrations, regras de autenticação ou contratos públicos que nunca devem mudar sem aprovação?
+- Existem convenções locais invisíveis por nomes de arquivo, imports ou manifests?

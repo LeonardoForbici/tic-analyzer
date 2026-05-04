@@ -1,13 +1,73 @@
 {
   "projectName": "tic-coder-lite",
-  "rootPath": "C:\\git\\tic-coder-lite",
-  "generatedAt": "2026-04-30T23:12:27.913Z",
+  "rootPath": "c:\\Git\\tic-coder-lite",
+  "generatedAt": "2026-05-04T14:16:10.925Z",
   "summary": {
-    "total": 0,
-    "low": 0,
-    "medium": 0,
+    "total": 6,
+    "low": 1,
+    "medium": 2,
     "high": 0,
-    "critical": 0
+    "critical": 3
   },
-  "risks": []
+  "risks": [
+    {
+      "id": "large-file-critical",
+      "level": "critical",
+      "title": "Arquivo tem mais de 1500 linhas",
+      "file": "package-lock.json",
+      "reason": "O arquivo tem 4001 linhas.",
+      "recommendation": "Separe responsabilidades em módulos menores antes de mudanças amplas.",
+      "evidence": "4001 linhas"
+    },
+    {
+      "id": "sql-concatenation",
+      "level": "critical",
+      "title": "SQL concatenado em string",
+      "file": "src/webview/webviewAssets.ts",
+      "line": 357,
+      "reason": "SQL parece ser montado com concatenação de strings, o que pode causar injection e consultas frágeis.",
+      "recommendation": "Use consultas parametrizadas, prepared statements ou query builder com valores vinculados.",
+      "evidence": "'backend', 'Backend'], ['frontend', 'Frontend'], ['mobile', 'Mobile'], ['database', 'Database / PL/SQL'] ]; select.innerHTML = '<option value=\"todos\">Todos os tipos</option>' + projectTypes.map(([value, label]) => '<option value=\"' + value "
+    },
+    {
+      "id": "sql-concatenation",
+      "level": "critical",
+      "title": "SQL concatenado em string",
+      "file": "src/webview/webviewAssets.ts",
+      "line": 402,
+      "reason": "SQL parece ser montado com concatenação de strings, o que pode causar injection e consultas frágeis.",
+      "recommendation": "Use consultas parametrizadas, prepared statements ou query builder com valores vinculados.",
+      "evidence": "'http://www.w3.org/2000/svg', 'line'); const dim = graphState.selectedNodeId && edge.from !== graphState.selectedNodeId && edge.to !== graphState.selectedNodeId; line.setAttribute('class', 'edge ' +"
+    },
+    {
+      "id": "typescript-any",
+      "level": "medium",
+      "title": "Uso de any no TypeScript",
+      "file": "src/exporters/writeTicCodeFolder.ts",
+      "line": 192,
+      "reason": "O código abre mão da checagem de tipos do TypeScript.",
+      "recommendation": "Substitua any por interface mais estreita, generic, unknown com validação ou tipo explícito de domínio.",
+      "evidence": ": any"
+    },
+    {
+      "id": "typescript-any",
+      "level": "medium",
+      "title": "Uso de any no TypeScript",
+      "file": "src/exporters/writeTicCodeFolder.ts",
+      "line": 262,
+      "reason": "O código abre mão da checagem de tipos do TypeScript.",
+      "recommendation": "Substitua any por interface mais estreita, generic, unknown com validação ou tipo explícito de domínio.",
+      "evidence": ": any"
+    },
+    {
+      "id": "todo-fixme",
+      "level": "low",
+      "title": "Marcador TODO/FIXME encontrado",
+      "file": "src/exporters/reverseEngineering/generateBusinessRules.ts",
+      "line": 8,
+      "reason": "O código contém um marcador de trabalho não resolvido.",
+      "recommendation": "Resolva o marcador ou converta em trabalho rastreado com responsável e contexto.",
+      "evidence": "/** Nomes de método que sugerem regras de negócio */"
+    }
+  ]
 }

@@ -9,6 +9,8 @@ import { generateClaudeMd } from './generateClaudeMd';
 import { generateCopilotInstructions } from './generateCopilotInstructions';
 import { generateCursorRules } from './generateCursorRules';
 import { generateGeminiMd } from './generateGeminiMd';
+import { loadReversaAssets } from './reversaAssetLoader';
+import type { ReversaAssets } from './reversaAssetLoader';
 import { SafeWriter } from './safeWriter';
 
 export async function detectAiEnginesCommand(): Promise<AiEngine[] | undefined> {
@@ -35,7 +37,7 @@ export async function exportForEngineCommand(context: vscode.ExtensionContext, e
   }
 
   const summary = getLastAnalysis(context) ?? await analyzeWorkspace(root);
-  await writeTicCodeFolder(root, summary);
+  await writeTicCodeFolder(root, summary, context.extensionUri);
 
   const engine = await detectEngineById(root.uri.fsPath, engineId);
   if (!engine) {
@@ -43,7 +45,8 @@ export async function exportForEngineCommand(context: vscode.ExtensionContext, e
     return undefined;
   }
 
-  const result = await exportForEngine(root, summary, engine);
+  const assets = loadReversaAssets(context.extensionUri);
+  const result = await exportForEngine(root, summary, engine, assets, context.extensionUri);
   await context.globalState.update('ticCoderLite.lastAnalysis', summary);
   vscode.commands.executeCommand('ticCoderLite.refreshSidebar');
   vscode.window.showInformationMessage(`IA Padrão: ${engine.name} ${translateAction(result.action)} ${result.targetFile}.`);
@@ -60,9 +63,10 @@ function translateAction(action: string): string {
   }[action] ?? action;
 }
 
-export async function exportForEngine(root: vscode.WorkspaceFolder, summary: ProjectSummary, engine: AiEngine): Promise<EngineExportResult> {
+export async function exportForEngine(root: vscode.WorkspaceFolder, summary: ProjectSummary, engine: AiEngine, assets?: ReversaAssets, extensionUri?: vscode.Uri): Promise<EngineExportResult> {
   const writer = new SafeWriter(root);
-  const content = generateEngineContent(engine.id, summary);
+  const resolvedAssets = assets ?? loadReversaAssets();
+  const content = generateEngineContent(engine.id, summary, resolvedAssets, extensionUri);
   const result = await writer.writeFile(engine.entryFile, content);
 
   return {
@@ -72,19 +76,19 @@ export async function exportForEngine(root: vscode.WorkspaceFolder, summary: Pro
   };
 }
 
-function generateEngineContent(engineId: EngineId, summary: ProjectSummary): string {
+function generateEngineContent(engineId: EngineId, summary: ProjectSummary, assets: ReversaAssets, extensionUri?: vscode.Uri): string {
   switch (engineId) {
     case 'claude-code':
-      return generateClaudeMd(summary);
+      return generateClaudeMd(summary, assets, extensionUri);
     case 'codex':
-      return generateAgentsMd(summary);
+      return generateAgentsMd(summary, assets, extensionUri);
     case 'cursor':
-      return generateCursorRules(summary);
+      return generateCursorRules(summary, assets, extensionUri);
     case 'github-copilot':
-      return generateCopilotInstructions(summary);
+      return generateCopilotInstructions(summary, assets, extensionUri);
     case 'gemini-cli':
-      return generateGeminiMd(summary);
+      return generateGeminiMd(summary, assets, extensionUri);
     case 'aider':
-      return generateAgentsMd(summary).replace('Context For Codex', 'Context For Aider').replace('AGENTS.md', 'CONVENTIONS.md');
+      return generateAgentsMd(summary, assets, extensionUri).replace('para Codex', 'para Aider');
   }
 }
