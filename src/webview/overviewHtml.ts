@@ -60,7 +60,7 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TIC Coder Lite</title>
+  <title>Reversa Engine — TIC Coder Lite</title>
   <style nonce="${nonce}">${getOverviewStyles()}</style>
 </head>
 <body>
@@ -68,9 +68,9 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
   <main class="page">
     <header class="header">
       <div>
-        <h1>TIC Coder Lite</h1>
+        <h1>Reversa Engine — TIC Coder Lite</h1>
+        <p class="muted">Interface gráfica VS Code para programação reversa</p>
         <p class="muted">Workspace: <strong>${escapeHtml(summary.workspaceName)}</strong></p>
-        <p class="muted">Entenda seu workspace antes de pedir para a IA alterar o código.</p>
       </div>
       <div class="actions">
         <button class="btn primary" data-command="analyzeProject">⚡ Analisar Workspace</button>

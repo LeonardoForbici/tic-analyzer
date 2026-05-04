@@ -38,6 +38,9 @@ export interface TicCoderLiteConfig {
     enabled: boolean;
     ollamaUrl: string;
     model: string;
+    fastModel: string;
+    qualityModel: string;
+    mode: 'auto' | 'fast' | 'quality';
   };
   database: DatabaseConfig;
 }
@@ -74,7 +77,10 @@ export function getTicCoderLiteConfig(): TicCoderLiteConfig {
     localAi: {
       enabled: config.get<boolean>('localAi.enabled', false),
       ollamaUrl: config.get<string>('localAi.ollamaUrl', 'http://localhost:11434'),
-      model: config.get<string>('localAi.model', 'qwen2.5-coder:1.5b')
+      model: config.get<string>('localAi.model', 'qwen2.5-coder:3b'),
+      fastModel: config.get<string>('localAi.fastModel', 'qwen2.5-coder:3b'),
+      qualityModel: config.get<string>('localAi.qualityModel', 'qwen2.5-coder:7b'),
+      mode: validateMode(config.get<string>('localAi.mode', 'auto'))
     },
     database: {
       largeMode: config.get<boolean>('database.largeMode', true),
@@ -105,4 +111,8 @@ function readStringArray(config: vscode.WorkspaceConfiguration, key: string, fal
 
 function readSafeWriteMode(value: string): SafeWriteMode {
   return value === 'append' || value === 'ignore' ? value : 'ask';
+}
+
+function validateMode(value: string): 'auto' | 'fast' | 'quality' {
+  return value === 'fast' || value === 'quality' ? value : 'auto';
 }

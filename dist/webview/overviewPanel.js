@@ -62,7 +62,7 @@ async function openOverviewPanel(context) {
         await (0, writeTicCodeFolder_1.writeTicCodeFolder)(root, summary, context.extensionUri);
         await context.globalState.update('ticCoderLite.lastAnalysis', summary);
     }
-    const panel = vscode.window.createWebviewPanel('ticCoderLiteOverview', 'TIC Coder Lite', vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true });
+    const panel = vscode.window.createWebviewPanel('ticCoderLiteOverview', 'Reversa Engine — TIC Coder Lite', vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true });
     await render(panel, context, root, summary);
     panel.webview.onDidReceiveMessage(async (message) => {
         switch (message.command) {
@@ -101,7 +101,7 @@ async function openOverviewPanel(context) {
                 break;
             case 'enableLocalAi':
                 await setLocalAiEnabled(true);
-                vscode.window.showInformationMessage('TIC Coder Lite: IA Local ligada. Use Ollama com um modelo pequeno, como qwen2.5-coder:1.5b.');
+                vscode.window.showInformationMessage('TIC Coder Lite: IA Local ligada. Use Ollama com um modelo pequeno, como qwen2.5-coder:3b.');
                 break;
             case 'disableLocalAi':
                 await setLocalAiEnabled(false);

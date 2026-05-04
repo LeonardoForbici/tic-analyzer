@@ -32,7 +32,7 @@ export async function openOverviewPanel(context: vscode.ExtensionContext): Promi
 
   const panel = vscode.window.createWebviewPanel(
     'ticCoderLiteOverview',
-    'TIC Coder Lite',
+    'Reversa Engine — TIC Coder Lite',
     vscode.ViewColumn.One,
     { enableScripts: true, retainContextWhenHidden: true }
   );
@@ -76,7 +76,7 @@ export async function openOverviewPanel(context: vscode.ExtensionContext): Promi
         break;
       case 'enableLocalAi':
         await setLocalAiEnabled(true);
-        vscode.window.showInformationMessage('TIC Coder Lite: IA Local ligada. Use Ollama com um modelo pequeno, como qwen2.5-coder:1.5b.');
+        vscode.window.showInformationMessage('TIC Coder Lite: IA Local ligada. Use Ollama com um modelo pequeno, como qwen2.5-coder:3b.');
         break;
       case 'disableLocalAi':
         await setLocalAiEnabled(false);

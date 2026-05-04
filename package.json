@@ -1,7 +1,7 @@
 {
   "name": "tic-coder-lite",
   "displayName": "TIC Coder Lite",
-  "description": "Contexto local de código em três modos: Modo Lite sem IA, IA Padrão para exportações e IA Local opcional com Ollama.",
+  "description": "VS Code interface for Reversa Engine — transform legacy systems into executable specifications using reverse engineering.",
   "version": "0.0.1",
   "publisher": "tic",
   "license": "MIT",

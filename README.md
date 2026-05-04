@@ -1,10 +1,29 @@
-# TIC Coder Lite
+# TIC Coder Lite — Interface VS Code para Reversa Engine
 
-TIC Coder Lite é uma extensão VS Code local-first que ajuda desenvolvedores a entender um workspace antes de pedir para um assistente de IA alterar o código.
+TIC Coder Lite é uma extensão VS Code que fornece uma interface gráfica local-first para o **Reversa Engine** — um motor de programação reversa que transforma sistemas legados em especificações executáveis.
 
-Ele escaneia o projeto aberto, constrói um grafo de arquitetura leve, detecta riscos determinísticos e exporta arquivos de contexto que ferramentas como Codex, Claude Code, GitHub Copilot, Cursor, Gemini CLI e modelos Ollama locais podem ler.
+Ele escaneia o projeto aberto, constrói um grafo de arquitetura leve, detecta riscos determinísticos e usa a metodologia de SDD e agentes do Reversa para gerar documentação operacional em `.tic-code/`.
 
-TIC Coder Lite está preparado para demos locais e futuro empacotamento `.vsix`. Ainda não é publicado no Marketplace.
+O contexto gerado pode ser exportado para ferramentas como Codex, Claude Code, GitHub Copilot, Cursor, Gemini CLI e modelos Ollama locais.
+
+TIC Coder Lite está preparado para demos locais e empacotamento `.vsix`. Ainda não é publicado no Marketplace.
+
+## O que é o Reversa Engine?
+
+O Reversa Engine (adaptado de Reversa by Sandeco, MIT) é uma metodologia de programação reversa com:
+
+- **7 Agentes de IA**: Scout, Archaeologist, Detective, Architect, Writer, Reviewer, Data Master
+- **Escala de Confiança**: 🟢 CONFIRMADO, 🟡 INFERIDO, 🔴 LACUNA
+- **Especificações Executáveis**: SDD (Sistema de Documentação de Domínio)
+- **Contratos Operacionais**: Regras extraídas, permissões, fluxos, SQL/PL-SQL
+- **Rastreabilidade**: Matriz código ↔ spec, impacto de riscos
+
+## TIC Coder Lite ≠ Reversa CLI
+
+- **Reversa CLI**: Executável `npx reversa` — standalone reverse engineering tool
+- **TIC Coder Lite**: Extensão VS Code — interface gráfica que **usa o Reversa Engine como motor**
+
+TIC Coder Lite não instala, executa ou depende do Reversa CLI. Ele **incorpora os agentes, templates e metodologia** do Reversa como um motor embutido.
 
 ## Capturas de Tela
 
