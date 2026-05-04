@@ -92,7 +92,7 @@ async function writeReverseEngineeringDir(
   await writeText(vscode.Uri.joinPath(dir, 'permissions.md'), renderPermissionsMd(permissions, projectName));
   await writeText(vscode.Uri.joinPath(dir, 'architecture.md'), renderArchitectureMd(input, projectName));
   await writeText(vscode.Uri.joinPath(dir, 'api-contracts.md'), renderApiContractsMd(apiContracts, projectName));
-  await writeText(vscode.Uri.joinPath(dir, 'data-dictionary.md'), renderDataDictionaryMd(dataDictionary, projectName));
+  await writeText(vscode.Uri.joinPath(dir, 'data-dictionary.md'), renderDataDictionaryMd(dataDictionary, projectName, input.plsql.tableReferences.length));
   await writeText(vscode.Uri.joinPath(dir, 'database-analysis.md'), renderDatabaseAnalysisMd(input, projectName));
   await writeText(vscode.Uri.joinPath(dir, 'confidence-report.md'), renderConfidenceReportMd(input, businessRules, projectName));
   await writeText(vscode.Uri.joinPath(dir, 'gaps.md'), renderGapsMd(gaps, projectName));

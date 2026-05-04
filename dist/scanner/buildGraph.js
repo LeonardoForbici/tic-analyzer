@@ -76,7 +76,7 @@ async function buildGraph(scan, inventory, options = {}) {
         }
     }
     const nodes = [...nodeByPath.values(), ...packageNodes.values()];
-    addPlSqlGraph(inventory, nodeByPath, nodes, edges, edgeKeys);
+    addPlSqlGraph(inventory, nodeByPath, nodes, edges, edgeKeys, options.database);
     applyRiskLevels(nodes, edges);
     return {
         projectName: scan.projectName,
@@ -87,10 +87,17 @@ async function buildGraph(scan, inventory, options = {}) {
         stats: buildStats(nodes, edges)
     };
 }
-function addPlSqlGraph(inventory, fileNodes, nodes, edges, edgeKeys) {
+/** Padrões de nomes de classe Java/Spring que não devem aparecer no grafo de banco. */
+const JAVA_CLASS_PREFIXES = ['java.', 'org.springframework', 'com.sun.', 'javax.', 'sun.', 'jdk.'];
+function isJavaClassName(name) {
+    const lower = name.toLowerCase();
+    return JAVA_CLASS_PREFIXES.some((prefix) => lower.startsWith(prefix)) || /^[a-z]+\.[A-Z]/.test(name);
+}
+function addPlSqlGraph(inventory, fileNodes, nodes, edges, edgeKeys, dbConfig) {
     if (!inventory.plsql.detected) {
         return;
     }
+    const maxTableNodes = dbConfig?.largeMode ? (dbConfig.maxTablesInGraph ?? 100) : 10000;
     const plsqlNodes = new Map();
     const routineByName = new Map();
     const tableByName = new Map();
@@ -120,7 +127,14 @@ function addPlSqlGraph(inventory, fileNodes, nodes, edges, edgeKeys) {
         }
     }
     for (const table of inventory.plsql.tableReferences) {
+        // Filtrar nomes de classe Java/Spring que não devem aparecer no grafo de banco
+        if (isJavaClassName(table.name)) {
+            continue;
+        }
         if (!tableByName.has(table.name)) {
+            if (tableByName.size >= maxTableNodes) {
+                break;
+            }
             const node = {
                 id: `plsql:table:${table.name}`,
                 label: table.name,

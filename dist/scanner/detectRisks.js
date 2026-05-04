@@ -80,6 +80,7 @@ async function detectRisks(scan, inventory, graph, options = {}) {
     detectLayerViolations(graph, risks);
     detectCircularDependencies(graph, risks);
     detectControllerEndpointVolume(inventory, risks);
+    detectLargePlSqlBase(inventory, risks);
     risks.push(...await (0, detectPlSql_1.detectPlSqlRisks)(scan, inventory.plsql));
     const uniqueRisks = dedupeRisks(risks).sort(compareRisks);
     return {
@@ -245,6 +246,16 @@ function detectControllerEndpointVolume(inventory, risks) {
         else if (file.endpoints.length > 8) {
             risks.push(createRisk('many-controller-endpoints', 'medium', 'Controller tem muitos endpoints', file.path, undefined, `Controller tem ${file.endpoints.length} anotações de mapeamento.`, 'Verifique se o controller está assumindo responsabilidades demais de API.', `${file.endpoints.length} endpoints`));
         }
+    }
+}
+function detectLargePlSqlBase(inventory, risks) {
+    const totalTables = inventory.plsql.tableReferences.length;
+    if (totalTables >= 25000) {
+        risks.push(createRisk('plsql-large-base-25000', 'critical', 'Base PL/SQL muito grande detectada (>= 25.000 tabelas)', '.tic-code/projects/database/index/tables.json', undefined, `Foram detectadas ${totalTables} tabelas referenciadas em artefatos PL/SQL.`, 'Ative e mantenha o PLSQL Enterprise Mode para renderização resumida e uso de contexto filtrado na IA Local.', `${totalTables} tabelas indexadas`));
+        return;
+    }
+    if (totalTables >= 5000) {
+        risks.push(createRisk('plsql-large-base-5000', 'high', 'Base PL/SQL grande detectada (>= 5.000 tabelas)', '.tic-code/projects/database/index/tables.json', undefined, `Foram detectadas ${totalTables} tabelas referenciadas em artefatos PL/SQL.`, 'Use visualização resumida (top objetos críticos) e busca por índice para evitar sobrecarga na WebView.', `${totalTables} tabelas indexadas`));
     }
 }
 function findCycles(adjacency, maxCycles) {

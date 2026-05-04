@@ -3,6 +3,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.renderOverviewHtml = renderOverviewHtml;
 const graphRenderer_1 = require("./graphRenderer");
 const webviewAssets_1 = require("./webviewAssets");
+const databaseSearch_1 = require("./databaseSearch");
+const databaseIndex_1 = require("../scanner/databaseIndex");
+const databaseLargeMode_1 = require("../scanner/databaseLargeMode");
+const config_1 = require("../utils/config");
 function renderOverviewHtml(input) {
     const { summary, engines, agentContextPreview, nonce, localAiTaskLog, localAiConfig } = input;
     const graph = (0, graphRenderer_1.buildWebviewGraphData)(summary.graph);
@@ -15,6 +19,20 @@ function renderOverviewHtml(input) {
     const plsql = summary.inventory.plsql;
     const plsqlRisks = summary.risks.risks.filter((risk) => risk.category === 'plsql');
     const detectedProjects = summary.detectedProjects ?? [];
+    // Construir seção Database Enterprise se PL/SQL for detectado
+    let dbEnterpriseHtml = '';
+    if (plsql.detected) {
+        try {
+            const dbConfig = (0, config_1.getTicCoderLiteConfig)().database;
+            const dbIndex = (0, databaseIndex_1.buildDatabaseIndex)(plsql, dbConfig);
+            const dbSummary = (0, databaseLargeMode_1.buildDatabaseSummary)(dbIndex);
+            dbEnterpriseHtml = (0, databaseSearch_1.renderDatabaseEnterpriseSection)({ index: dbIndex, summary: dbSummary });
+        }
+        catch {
+            // Fallback para seção básica se o enterprise mode falhar
+            dbEnterpriseHtml = '';
+        }
+    }
     const data = {
         graph,
         project: summary.workspaceName,
@@ -158,6 +176,15 @@ function renderOverviewHtml(input) {
               <option value="high-risk">Alto risco</option>
               <option value="all">Todos</option>
             </select>
+            <select id="stackFilter" aria-label="Filtrar por stack">
+              <option value="all" selected>Todos</option>
+              <option value="backend-java">Backend Java</option>
+              <option value="frontend-react">Frontend React/TS</option>
+              <option value="javascript">JavaScript</option>
+              <option value="database">Database / PL/SQL</option>
+              <option value="infra">Infra</option>
+              <option value="end-to-end">Fluxo ponta-a-ponta</option>
+            </select>
             <select id="moduleFilter" aria-label="Filtrar por módulo"></select>
             <select id="layoutSelect" aria-label="Layout do grafo">
               <option value="agrupado">Agrupado</option>
@@ -201,6 +228,7 @@ function renderOverviewHtml(input) {
       <ul>${highRiskFiles.map((file) => `<li><span class="mono">${escapeHtml(file.path)}</span><span class="risk-${escapeHtml(file.level)}">${riskLabel(file.level)}</span></li>`).join('') || '<li><span>Nenhum risco alto detectado.</span></li>'}</ul>
     </section>
 
+    ${dbEnterpriseHtml || (plsql.detected ? `
     <section class="section">
       <h2>Database / PL/SQL</h2>
       <div class="metrics">
@@ -215,7 +243,7 @@ function renderOverviewHtml(input) {
       <ul>${plsql.tableReferences.slice(0, 10).map((table) => `<li><span class="mono">${escapeHtml(table.name)}</span><span>${table.reads} leituras / ${table.writes} escritas</span></li>`).join('') || '<li><span>Nenhuma tabela PL/SQL detectada.</span></li>'}</ul>
       <h3 style="margin-top:14px">Riscos PL/SQL</h3>
       <ul>${plsqlRisks.slice(0, 12).map((risk) => `<li><span class="mono">${escapeHtml(risk.title)} (${escapeHtml(risk.file)}${risk.line ? `:${risk.line}` : ''})</span><span class="risk-${escapeHtml(risk.level)}">${riskLabel(risk.level)}</span></li>`).join('') || '<li><span>Nenhum risco PL/SQL detectado.</span></li>'}</ul>
-    </section>
+    </section>` : '')}
 
     <section class="section">
       <h2>🔍 Programação Reversa / SDD</h2>

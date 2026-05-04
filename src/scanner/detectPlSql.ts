@@ -68,8 +68,15 @@ export function isPlSqlFileExtension(extension: string): boolean {
   return PL_SQL_EXTENSIONS.has(extension.toLowerCase());
 }
 
-export async function detectPlSql(scan: ScanResult): Promise<PlSqlInventory> {
-  const files = scan.files.filter((file) => isPlSqlFileExtension(file.extension));
+export interface DetectPlSqlOptions {
+  /** Limite de arquivos SQL/PL/SQL a processar. Default 100000. */
+  maxSqlFiles?: number;
+}
+
+export async function detectPlSql(scan: ScanResult, options: DetectPlSqlOptions = {}): Promise<PlSqlInventory> {
+  const maxSqlFiles = options.maxSqlFiles ?? 100000;
+  const allFiles = scan.files.filter((file) => isPlSqlFileExtension(file.extension));
+  const files = allFiles.slice(0, maxSqlFiles);
   const entities: PlSqlEntity[] = [];
   const dependencies: PlSqlDependency[] = [];
   const tableRefs = new Map<string, { name: string; reads: number; writes: number; files: Set<string> }>();

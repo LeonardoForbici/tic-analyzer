@@ -68,6 +68,14 @@ export interface WorkspaceSummary {
   inventory: ArchitectureInventory;
   graph: LightweightGraph;
   risks: RiskReport;
+  // Metadados opcionais de bases PL/SQL grandes (quando disponíveis)
+  databaseLargeMode?: {
+    enabled: boolean;
+    totalTablesIndexed: number;
+    totalCriticalObjects: number;
+    maxVisualNodes: number;
+    maxTablesInGraph: number;
+  };
   // Metadados de projetos
   projectSummaries?: Record<string, ProjectContextSummary>;
 }

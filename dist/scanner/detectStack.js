@@ -43,12 +43,12 @@ const detectJavaSpring_1 = require("./detectJavaSpring");
 const detectPlSql_1 = require("./detectPlSql");
 const detectTypeScriptProject_1 = require("./detectTypeScriptProject");
 const MODULE_KINDS = ['controller', 'service', 'repository', 'entity', 'dto', 'config', 'security', 'database', 'unknown'];
-async function detectStack(scan) {
+async function detectStack(scan, options = {}) {
     const projectFiles = await collectProjectFiles(scan.rootPath, Math.min(scan.limits?.maxFiles ?? 10000, 10000));
     const fileSet = new Set([...scan.files.map((file) => file.relativePath), ...projectFiles]);
     const javaSpring = await (0, detectJavaSpring_1.detectJavaSpring)(scan);
     const typeScript = await (0, detectTypeScriptProject_1.detectTypeScriptProject)(scan);
-    const plsql = await (0, detectPlSql_1.detectPlSql)(scan);
+    const plsql = await (0, detectPlSql_1.detectPlSql)(scan, options.plsql ?? {});
     const databaseEvidence = detectDatabaseEvidence(fileSet);
     const dockerEvidence = findByBasename(fileSet, ['docker-compose.yml', 'docker-compose.yaml']);
     return {

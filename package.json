@@ -157,6 +157,48 @@
           ],
           "default": "ask",
           "description": "Como as exportações de IA Padrão tratam arquivos existentes. Sobrescrever só fica disponível com confirmação explícita."
+        },
+        "ticCoderLite.database.largeMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativa o PLSQL Enterprise Mode para projetos com bases muito grandes (> 1000 tabelas). Indexa tudo, mas só renderiza objetos críticos no grafo."
+        },
+        "ticCoderLite.database.maxVisualNodes": {
+          "type": "number",
+          "default": 300,
+          "minimum": 10,
+          "description": "Número máximo de nós exibidos no grafo visual do banco de dados. Evita travamento com bases enormes."
+        },
+        "ticCoderLite.database.maxTablesInGraph": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "description": "Número máximo de tabelas exibidas no grafo visual. Somente as tabelas mais críticas são mostradas."
+        },
+        "ticCoderLite.database.maxCriticalTables": {
+          "type": "number",
+          "default": 200,
+          "minimum": 10,
+          "description": "Número máximo de tabelas críticas incluídas no critical-objects.json e nos relatórios de programação reversa."
+        },
+        "ticCoderLite.database.enableTableIndex": {
+          "type": "boolean",
+          "default": true,
+          "description": "Habilita a geração do índice de tabelas, packages, procedures, functions e triggers em .tic-code/projects/database/index/."
+        },
+        "ticCoderLite.database.criticalNamePatterns": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Padrões de nome (strings) que aumentam a pontuação de criticidade de tabelas e packages. Ex: ['fatura','pedido','estoque']. Se vazio, usa padrões embutidos."
+        },
+        "ticCoderLite.database.maxSqlFiles": {
+          "type": "number",
+          "default": 100000,
+          "minimum": 1,
+          "description": "Número máximo de arquivos SQL/PL/SQL analisados pelo scanner. Aumentar para projetos com dezenas de milhares de arquivos."
         }
       }
     },

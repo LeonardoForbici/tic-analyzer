@@ -76,7 +76,7 @@ export function generateDataDictionary(input: ReverseEngineeringInput): DataDict
   return items.slice(0, 80);
 }
 
-export function renderDataDictionaryMd(items: DataDictionaryItem[], projectName: string): string {
+export function renderDataDictionaryMd(items: DataDictionaryItem[], projectName: string, totalTablesIndexed?: number): string {
   const lines: string[] = [];
   lines.push(`# Dicionário de Dados: ${projectName}`);
   lines.push('');
@@ -85,6 +85,12 @@ export function renderDataDictionaryMd(items: DataDictionaryItem[], projectName:
   lines.push('');
   lines.push('> ⚠️ Campos não foram extraídos (análise sem conteúdo de arquivo). Use este dicionário como ponto de partida.');
   lines.push('');
+
+  if (totalTablesIndexed !== undefined && totalTablesIndexed > 300) {
+    lines.push(`> ⚡ **PLSQL Enterprise Mode** — ${totalTablesIndexed.toLocaleString('pt-BR')} tabelas indexadas. Exibindo top 80 mais referenciadas.`);
+    lines.push('> Índice completo: \`.tic-code/projects/database/index/tables.json\`');
+    lines.push('');
+  }
 
   if (items.length === 0) {
     lines.push('- Nenhuma entidade ou tabela detectada 🔴 LACUNA');

@@ -11,11 +11,11 @@ export interface WebviewGraphNode {
   degree: number;
   x: number;
   y: number;
-  /** Origin classification: 'internal' | 'external' | 'framework' */
+  /** Classificação de origem: 'internal' | 'external' | 'framework' */
   origin: string;
-  /** Framework name when origin === 'framework', e.g. 'Spring' */
+  /** Nome do framework quando origin === 'framework'. Ex: 'Spring' */
   frameworkName?: string;
-  /** Whether the node is shown in the default "Internos" filter. */
+  /** Se o nó é exibido no filtro padrão "Internos". */
   visibleByDefault: boolean;
 }
 
@@ -47,7 +47,7 @@ export function buildWebviewGraphData(graph: LightweightGraph): WebviewGraphData
     degree.set(edge.to, (degree.get(edge.to) ?? 0) + 1);
   }
 
-  // Internal nodes only for default view
+  // Nós internos apenas para a visualização padrão
   const internalNodes = graph.nodes.filter((node) => node.visibleByDefault);
 
   const centralPaths = new Set(graph.stats.centralFiles.slice(0, 60).map((file) => file.path));
@@ -61,14 +61,14 @@ export function buildWebviewGraphData(graph: LightweightGraph): WebviewGraphData
     }
   }
 
-  // Select up to 180 nodes from internal set, prioritised by degree and risk
+  // Selecionar até 180 nós do conjunto interno, priorizando por grau e risco
   const selectedNodes = internalNodes
     .filter((node) => centralPaths.has(node.path) || connectedIds.has(node.id) || node.riskLevel || node.module !== 'unknown')
     .sort((a, b) => (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.path.localeCompare(b.path))
     .slice(0, 180);
 
   const selectedIds = new Set(selectedNodes.map((node) => node.id));
-  // Edges between internal nodes only
+  // Arestas apenas entre nós internos
   const visibleEdges = graph.edges
     .filter((edge) => selectedIds.has(edge.from) && selectedIds.has(edge.to))
     .sort((a, b) => (degree.get(b.from) ?? 0) + (degree.get(b.to) ?? 0) - ((degree.get(a.from) ?? 0) + (degree.get(a.to) ?? 0)))

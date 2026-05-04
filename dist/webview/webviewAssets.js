@@ -203,8 +203,40 @@ function getOverviewStyles() {
     .pill { border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; background: var(--panel-2); font-size: 12px; }
     .risk-high, .risk-critical { color: var(--danger); }
     .risk-medium { color: var(--warn); }
+    .risk-low { color: var(--ok); }
     .context { white-space: pre-wrap; max-height: 300px; overflow: auto; }
     .log { min-height: 120px; max-height: 220px; overflow: auto; color: var(--muted); white-space: pre-wrap; }
+    .enterprise-banner {
+      padding: 8px 12px;
+      background: color-mix(in srgb, var(--accent) 15%, transparent);
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      margin-bottom: 12px;
+      font-size: 13px;
+    }
+    .db-search-input { border-radius: 4px; }
+    .db-filter {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      background: transparent;
+      color: var(--fg);
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .db-filter.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+    .db-group { margin: 10px 0; }
+    .db-list { display: grid; gap: 4px; }
+    .db-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 8px;
+      border-bottom: 1px solid var(--line);
+      font-size: 12px;
+    }
+    .db-item:last-child { border-bottom: 0; }
     @media (max-width: 980px) {
       .page { padding: 16px; }
       .header, .two-column, .graph-shell { display: grid; grid-template-columns: 1fr; }
@@ -227,6 +259,7 @@ function getOverviewScript(nonce) {
       density: 65,
       module: 'todos',
       origin: 'internal',
+      stack: 'all',
       search: '',
       draggingNode: null,
       draggingCanvas: false,
@@ -281,6 +314,7 @@ function getOverviewScript(nonce) {
       const maxEdges = Math.max(20, Math.round(state.graph.edges.length * graphState.density / 100));
       const module = graphState.module;
       const originMode = graphState.origin;
+      const stackMode = graphState.stack;
       const nodes = state.graph.nodes.filter((node) => {
         const moduleOk = module === 'todos' || matchesProjectType(node, module) || node.module === module;
         const searchOk = !search || node.label.toLowerCase().includes(search) || node.path.toLowerCase().includes(search);
@@ -290,11 +324,32 @@ function getOverviewScript(nonce) {
         else if (originMode === 'framework') originOk = node.origin === 'framework';
         else if (originMode === 'high-risk') originOk = node.origin === 'internal' && (node.riskLevel === 'high' || node.riskLevel === 'critical');
         // 'all' shows everything
-        return moduleOk && searchOk && originOk;
+        const stackOk = matchesStackFilter(node, stackMode);
+        return moduleOk && searchOk && originOk && stackOk;
       });
       const ids = new Set(nodes.map((node) => node.id));
-      const edges = state.graph.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)).slice(0, maxEdges);
+      // For end-to-end, include cross-boundary edges
+      let edges;
+      if (stackMode === 'end-to-end') {
+        edges = state.graph.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)).slice(0, maxEdges * 2);
+      } else {
+        edges = state.graph.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)).slice(0, maxEdges);
+      }
       return { nodes, edges, ids };
+    }
+
+    function matchesStackFilter(node, stack) {
+      if (stack === 'all') return true;
+      if (stack === 'backend-java') return node.language === 'Java' || node.module === 'controller' || node.module === 'service' || node.module === 'repository' || node.module === 'entity';
+      if (stack === 'frontend-react') return /TypeScript|React/.test(node.language) && !/server|backend/i.test(node.path);
+      if (stack === 'javascript') return /JavaScript/.test(node.language);
+      if (stack === 'database') return node.module === 'database' || node.language === 'PL/SQL' || String(node.type).startsWith('plsql_');
+      if (stack === 'infra') return /docker|k8s|helm|terraform|infra|workflow/i.test(node.path);
+      if (stack === 'end-to-end') {
+        // Show controller + service + repository + database nodes to see full flow
+        return node.module === 'controller' || node.module === 'service' || node.module === 'repository' || node.module === 'database' || node.language === 'PL/SQL' || String(node.type).startsWith('plsql_');
+      }
+      return true;
     }
 
     function renderModuleOptions() {
@@ -573,6 +628,10 @@ function getOverviewScript(nonce) {
         renderGraph();
       });
     }
+    const stackFilterEl = $('stackFilter');
+    if (stackFilterEl) {
+      stackFilterEl.addEventListener('change', (event) => { graphState.stack = event.target.value; renderGraph(); });
+    }
     $('graphSearch').addEventListener('input', (event) => { graphState.search = event.target.value; renderGraph(); });
     $('density').addEventListener('input', (event) => { graphState.density = Number(event.target.value); renderGraph(); });
     $('layoutSelect').addEventListener('change', (event) => applyLayout(event.target.value));
@@ -612,6 +671,44 @@ function getOverviewScript(nonce) {
     $('graphTotal').textContent = state.graph.stats.totalNodes + ' nós totais · ' + state.graph.stats.totalEdges + ' arestas totais';
     applyLayout('agrupado');
     selectNode(graphState.selectedNodeId);
+
+    // Database search functionality
+    (function initDbSearch() {
+      const dbSearchInput = $('dbSearch');
+      const dbResults = $('dbSearchResults');
+      if (!dbSearchInput || !dbResults) return;
+      const allItems = dbResults.querySelectorAll('.db-item');
+      const filterBtns = document.querySelectorAll('.db-filter');
+
+      let activeFilter = 'all';
+
+      filterBtns.forEach((btn) => btn.addEventListener('click', () => {
+        filterBtns.forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeFilter = btn.dataset.filter;
+        applyDbFilter();
+      }));
+
+      dbSearchInput.addEventListener('input', () => applyDbFilter());
+
+      function applyDbFilter() {
+        const query = dbSearchInput.value.toLowerCase();
+        allItems.forEach((item) => {
+          const name = item.dataset.name || '';
+          const type = item.dataset.type || '';
+          const risk = item.dataset.risk || '';
+          const matchesSearch = !query || name.includes(query);
+          let matchesFilter = true;
+          if (activeFilter === 'critical') matchesFilter = type === 'table' && (risk === 'critical' || risk === 'high');
+          else if (activeFilter === 'package') matchesFilter = type === 'package';
+          else if (activeFilter === 'procedure') matchesFilter = type === 'procedure';
+          else if (activeFilter === 'trigger') matchesFilter = type === 'trigger';
+          else if (activeFilter === 'high-risk') matchesFilter = risk === 'critical' || risk === 'high';
+          item.style.display = matchesSearch && matchesFilter ? '' : 'none';
+        });
+      }
+    })();
+
     log('Painel TIC Coder Lite carregado');
   </script>`;
 }

@@ -12,6 +12,7 @@ import {
 import type { ParsedImport } from './parseImports';
 import type { CancellationLike, ScannedFile } from './scanFiles';
 import type { ScanResult } from './scanWorkspace';
+import type { DatabaseConfig } from '../utils/config';
 
 export type GraphEdgeType = 'IMPORTS' | 'USES_PACKAGE' | 'DEPENDS_ON' | 'CALLS' | 'READS_TABLE' | 'WRITES_TABLE' | 'TRIGGERS_ON' | 'DEFINES' | 'USES_CURSOR';
 export type GraphRiskLevel = 'low' | 'medium' | 'high';
@@ -25,11 +26,11 @@ export interface GraphNode {
   module: string;
   language: string;
   riskLevel?: GraphRiskLevel;
-  /** Whether this node originated inside the workspace ('internal') or is a third-party dep. */
+  /** Se este nó é interno ao workspace ('internal') ou uma dependência de terceiros. */
   origin: GraphNodeOrigin;
-  /** Set when origin === 'framework'. E.g. 'Spring', 'React'. */
+  /** Preenchido quando origin === 'framework'. Ex: 'Spring', 'React'. */
   frameworkName?: string;
-  /** Whether to show this node in the default graph view (internal=true, external/framework=false). */
+  /** Se o nó deve aparecer na visualização padrão do grafo (interno=true, externo/framework=false). */
   visibleByDefault: boolean;
 }
 
@@ -62,7 +63,7 @@ export interface LightweightGraph {
     externalEdges: number;
     modules: Record<string, number>;
     centralFiles: Array<{ path: string; degree: number }>;
-    /** Summary of external/framework dependencies (for external-dependencies.json). */
+    /** Resumo de dependências externas/framework (para external-dependencies.json). */
     externalDependencies: ExternalDependencySummary[];
   };
 }
@@ -71,6 +72,8 @@ const SOURCE_EXTENSIONS = new Set(['.java', '.ts', '.tsx', '.js', '.jsx']);
 
 export interface BuildGraphOptions {
   token?: CancellationLike;
+  /** Configuração de banco para limitar nós no grafo visual (PLSQL Enterprise Mode). */
+  database?: Pick<DatabaseConfig, 'largeMode' | 'maxTablesInGraph' | 'maxVisualNodes'>;
 }
 
 export async function buildGraph(scan: ScanResult, inventory: ArchitectureInventory, options: BuildGraphOptions = {}): Promise<LightweightGraph> {
@@ -115,7 +118,7 @@ export async function buildGraph(scan: ScanResult, inventory: ArchitectureInvent
   }
 
   const nodes = [...nodeByPath.values(), ...packageNodes.values()];
-  addPlSqlGraph(inventory, nodeByPath, nodes, edges, edgeKeys);
+  addPlSqlGraph(inventory, nodeByPath, nodes, edges, edgeKeys, options.database);
   applyRiskLevels(nodes, edges);
 
   return {
@@ -128,16 +131,27 @@ export async function buildGraph(scan: ScanResult, inventory: ArchitectureInvent
   };
 }
 
+/** Padrões de nomes de classe Java/Spring que não devem aparecer no grafo de banco. */
+const JAVA_CLASS_PREFIXES = ['java.', 'org.springframework', 'com.sun.', 'javax.', 'sun.', 'jdk.'];
+
+function isJavaClassName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return JAVA_CLASS_PREFIXES.some((prefix) => lower.startsWith(prefix)) || /^[a-z]+\.[A-Z]/.test(name);
+}
+
 function addPlSqlGraph(
   inventory: ArchitectureInventory,
   fileNodes: Map<string, GraphNode>,
   nodes: GraphNode[],
   edges: GraphEdge[],
-  edgeKeys: Set<string>
+  edgeKeys: Set<string>,
+  dbConfig?: Pick<DatabaseConfig, 'largeMode' | 'maxTablesInGraph' | 'maxVisualNodes'>
 ): void {
   if (!inventory.plsql.detected) {
     return;
   }
+
+  const maxTableNodes = dbConfig?.largeMode ? (dbConfig.maxTablesInGraph ?? 100) : 10000;
 
   const plsqlNodes = new Map<string, GraphNode>();
   const routineByName = new Map<string, GraphNode>();
@@ -171,7 +185,14 @@ function addPlSqlGraph(
   }
 
   for (const table of inventory.plsql.tableReferences) {
+    // Filtrar nomes de classe Java/Spring que não devem aparecer no grafo de banco
+    if (isJavaClassName(table.name)) {
+      continue;
+    }
     if (!tableByName.has(table.name)) {
+      if (tableByName.size >= maxTableNodes) {
+        break;
+      }
       const node: GraphNode = {
         id: `plsql:table:${table.name}`,
         label: table.name,

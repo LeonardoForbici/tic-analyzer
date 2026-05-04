@@ -66,6 +66,15 @@ function getTicCoderLiteConfig() {
             enabled: config.get('localAi.enabled', false),
             ollamaUrl: config.get('localAi.ollamaUrl', 'http://localhost:11434'),
             model: config.get('localAi.model', 'qwen2.5-coder:1.5b')
+        },
+        database: {
+            largeMode: config.get('database.largeMode', true),
+            maxVisualNodes: readPositiveNumber(config, 'database.maxVisualNodes', 300),
+            maxTablesInGraph: readPositiveNumber(config, 'database.maxTablesInGraph', 100),
+            maxCriticalTables: readPositiveNumber(config, 'database.maxCriticalTables', 200),
+            enableTableIndex: config.get('database.enableTableIndex', true),
+            criticalNamePatterns: readStringArray(config, 'database.criticalNamePatterns', []),
+            maxSqlFiles: readPositiveNumber(config, 'database.maxSqlFiles', 100000),
         }
     };
 }

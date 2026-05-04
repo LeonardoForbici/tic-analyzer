@@ -275,15 +275,27 @@ function detectShared(scan, risks) {
 }
 function detectDatabase(scan, risks) {
     const databaseFiles = scan.files.filter((file) => isDatabaseFile(file.relativePath, file.extension));
+    const migrationFiles = scan.files.filter((file) => {
+        const lower = file.relativePath.toLowerCase();
+        return lower.includes('migrat') || lower.includes('flyway') || lower.includes('liquibase') || lower.includes('changelog');
+    });
     if (databaseFiles.length > 0) {
+        const stack = ['Oracle PL/SQL'];
+        if (migrationFiles.length > 0) {
+            stack.push('SQL / Migrations');
+        }
+        const evidence = [
+            ...databaseFiles.slice(0, 15).map((file) => file.relativePath),
+            ...migrationFiles.slice(0, 5).map((file) => file.relativePath)
+        ];
         return {
             id: 'database',
             name: 'Database / PL/SQL',
             rootPath: scan.rootPath,
             relativePath: commonDatabaseRoot(databaseFiles.map((file) => file.relativePath)),
             kind: 'database',
-            stack: ['Oracle PL/SQL'],
-            evidence: databaseFiles.slice(0, 20).map((file) => file.relativePath),
+            stack,
+            evidence,
             files: databaseFiles.length,
             risks: risks?.risks.filter((risk) => risk.category === 'plsql').length ?? 0
         };

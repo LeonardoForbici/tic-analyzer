@@ -169,10 +169,10 @@ async function analyzeWorkspaceInternal(root, options = {}) {
     const directories = new Map();
     const keyFiles = [];
     options.progress?.report({ message: 'Detectando stack e módulos', increment: 20 });
-    const inventory = await (0, detectStack_1.detectStack)(scan);
+    const inventory = await (0, detectStack_1.detectStack)(scan, { plsql: { maxSqlFiles: config.database.maxSqlFiles } });
     throwIfCancelled(options.token);
     options.progress?.report({ message: 'Montando grafo', increment: 20 });
-    const graph = await (0, buildGraph_1.buildGraph)(scan, inventory, { token: options.token });
+    const graph = await (0, buildGraph_1.buildGraph)(scan, inventory, { token: options.token, database: config.database });
     throwIfCancelled(options.token);
     options.progress?.report({ message: 'Detectando riscos determinísticos', increment: 20 });
     const risks = await (0, detectRisks_1.detectRisks)(scan, inventory, graph, { token: options.token });

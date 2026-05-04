@@ -43,6 +43,8 @@ const generateAgentContextMd_1 = require("./generateAgentContextMd");
 const generateConfidenceReportMd_1 = require("./generateConfidenceReportMd");
 const generateQuestionsMd_1 = require("./generateQuestionsMd");
 const generateReverseEngineering_1 = require("./reverseEngineering/generateReverseEngineering");
+const databaseLargeMode_1 = require("../scanner/databaseLargeMode");
+const config_1 = require("../utils/config");
 async function writeTicCodeFolder(root, summary) {
     const ticCodeDir = vscode.Uri.joinPath(root.uri, '.tic-code');
     const artifacts = {
@@ -68,7 +70,7 @@ async function writeTicCodeFolder(root, summary) {
     await writeText(artifacts.agentContextMd, (0, generateAgentContextMd_1.generateAgentContextMd)(summary));
     await writeText(artifacts.confidenceReportMd, (0, generateConfidenceReportMd_1.generateConfidenceReportMd)(summary));
     await writeText(artifacts.questionsMd, (0, generateQuestionsMd_1.generateQuestionsMd)(summary));
-    // External dependencies summary for tooling and reverse engineering
+    // Resumo de dependências externas para ferramentas e programação reversa
     const externalDepsJson = vscode.Uri.joinPath(ticCodeDir, 'external-dependencies.json');
     await writeText(externalDepsJson, `${JSON.stringify(summary.graph.stats.externalDependencies, null, 2)}\n`);
     await writeProjectArtifacts(root, summary);
@@ -114,6 +116,10 @@ async function writeProjectArtifacts(root, summary) {
         // Gerar markdown de contexto específico por tipo
         const contextMd = generateProjectContextMd(summary, project, scan, risks, graph);
         await writeText(vscode.Uri.joinPath(projectDir, 'agent-context.md'), contextMd);
+        // Para projetos de banco de dados: escrever índices (PLSQL Enterprise Mode)
+        if (project.kind === 'database' && summary.inventory.plsql.detected) {
+            await writeDatabaseIndexArtifacts(root, projectDir, summary);
+        }
     }
 }
 function filterProjectFiles(summary, project) {
@@ -364,5 +370,23 @@ function summarizeRisks(risks) {
 }
 async function writeText(uri, content) {
     await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
+}
+async function writeDatabaseIndexArtifacts(_root, projectDir, summary) {
+    const config = (0, config_1.getTicCoderLiteConfig)();
+    if (!config.database.enableTableIndex) {
+        return;
+    }
+    const { index, summary: dbSummary, graphSummary } = (0, databaseLargeMode_1.buildDatabaseLargeModeData)(summary.inventory.plsql, config.database);
+    const indexDir = vscode.Uri.joinPath(projectDir, 'index');
+    await vscode.workspace.fs.createDirectory(indexDir);
+    await writeText(vscode.Uri.joinPath(indexDir, 'tables.json'), `${JSON.stringify(index.tables, null, 2)}\n`);
+    await writeText(vscode.Uri.joinPath(indexDir, 'views.json'), `${JSON.stringify(index.views, null, 2)}\n`);
+    await writeText(vscode.Uri.joinPath(indexDir, 'packages.json'), `${JSON.stringify(index.packages, null, 2)}\n`);
+    await writeText(vscode.Uri.joinPath(indexDir, 'procedures.json'), `${JSON.stringify(index.procedures, null, 2)}\n`);
+    await writeText(vscode.Uri.joinPath(indexDir, 'functions.json'), `${JSON.stringify(index.functions, null, 2)}\n`);
+    await writeText(vscode.Uri.joinPath(indexDir, 'triggers.json'), `${JSON.stringify(index.triggers, null, 2)}\n`);
+    await writeText(vscode.Uri.joinPath(projectDir, 'summary.json'), `${JSON.stringify(dbSummary, null, 2)}\n`);
+    await writeText(vscode.Uri.joinPath(projectDir, 'graph.summary.json'), `${JSON.stringify(graphSummary, null, 2)}\n`);
+    await writeText(vscode.Uri.joinPath(projectDir, 'critical-objects.json'), `${JSON.stringify(index.criticalObjects, null, 2)}\n`);
 }
 //# sourceMappingURL=writeTicCodeFolder.js.map

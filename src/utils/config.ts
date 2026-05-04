@@ -9,6 +9,23 @@ export interface ScanConfig {
   exclude: string[];
 }
 
+export interface DatabaseConfig {
+  /** Ativa PLSQL Enterprise Mode para projetos com bases muito grandes. */
+  largeMode: boolean;
+  /** Número máximo de nós exibidos no grafo visual. */
+  maxVisualNodes: number;
+  /** Número máximo de tabelas exibidas no grafo de banco. */
+  maxTablesInGraph: number;
+  /** Número máximo de tabelas críticas indexadas no critical-objects.json. */
+  maxCriticalTables: number;
+  /** Habilita geração de índice de tabelas em .tic-code/projects/database/index/. */
+  enableTableIndex: boolean;
+  /** Padrões de nome que aumentam a criticidade de tabelas e packages. */
+  criticalNamePatterns: string[];
+  /** Número máximo de arquivos SQL/PL/SQL analisados pelo scanner. */
+  maxSqlFiles: number;
+}
+
 export interface TicCoderLiteConfig {
   scan: ScanConfig;
   output: {
@@ -22,6 +39,7 @@ export interface TicCoderLiteConfig {
     ollamaUrl: string;
     model: string;
   };
+  database: DatabaseConfig;
 }
 
 const DEFAULT_EXCLUDE = [
@@ -57,6 +75,15 @@ export function getTicCoderLiteConfig(): TicCoderLiteConfig {
       enabled: config.get<boolean>('localAi.enabled', false),
       ollamaUrl: config.get<string>('localAi.ollamaUrl', 'http://localhost:11434'),
       model: config.get<string>('localAi.model', 'qwen2.5-coder:1.5b')
+    },
+    database: {
+      largeMode: config.get<boolean>('database.largeMode', true),
+      maxVisualNodes: readPositiveNumber(config, 'database.maxVisualNodes', 300),
+      maxTablesInGraph: readPositiveNumber(config, 'database.maxTablesInGraph', 100),
+      maxCriticalTables: readPositiveNumber(config, 'database.maxCriticalTables', 200),
+      enableTableIndex: config.get<boolean>('database.enableTableIndex', true),
+      criticalNamePatterns: readStringArray(config, 'database.criticalNamePatterns', []),
+      maxSqlFiles: readPositiveNumber(config, 'database.maxSqlFiles', 100000),
     }
   };
 }

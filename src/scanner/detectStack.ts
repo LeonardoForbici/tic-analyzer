@@ -5,7 +5,7 @@ import { shouldIgnoreDirectory } from './ignoreRules';
 import { detectJavaSpring } from './detectJavaSpring';
 import type { JavaSpringDetection, ModuleKind } from './detectJavaSpring';
 import { detectPlSql } from './detectPlSql';
-import type { PlSqlInventory } from './detectPlSql';
+import type { PlSqlInventory, DetectPlSqlOptions } from './detectPlSql';
 import { detectTypeScriptProject } from './detectTypeScriptProject';
 import type { TypeScriptProjectDetection } from './detectTypeScriptProject';
 import type { ScanResult } from './scanWorkspace';
@@ -43,12 +43,16 @@ export interface ArchitectureInventory {
 
 const MODULE_KINDS: ModuleKind[] = ['controller', 'service', 'repository', 'entity', 'dto', 'config', 'security', 'database', 'unknown'];
 
-export async function detectStack(scan: ScanResult): Promise<ArchitectureInventory> {
+export interface DetectStackOptions {
+  plsql?: DetectPlSqlOptions;
+}
+
+export async function detectStack(scan: ScanResult, options: DetectStackOptions = {}): Promise<ArchitectureInventory> {
   const projectFiles = await collectProjectFiles(scan.rootPath, Math.min(scan.limits?.maxFiles ?? 10000, 10000));
   const fileSet = new Set([...scan.files.map((file) => file.relativePath), ...projectFiles]);
   const javaSpring = await detectJavaSpring(scan);
   const typeScript = await detectTypeScriptProject(scan);
-  const plsql = await detectPlSql(scan);
+  const plsql = await detectPlSql(scan, options.plsql ?? {});
   const databaseEvidence = detectDatabaseEvidence(fileSet);
   const dockerEvidence = findByBasename(fileSet, ['docker-compose.yml', 'docker-compose.yaml']);
 

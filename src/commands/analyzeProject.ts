@@ -153,10 +153,10 @@ export async function analyzeWorkspaceInternal(root: vscode.WorkspaceFolder, opt
   const directories = new Map<string, number>();
   const keyFiles: string[] = [];
   options.progress?.report({ message: 'Detectando stack e módulos', increment: 20 });
-  const inventory = await detectStack(scan);
+  const inventory = await detectStack(scan, { plsql: { maxSqlFiles: config.database.maxSqlFiles } });
   throwIfCancelled(options.token);
   options.progress?.report({ message: 'Montando grafo', increment: 20 });
-  const graph = await buildGraph(scan, inventory, { token: options.token });
+  const graph = await buildGraph(scan, inventory, { token: options.token, database: config.database });
   throwIfCancelled(options.token);
   options.progress?.report({ message: 'Detectando riscos determinísticos', increment: 20 });
   const risks = await detectRisks(scan, inventory, graph, { token: options.token });

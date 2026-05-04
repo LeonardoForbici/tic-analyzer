@@ -359,6 +359,13 @@ Se Ollama estiver offline, TIC Coder Lite mostra uma mensagem amigável e Modo L
 - `ticCoderLite.localAi.model` (legado)
 - `ticCoderLite.output.openAfterScan`
 - `ticCoderLite.exports.safeWriteMode`
+- `ticCoderLite.database.largeMode` (padrão: `true`)
+- `ticCoderLite.database.maxVisualNodes` (padrão: `300`)
+- `ticCoderLite.database.maxTablesInGraph` (padrão: `100`)
+- `ticCoderLite.database.maxCriticalTables` (padrão: `200`)
+- `ticCoderLite.database.enableTableIndex` (padrão: `true`)
+- `ticCoderLite.database.criticalNamePatterns` (lista opcional)
+- `ticCoderLite.database.maxSqlFiles` (padrão: `100000`)
 
 ## Estrutura de Artefatos
 
@@ -410,14 +417,6 @@ Cada análise gera uma estrutura hierárquica:
 ## Licença
 
 MIT
-
-- `ticCoderLite.output.openAfterScan`
-- `ticCoderLite.exports.safeWriteMode`
-- `ticCoderLite.localAi.enabled`
-- `ticCoderLite.localAi.ollamaUrl`
-- `ticCoderLite.localAi.fastModel` (padrão: `qwen2.5-coder:3b`)
-- `ticCoderLite.localAi.qualityModel` (padrão: `qwen2.5-coder:7b`)
-- `ticCoderLite.localAi.mode` (`auto` | `fast` | `quality`, padrão: `auto`)
 - `ticCoderLite.localAi.model` (legado)
 
 ## Generate A Local VSIX

@@ -56,8 +56,10 @@ const CRITICAL_TABLE_WORDS = ['pagamento', 'fatura', 'nota', 'nfe', 'fiscal', 'b
 function isPlSqlFileExtension(extension) {
     return exports.PL_SQL_EXTENSIONS.has(extension.toLowerCase());
 }
-async function detectPlSql(scan) {
-    const files = scan.files.filter((file) => isPlSqlFileExtension(file.extension));
+async function detectPlSql(scan, options = {}) {
+    const maxSqlFiles = options.maxSqlFiles ?? 100000;
+    const allFiles = scan.files.filter((file) => isPlSqlFileExtension(file.extension));
+    const files = allFiles.slice(0, maxSqlFiles);
     const entities = [];
     const dependencies = [];
     const tableRefs = new Map();
