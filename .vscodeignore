@@ -1,11 +1,29 @@
 .vscode/**
+.git/**
+.github/**
 .tic-code/**
-node_modules/**
 src/**
+test/**
+tests/**
+coverage/**
 mockup.html
 *.vsix
+*.map
+*.log
+tmp/**
+temp/**
+reversa-main/**
+
+# Não empacotar configs de build/dev
 tsconfig.json
 package-lock.json
-reversa-main/**
-# resources/reversa/ is intentionally NOT ignored — it is bundled in the extension package
-# so that the Reversa Engine assets (agents/templates/docs) are available at runtime.
+
+# Não ignorar dist/
+# dist/extension.js precisa ir no VSIX
+
+# Não ignorar resources/reversa/
+# resources/reversa/ precisa ir no VSIX
+
+# Cuidado com node_modules:
+# Se package.json tiver "dependencies", NÃO ignore node_modules inteiro.
+node_modules/.cache/**
