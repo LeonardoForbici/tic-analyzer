@@ -240,6 +240,19 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
       </div>
     </section>
 
+
+    <section class="section">
+      <h2>Impacto por Tela</h2>
+      <div class="card">
+        <p>Fluxo visual: <strong>Frontend → API → Backend → SQL → Banco/PLSQL</strong></p>
+        <div class="actions">
+          <button class="btn primary" data-command="analyzeImpactByScreen">Analisar Impacto</button>
+          <button class="btn" data-command="importScreenForImpact">Importar Screenshot</button>
+        </div>
+        <p class="caption">Artefatos: .tic-code/impact/screen-impact.md, screen-impact.json, frontend-trace.json, backend-trace.json, database-trace.json.</p>
+      </div>
+    </section>
+
     <section class="section">
       <h2>Riscos</h2>
       <ul>${highRiskFiles.map((file) => `<li><span class="mono">${escapeHtml(file.path)}</span><span class="risk-${escapeHtml(file.level)}">${riskLabel(file.level)}</span></li>`).join('') || '<li><span>Nenhum risco alto detectado.</span></li>'}</ul>

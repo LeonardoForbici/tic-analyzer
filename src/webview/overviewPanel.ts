@@ -88,6 +88,12 @@ export async function openOverviewPanel(context: vscode.ExtensionContext): Promi
       case 'importVisorScreenshots':
         await vscode.commands.executeCommand('ticCoderLite.importVisorScreenshots');
         break;
+      case 'analyzeImpactByScreen':
+        await vscode.commands.executeCommand('ticCoderLite.analyzeImpactByScreen');
+        break;
+      case 'importScreenForImpact':
+        await vscode.commands.executeCommand('ticCoderLite.importScreenForImpact');
+        break;
       case 'openSettings':
         await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:tic.tic-coder-lite');
         break;

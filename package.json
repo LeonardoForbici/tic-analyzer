@@ -69,6 +69,14 @@
       {
         "command": "ticCoderLite.importVisorScreenshots",
         "title": "TIC Coder Lite: Importar Screenshots para Visor"
+      },
+      {
+        "command": "ticCoderLite.analyzeImpactByScreen",
+        "title": "TIC Coder Lite: Analisar Impacto por Tela"
+      },
+      {
+        "command": "ticCoderLite.importScreenForImpact",
+        "title": "TIC Coder Lite: Importar Print para Impacto por Tela"
       }
     ],
     "configuration": {
