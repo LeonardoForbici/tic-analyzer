@@ -7,7 +7,10 @@ import { openOverview } from './commands/openOverview';
 import { importTracerInputsCommand } from './commands/importTracerInputs';
 import { importVisorScreenshotsCommand } from './commands/importVisorScreenshots';
 import { detectAiEnginesCommand, exportForEngineCommand } from './reversa-adapter/exportForEngines';
-import { analyzeImpactByScreenCommand, importScreenForImpactCommand } from './impact/analyzeImpactByScreen';
+import { analyzeImpactByImageCommand } from './impact/analyzeImpactByImage';
+import { importImpactScreenshotCommand } from './impact/importImpactScreenshot';
+import { estimateChangeCostWithLocalAiCommand } from './impact/changeCostEstimator';
+import { exportChangePackageForPaidAiCommand } from './impact/exportChangePackageForPaidAi';
 import { ProjectSummary } from './types';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -32,8 +35,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ticCoderLite.enhanceWithLocalAi', () => enhanceWithLocalAi())
     ,vscode.commands.registerCommand('ticCoderLite.importTracerInputs', () => importTracerInputsCommand())
     ,vscode.commands.registerCommand('ticCoderLite.importVisorScreenshots', () => importVisorScreenshotsCommand())
-    ,vscode.commands.registerCommand('ticCoderLite.analyzeImpactByScreen', () => analyzeImpactByScreenCommand())
-    ,vscode.commands.registerCommand('ticCoderLite.importScreenForImpact', () => importScreenForImpactCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.analyzeImpactByImage', () => analyzeImpactByImageCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.importImpactScreenshot', () => importImpactScreenshotCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.estimateChangeCostWithLocalAi', () => estimateChangeCostWithLocalAiCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.exportChangePackageForPaidAi', () => exportChangePackageForPaidAiCommand())
   );
 }
 
@@ -76,7 +81,7 @@ class TicCoderLiteTreeProvider implements vscode.TreeDataProvider<TicCoderLiteIt
       commandItem('IA Padrão: Exportar para Codex', 'ticCoderLite.exportForCodex', 'Gravar ou mesclar AGENTS.md'),
       commandItem('IA Local: Melhorar com Ollama', 'ticCoderLite.enhanceWithLocalAi', 'Usar Ollama opcional com modelo pequeno para melhorar o contexto .tic-code'),
       commandItem('IA Padrão: Exportar AGENTS.md', 'ticCoderLite.exportAgentsMd', 'Gravar ou atualizar AGENTS.md'),
-      commandItem('Impacto por Tela: Analisar', 'ticCoderLite.analyzeImpactByScreen', 'Mapear frontend → backend → SQL/PLSQL por URL de tela'),
+      commandItem('Impacto por Imagem/Tela: Analisar', 'ticCoderLite.analyzeImpactByImage', 'Mapear frontend → backend → SQL/PLSQL por URL de tela'),
       summaryItem(summary)
     ];
   }

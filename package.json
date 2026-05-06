@@ -71,12 +71,20 @@
         "title": "TIC Coder Lite: Importar Screenshots para Visor"
       },
       {
-        "command": "ticCoderLite.analyzeImpactByScreen",
-        "title": "TIC Coder Lite: Analisar Impacto por Tela"
+        "command": "ticCoderLite.analyzeImpactByImage",
+        "title": "TIC Coder Lite: Analisar Impacto por Imagem/Tela"
       },
       {
-        "command": "ticCoderLite.importScreenForImpact",
-        "title": "TIC Coder Lite: Importar Print para Impacto por Tela"
+        "command": "ticCoderLite.importImpactScreenshot",
+        "title": "TIC Coder Lite: Importar Screenshot para Impacto"
+      },
+      {
+        "command": "ticCoderLite.estimateChangeCostWithLocalAi",
+        "title": "TIC Coder Lite: Estimar Esforço com IA Local"
+      },
+      {
+        "command": "ticCoderLite.exportChangePackageForPaidAi",
+        "title": "TIC Coder Lite: Exportar Pacote para IA Paga"
       }
     ],
     "configuration": {
