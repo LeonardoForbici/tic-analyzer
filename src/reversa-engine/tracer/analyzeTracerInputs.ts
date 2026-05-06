@@ -1,0 +1,1 @@
+export function analyzeTracerInputs(lines: string[]): { endpoints: string[]; errors: string[] } { return { endpoints: lines.filter((l)=>l.includes('HTTP')).slice(0,20), errors: lines.filter((l)=>/error|exception/i.test(l)).slice(0,20) }; }

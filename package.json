@@ -61,6 +61,14 @@
       {
         "command": "ticCoderLite.enhanceWithLocalAi",
         "title": "TIC Coder Lite: Melhorar com IA Local (Modo IA Local)"
+      },
+      {
+        "command": "ticCoderLite.importTracerInputs",
+        "title": "TIC Coder Lite: Importar Logs/Traces para Tracer"
+      },
+      {
+        "command": "ticCoderLite.importVisorScreenshots",
+        "title": "TIC Coder Lite: Importar Screenshots para Visor"
       }
     ],
     "configuration": {
@@ -93,7 +101,11 @@
         },
         "ticCoderLite.localAi.mode": {
           "type": "string",
-          "enum": ["auto", "fast", "quality"],
+          "enum": [
+            "auto",
+            "fast",
+            "quality"
+          ],
           "enumDescriptions": [
             "Seleção automática: fastModel para tarefas simples, qualityModel para tarefas complexas.",
             "Usa sempre fastModel independentemente da tarefa.",

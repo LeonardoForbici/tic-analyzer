@@ -47,6 +47,7 @@ export async function runReversaLikePipeline(
 ): Promise<ReversaEngineResult> {
   const contextFiles: string[] = [];
   const sddFiles: string[] = [];
+  const agentFiles = detectAgentFiles(summary.scan.files.map((f) => f.relativePath));
 
   // ── Criar pastas base ────────────────────────────────────────────────────
   for (const dir of [REVERSA_DIR, CONTEXT_DIR, CONFIG_DIR]) {
@@ -108,6 +109,7 @@ export async function runReversaLikePipeline(
 
   // ── d) SDD structure ─────────────────────────────────────────────────────
   await generateReversaSddStructure(root, summary);
+  await generateCoreAgentArtifacts(root);
 
   // ── e) Copy embedded Reversa assets ──────────────────────────────────────
   if (extensionUri) {
@@ -120,7 +122,7 @@ export async function runReversaLikePipeline(
     planFile: PLAN_FILE,
     contextFiles,
     sddFiles,
-    agentFiles: []
+    agentFiles
   };
 }
 
@@ -264,4 +266,37 @@ function countTestFiles(summary: ProjectSummary): number {
 async function write(root: vscode.WorkspaceFolder, relativePath: string, content: string): Promise<void> {
   const uri = toWorkspaceUri(root, relativePath);
   await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
+}
+
+function detectAgentFiles(paths: string[]): string[] {
+  const wanted = ['AGENTS.md', 'CLAUDE.md', '.github/copilot-instructions.md', '.cursorrules', 'GEMINI.md'];
+  const normalized = new Set(paths.map((p) => p.replace(/\\/g, '/')));
+  return wanted.filter((w) => normalized.has(w));
+}
+
+async function generateCoreAgentArtifacts(root: vscode.WorkspaceFolder): Promise<void> {
+  const files: Record<string, string> = {
+    '.tic-code/reverse-engineering/dynamic.md': '# Dynamic Analysis\n\nStatus: pending input (logs/traces).\n',
+    '.tic-code/reverse-engineering/traceability/runtime-evidence.md': '# Runtime Evidence\n\nNenhuma evidência de runtime importada.\n',
+    '.tic-code/reverse-engineering/ui/screenshots-index.md': '# Screenshots Index\n\nNenhum screenshot importado.\n',
+    '.tic-code/reverse-engineering/ui/ui-analysis.md': '# UI Analysis\n\nLacuna: screenshots não fornecidas.\n',
+    '.tic-code/reverse-engineering/ui/user-flows.md': '# User Flows\n\nLacuna: sem fluxo inferido por falta de imagens.\n',
+    '.tic-code/reverse-engineering/database/README.md': '# Database\n\nArtefatos de banco gerados por análise estática.\n',
+    '.tic-code/reverse-engineering/database/tables.md': '# Tables\n\nBanco não detectado ou sem DDL explícito.\n',
+    '.tic-code/reverse-engineering/database/views.md': '# Views\n\nSem views detectadas.\n',
+    '.tic-code/reverse-engineering/database/procedures.md': '# Procedures\n\nSem procedures detectadas.\n',
+    '.tic-code/reverse-engineering/database/functions.md': '# Functions\n\nSem functions detectadas.\n',
+    '.tic-code/reverse-engineering/database/triggers.md': '# Triggers\n\nSem triggers detectadas.\n',
+    '.tic-code/reverse-engineering/database/packages.md': '# Packages\n\nSem packages detectados.\n',
+    '.tic-code/reverse-engineering/design-system/tokens.md': '# Tokens\n\nDesign system não detectado (lacuna explícita).\n',
+    '.tic-code/reverse-engineering/design-system/components.md': '# Components\n\nSem componentes de design system catalogados.\n',
+    '.tic-code/reverse-engineering/design-system/themes.md': '# Themes\n\nSem themes explícitos detectados.\n',
+    '.tic-code/reverse-engineering/review-report.md': '# Review Report\n\nValidação executada sobre artefatos disponíveis.\n',
+    '.tic-code/reverse-engineering/changelog.md': '# Changelog\n\n- Sessão inicial registrada.\n',
+    '.tic-code/reversa/chronicler/session.md': '# Session\n\nSessão de análise registrada.\n',
+    '.tic-code/reversa/chronicler/history.json': '{\"sessions\":[]}\n'
+  };
+  for (const [path, content] of Object.entries(files)) {
+    await write(root, path, content);
+  }
 }

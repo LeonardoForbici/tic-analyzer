@@ -12,7 +12,26 @@ export type ReversaPhaseId =
   | 'review'
   | 'data';
 
-export type ReversaPhaseStatus = 'pending' | 'running' | 'completed' | 'skipped';
+export type ReversaAgentStatusValue = 'pending' | 'running' | 'completed' | 'failed';
+export type ReversaExecutionMode = 'deterministic' | 'user-input' | 'ai-assisted';
+export type ReversaPhaseStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+export interface ReversaAgentStatus {
+  id: string;
+  name: string;
+  role: string;
+  status: ReversaAgentStatusValue;
+  executionMode: ReversaExecutionMode;
+  requiredInputs: string[];
+  receivedInputs: string[];
+  generatedFiles: string[];
+  errors: string[];
+  warnings: string[];
+  confidenceSummary: { confirmed: number; inferred: number; gaps: number };
+  startedAt?: string;
+  finishedAt?: string;
+  lastRunAt?: string;
+}
 
 export interface ReversaPhase {
   id: ReversaPhaseId;
@@ -40,6 +59,7 @@ export interface ReversaState {
   completed: ReversaPhaseId[];
   pending: ReversaPhaseId[];
   phases: ReversaPhase[];
+  agents: Record<string, ReversaAgentStatus>;
   checkpoints: Partial<Record<string, ReversaCheckpoint>>;
   createdFiles: string[];
   createdAt: string;

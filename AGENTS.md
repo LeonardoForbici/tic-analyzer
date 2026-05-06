@@ -87,3 +87,18 @@ Antes de alterar comportamento, leia:
 ## Créditos
 
 A detecção de engines e o comportamento de escrita segura são adaptados conceitualmente do Reversa by Sandeco, licença MIT. O TIC Coder Lite permanece uma extensão separada e grava seu contexto principal em .tic-code.
+
+## Agentes Obrigatórios (execução funcional)
+
+- Reversa — orquestração, state/config/plan/context.
+- Scout — inventário/dependencies/surface.
+- Archaeologist — modules/code-analysis/sdd por módulo.
+- Detective — domain/business-rules/state-machines/permissions/gaps/questions.
+- Architect — architecture/c4/erd/adrs.
+- Writer — operational-contracts/sdd/openapi/user-stories/flowcharts/sequences.
+- Reviewer — confidence/gaps/questions/risk-impact/review-report.
+- Tracer — inputs de logs/traces + dynamic/runtime-evidence.
+- Visor — inputs de screenshots + ui docs.
+- Data Master — database-analysis/plsql/database/*/erd.
+- Design System — design-system/tokens/components/themes.
+- Chronicler — session/history/changelog.
