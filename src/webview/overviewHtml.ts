@@ -75,14 +75,15 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
     <header class="header">
       <div>
         <h1>Reversa Engine — TIC Coder Lite</h1>
-        <p class="muted">Interface gráfica VS Code para programação reversa</p>
+        <p class="muted">Interface gráfica VS Code para programação reversa baseada no Reversa.</p>
         <p class="muted">Workspace: <strong>${escapeHtml(summary.workspaceName)}</strong></p>
       </div>
       <div class="actions">
-        <button class="btn primary" data-command="analyzeProject">⚡ Analisar Workspace</button>
+        <button class="btn primary" data-command="analyzeWorkspace">⚡ Analisar Workspace</button>
         <button class="btn" data-command="exportForCodex">Exportar para Codex</button>
-        <button class="btn" data-command="exportForClaude">Exportar para Claude</button>
-        <button class="btn" data-command="enhanceLocalAi">🧠 Melhorar com IA Local</button>
+        <button class="btn" data-command="openTicCodeFolder">Abrir .tic-code</button>
+        <button class="btn" data-command="openReverseEngineeringFolder">Abrir reverse-engineering</button>
+        <button class="btn" data-command="enhanceWithLocalAi">🧠 IA Local</button>
       </div>
     </header>
 
@@ -163,7 +164,8 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
         <p>A IA Padrão grava arquivos nativos para ferramentas de codificação assistida.</p>
         <div class="actions">
           <button class="btn primary" data-command="exportForCodex">Exportar para Codex</button>
-          <button class="btn" data-command="exportForClaude">Exportar para Claude</button>
+          <button class="btn" data-command="openTicCodeFolder">Abrir .tic-code</button>
+        <button class="btn" data-command="openReverseEngineeringFolder">Abrir reverse-engineering</button>
           <button class="btn" data-command="exportForCopilot">Exportar para Copilot</button>
           <button class="btn" data-command="exportForCursor">Exportar para Cursor</button>
           <button class="btn" data-command="exportForGemini">Exportar para Gemini</button>
@@ -179,7 +181,7 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
     </section>
 
     <section class="section">
-      <h2>Grafo</h2>
+      <h2>Grafo do Workspace</h2>
       <div class="card graph-card">
         <div class="graph-toolbar">
           <div>
@@ -249,13 +251,27 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
 
     <section class="section">
       <h2>Impacto por Tela</h2>
+      <p class="caption">Informe a URL de uma tela e descubra o impacto provável no frontend, backend e banco.</p>
       <div class="card">
-        <p>Fluxo visual: <strong>Frontend → API → Backend → SQL → Banco/PLSQL</strong></p>
-        <div class="actions">
-          <button class="btn primary" data-command="analyzeImpactByScreen">Analisar Impacto</button>
-          <button class="btn" data-command="importScreenForImpact">Importar Screenshot</button>
+        <div class="two-column">
+          <div>
+            <label class="caption">URL da tela</label>
+            <input class="db-search-input" type="text" placeholder="/clientes/123" style="width:100%;margin:6px 0 10px">
+            <label class="caption">Descrição da mudança desejada</label>
+            <textarea placeholder="Ex: adicionar validação de limite de crédito" style="width:100%;min-height:84px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
+            <div class="actions" style="justify-content:flex-start;margin-top:10px">
+              <button class="btn primary" data-command="analyzeImpactByScreen">Analisar Impacto</button>
+              <button class="btn" data-command="importScreenForImpact">Importar Screenshot</button>
+              <button class="btn" data-command="openImpactReport">Abrir relatório</button>
+              <button class="btn" data-command="openImpactJson">Abrir JSON</button>
+            </div>
+          </div>
+          <div class="detail">
+            <div class="pill-list"><span class="badge badge-gray">Nenhuma análise de impacto executada ainda.</span></div>
+            <p class="caption" style="margin-top:10px">Fluxo visual: <strong>Frontend → API → Backend → SQL → Banco/PLSQL</strong></p>
+            <ul><li><span>Frontend</span><span class="caption">🔴 LACUNA</span></li><li><span>API</span><span class="caption">🔴 LACUNA</span></li><li><span>Backend</span><span class="caption">🔴 LACUNA</span></li><li><span>SQL</span><span class="caption">🔴 LACUNA</span></li><li><span>Banco/PLSQL</span><span class="caption">🔴 LACUNA</span></li></ul>
+          </div>
         </div>
-        <p class="caption">Artefatos: .tic-code/impact/screen-impact.md, screen-impact.json, frontend-trace.json, backend-trace.json, database-trace.json.</p>
       </div>
     </section>
 

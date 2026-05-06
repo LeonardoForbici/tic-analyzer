@@ -67,6 +67,7 @@ async function openOverviewPanel(context) {
     panel.webview.onDidReceiveMessage(async (message) => {
         switch (message.command) {
             case 'analyzeProject':
+            case 'analyzeWorkspace':
                 await vscode.commands.executeCommand('ticCoderLite.analyzeProject');
                 const latestAnalysis = (0, analyzeProject_1.getLastAnalysis)(context);
                 if (latestAnalysis) {
@@ -90,6 +91,7 @@ async function openOverviewPanel(context) {
                 await vscode.commands.executeCommand('ticCoderLite.exportForGemini');
                 break;
             case 'enhanceLocalAi':
+            case 'enhanceWithLocalAi':
                 await vscode.commands.executeCommand('ticCoderLite.enhanceWithLocalAi');
                 break;
             case 'setupBeginner':
@@ -112,6 +114,29 @@ async function openOverviewPanel(context) {
                 break;
             case 'importVisorScreenshots':
                 await vscode.commands.executeCommand('ticCoderLite.importVisorScreenshots');
+                break;
+            case 'analyzeImpactByScreen':
+                await vscode.commands.executeCommand('ticCoderLite.analyzeImpactByScreen');
+                break;
+            case 'importScreenForImpact':
+                await vscode.commands.executeCommand('ticCoderLite.importScreenForImpact');
+                break;
+            case 'openTicCodeFolder':
+                await openFolder(vscode.Uri.joinPath(root.uri, '.tic-code'));
+                break;
+            case 'openReverseEngineeringFolder':
+                await openFolder(vscode.Uri.joinPath(root.uri, '.tic-code', 'reverse-engineering'));
+                break;
+            case 'openGeneratedFile':
+                if (typeof message.path === 'string' && message.path.trim()) {
+                    await openFileFromWorkspace(root, message.path);
+                }
+                break;
+            case 'openImpactReport':
+                await openFileFromWorkspace(root, '.tic-code/impact/screen-impact.md');
+                break;
+            case 'openImpactJson':
+                await openFileFromWorkspace(root, '.tic-code/impact/screen-impact.json');
                 break;
             case 'openSettings':
                 await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:tic.tic-coder-lite');
@@ -207,5 +232,26 @@ function getNonce() {
         nonce += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return nonce;
+}
+async function openFolder(uri) {
+    try {
+        await vscode.commands.executeCommand('revealFileInOS', uri);
+    }
+    catch {
+        vscode.window.showWarningMessage('Pasta indisponível no workspace atual.');
+    }
+}
+async function openFileFromWorkspace(root, relativePath) {
+    const clean = relativePath.replace(/^\/+/, '');
+    const parts = clean.split('/').filter(Boolean);
+    const target = vscode.Uri.joinPath(root.uri, ...parts);
+    try {
+        await vscode.workspace.fs.stat(target);
+        const doc = await vscode.workspace.openTextDocument(target);
+        await vscode.window.showTextDocument(doc, { preview: false });
+    }
+    catch {
+        vscode.window.showWarningMessage(`Arquivo não gerado ainda: ${relativePath}`);
+    }
 }
 //# sourceMappingURL=overviewPanel.js.map
