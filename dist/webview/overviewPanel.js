@@ -156,7 +156,7 @@ async function openOverviewPanel(context) {
                 await openFileFromWorkspace(root, '.tic-code/impact/latest-screen-impact.json');
                 break;
             case 'openFilesToEdit':
-                await openFileFromWorkspace(root, '.tic-code/impact/screens/' + (message.latestScreenId || '') + '/files-to-edit.md');
+                await openFilesToEdit(root, message.latestScreenId);
                 break;
             case 'openAiChangePackage':
                 await openFileFromWorkspace(root, '.tic-code/impact/latest-ai-change-package.md');
@@ -209,6 +209,7 @@ async function render(panel, context, root, summary) {
         enabled: aiSettings.enabled
     };
     const reversaData = await loadReversaData(root);
+    const impactData = await loadImpactData(root);
     panel.webview.html = (0, overviewHtml_1.renderOverviewHtml)({
         summary,
         engines,
@@ -216,9 +217,30 @@ async function render(panel, context, root, summary) {
         nonce: getNonce(),
         localAiTaskLog,
         localAiConfig,
-        reversaData
+        reversaData,
+        impactData
     });
     await context.globalState.update('ticCoderLite.lastAnalysis', summary);
+}
+async function loadImpactData(root) {
+    const parseJson = async (uri) => {
+        try {
+            const content = await readTextIfExists(uri);
+            if (!content.trim())
+                return null;
+            return JSON.parse(content);
+        }
+        catch {
+            return null;
+        }
+    };
+    const impactDir = vscode.Uri.joinPath(root.uri, '.tic-code', 'impact');
+    return {
+        latestImpact: await parseJson(vscode.Uri.joinPath(impactDir, 'latest-screen-impact.json')),
+        latestAiPackage: await parseJson(vscode.Uri.joinPath(impactDir, 'latest-ai-change-package.json')),
+        latestCostEstimate: await parseJson(vscode.Uri.joinPath(impactDir, 'latest-cost-estimate.json')),
+        latestFilesToEdit: await parseJson(vscode.Uri.joinPath(impactDir, 'latest-files-to-edit.json'))
+    };
 }
 async function loadReversaData(root) {
     const parseJson = async (uri) => {
@@ -275,6 +297,19 @@ async function openFileFromWorkspace(root, relativePath) {
     }
     catch {
         vscode.window.showWarningMessage(`Arquivo não gerado ainda: ${relativePath}`);
+    }
+}
+async function openFilesToEdit(root, latestScreenId) {
+    const latestPath = '.tic-code/impact/latest-files-to-edit.md';
+    const fallbackPath = `.tic-code/impact/screens/${latestScreenId || ''}/files-to-edit.md`;
+    const latestUri = vscode.Uri.joinPath(root.uri, ...latestPath.split('/'));
+    try {
+        await vscode.workspace.fs.stat(latestUri);
+        await openFileFromWorkspace(root, latestPath);
+        return;
+    }
+    catch {
+        await openFileFromWorkspace(root, fallbackPath);
     }
 }
 //# sourceMappingURL=overviewPanel.js.map

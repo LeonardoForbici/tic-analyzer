@@ -5,6 +5,7 @@ import { writeTicCodeFolder } from '../exporters/writeTicCodeFolder';
 import { detectEngines } from '../reversa-adapter/detectEngines';
 import type { ProjectSummary } from '../types';
 import { renderOverviewHtml } from './overviewHtml';
+import type { FileEditCandidate, ScreenImpactResult } from '../impact/impactTypes';
 
 export async function openOverviewPanel(context: vscode.ExtensionContext): Promise<void> {
   const root = getWorkspaceRoot();
@@ -124,7 +125,7 @@ export async function openOverviewPanel(context: vscode.ExtensionContext): Promi
         await openFileFromWorkspace(root, '.tic-code/impact/latest-screen-impact.json');
         break;
       case 'openFilesToEdit':
-        await openFileFromWorkspace(root, '.tic-code/impact/screens/' + (message.latestScreenId || '') + '/files-to-edit.md');
+        await openFilesToEdit(root, message.latestScreenId);
         break;
       case 'openAiChangePackage':
         await openFileFromWorkspace(root, '.tic-code/impact/latest-ai-change-package.md');
@@ -179,6 +180,7 @@ async function render(panel: vscode.WebviewPanel, context: vscode.ExtensionConte
     enabled: aiSettings.enabled
   };
   const reversaData = await loadReversaData(root);
+  const impactData = await loadImpactData(root);
   panel.webview.html = renderOverviewHtml({
     summary,
     engines,
@@ -186,9 +188,34 @@ async function render(panel: vscode.WebviewPanel, context: vscode.ExtensionConte
     nonce: getNonce(),
     localAiTaskLog,
     localAiConfig,
-    reversaData
+    reversaData,
+    impactData
   });
   await context.globalState.update('ticCoderLite.lastAnalysis', summary);
+}
+
+async function loadImpactData(root: vscode.WorkspaceFolder): Promise<{
+  latestImpact: ScreenImpactResult | null;
+  latestAiPackage: Record<string, unknown> | null;
+  latestCostEstimate: Record<string, unknown> | null;
+  latestFilesToEdit: FileEditCandidate[] | null;
+}> {
+  const parseJson = async <T>(uri: vscode.Uri): Promise<T | null> => {
+    try {
+      const content = await readTextIfExists(uri);
+      if (!content.trim()) return null;
+      return JSON.parse(content) as T;
+    } catch {
+      return null;
+    }
+  };
+  const impactDir = vscode.Uri.joinPath(root.uri, '.tic-code', 'impact');
+  return {
+    latestImpact: await parseJson<ScreenImpactResult>(vscode.Uri.joinPath(impactDir, 'latest-screen-impact.json')),
+    latestAiPackage: await parseJson<Record<string, unknown>>(vscode.Uri.joinPath(impactDir, 'latest-ai-change-package.json')),
+    latestCostEstimate: await parseJson<Record<string, unknown>>(vscode.Uri.joinPath(impactDir, 'latest-cost-estimate.json')),
+    latestFilesToEdit: await parseJson<FileEditCandidate[]>(vscode.Uri.joinPath(impactDir, 'latest-files-to-edit.json'))
+  };
 }
 
 async function loadReversaData(root: vscode.WorkspaceFolder): Promise<{
@@ -252,5 +279,18 @@ async function openFileFromWorkspace(root: vscode.WorkspaceFolder, relativePath:
     await vscode.window.showTextDocument(doc, { preview: false });
   } catch {
     vscode.window.showWarningMessage(`Arquivo não gerado ainda: ${relativePath}`);
+  }
+}
+
+async function openFilesToEdit(root: vscode.WorkspaceFolder, latestScreenId?: string): Promise<void> {
+  const latestPath = '.tic-code/impact/latest-files-to-edit.md';
+  const fallbackPath = `.tic-code/impact/screens/${latestScreenId || ''}/files-to-edit.md`;
+  const latestUri = vscode.Uri.joinPath(root.uri, ...latestPath.split('/'));
+  try {
+    await vscode.workspace.fs.stat(latestUri);
+    await openFileFromWorkspace(root, latestPath);
+    return;
+  } catch {
+    await openFileFromWorkspace(root, fallbackPath);
   }
 }

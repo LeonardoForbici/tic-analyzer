@@ -1,6 +1,7 @@
 import type { LocalAiTaskLogEntry } from '../local-ai/ollamaClient';
 import type { AiEngine } from '../reversa-adapter/engineTypes';
 import type { ProjectSummary } from '../types';
+import type { FileEditCandidate, ScreenImpactResult } from '../impact/impactTypes';
 import { buildWebviewGraphData } from './graphRenderer';
 import { getOverviewScript, getOverviewStyles } from './webviewAssets';
 import { renderDatabaseEnterpriseSection } from './databaseSearch';
@@ -23,10 +24,16 @@ export interface OverviewHtmlInput {
     modules: unknown[] | null;
     risks: unknown[] | null;
   };
+  impactData?: {
+    latestImpact: ScreenImpactResult | null;
+    latestAiPackage: Record<string, unknown> | null;
+    latestCostEstimate: Record<string, unknown> | null;
+    latestFilesToEdit: FileEditCandidate[] | null;
+  };
 }
 
 export function renderOverviewHtml(input: OverviewHtmlInput): string {
-  const { summary, engines, agentContextPreview, nonce, localAiTaskLog, localAiConfig, reversaData } = input;
+  const { summary, engines, agentContextPreview, nonce, localAiTaskLog, localAiConfig, reversaData, impactData } = input;
   const graph = buildWebviewGraphData(summary.graph);
   const javaClasses = summary.inventory.javaSpring.files.length;
   const methods = estimateMethods(summary);
@@ -268,7 +275,6 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
             <div class="actions" style="justify-content:flex-start;margin-top:10px">
               <button class="btn primary" data-command="analyzeImpactByImage">Analisar Impacto</button>
               <button class="btn" data-command="importImpactScreenshot">Importar Screenshot</button>
-              <button class="btn" data-command="openImpactReport">Abrir relatório</button>
               <button class="btn" data-command="estimateChangeCostWithLocalAi">Estimar com IA Local</button>
               <button class="btn" data-command="exportChangePackageForPaidAi">Exportar para IA Paga</button>
               <button class="btn" data-command="openImpactReport">Abrir relatório</button>
@@ -277,9 +283,7 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
             </div>
           </div>
           <div class="detail">
-            <div class="pill-list"><span class="badge badge-gray">Nenhuma análise de impacto executada ainda.</span></div>
-            <p class="caption" style="margin-top:10px">Fluxo visual: <strong>Frontend → API → Backend → SQL → Banco/PLSQL</strong></p>
-            <ul><li><span>Frontend</span><span class="caption">🔴 LACUNA</span></li><li><span>API</span><span class="caption">🔴 LACUNA</span></li><li><span>Backend</span><span class="caption">🔴 LACUNA</span></li><li><span>SQL</span><span class="caption">🔴 LACUNA</span></li><li><span>Banco/PLSQL</span><span class="caption">🔴 LACUNA</span></li></ul>
+            ${renderImpactSummary(impactData)}
           </div>
         </div>
       </div>
@@ -414,6 +418,42 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
   ${getOverviewScript(nonce)}
 </body>
 </html>`;
+}
+
+function renderImpactSummary(impactData?: OverviewHtmlInput['impactData']): string {
+  const impact = impactData?.latestImpact;
+  if (!impact) {
+    return `<div class="pill-list"><span class="badge badge-gray">Nenhuma análise de impacto executada ainda.</span></div>
+      <p class="caption" style="margin-top:10px">Fluxo visual: <strong>Frontend → API → Backend → SQL → Banco/PLSQL</strong></p>`;
+  }
+  const filesToReview = impact.impactEstimate.recommendedFilesToReview ?? [];
+  const filesToEdit = (impactData?.latestFilesToEdit ?? impact.fileCandidates).slice(0, 10);
+  const cost = impactData?.latestCostEstimate;
+  return `
+    <div class="pill-list">
+      <span class="badge badge-blue">Impacto ${escapeHtml(impact.impactEstimate.level)}</span>
+      <span class="badge badge-gray">Score ${impact.impactEstimate.score}</span>
+      <span class="badge badge-gray">Esforço ${escapeHtml(impact.impactEstimate.estimatedEffort.label)}</span>
+    </div>
+    <ul style="margin-top:10px">
+      <li><span>URL</span><span class="caption mono">${escapeHtml(impact.input.url ?? 'N/A')}</span></li>
+      <li><span>Mudança desejada</span><span class="caption">${escapeHtml(impact.input.changeDescription || 'N/A')}</span></li>
+      <li><span>Screenshot path</span><span class="caption mono">${escapeHtml(impact.input.screenshotPath ?? 'N/A')}</span></li>
+    </ul>
+    <p class="caption" style="margin-top:10px">Fluxo visual: <strong>Frontend → API → Backend → SQL → Banco/PLSQL</strong></p>
+    <ul>
+      <li><span>Frontend</span><span class="caption">${impact.frontendMatches.length} matches</span></li>
+      <li><span>API</span><span class="caption">${impact.apiCalls.length} chamadas</span></li>
+      <li><span>Backend</span><span class="caption">${impact.backendFlow.length} nós</span></li>
+      <li><span>SQL</span><span class="caption">${impact.databaseImpact.sqlFiles.length} arquivos</span></li>
+      <li><span>Banco/PLSQL</span><span class="caption">${impact.databaseImpact.tables.length} tabelas</span></li>
+    </ul>
+    <p class="caption" style="margin-top:8px"><strong>Arquivos prováveis para edição:</strong> ${filesToEdit.map((f) => escapeHtml(f.file)).join(', ') || 'N/A'}</p>
+    <p class="caption"><strong>Arquivos para revisar:</strong> ${filesToReview.map((f) => escapeHtml(f)).join(', ') || 'N/A'}</p>
+    <p class="caption"><strong>Riscos:</strong> ${impact.impactEstimate.risks.map((r) => escapeHtml(r)).join(' | ') || 'N/A'}</p>
+    <p class="caption"><strong>Perguntas:</strong> ${impact.questions.map((q) => escapeHtml(q)).join(' | ') || 'N/A'}</p>
+    ${cost ? `<p class="caption"><strong>Estimativa IA Local:</strong> modelo ${escapeHtml(String(cost.model ?? 'N/A'))}, resposta ${escapeHtml(String(cost.response ?? 'N/A'))} — <code>.tic-code/impact/latest-cost-estimate.md</code></p>` : ''}
+  `;
 }
 
 function renderLocalAiLog(log: LocalAiTaskLogEntry[] | undefined): string {

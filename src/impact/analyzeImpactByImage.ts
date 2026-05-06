@@ -59,6 +59,8 @@ export async function analyzeImpactByImageCommand(payload?: ImpactAnalysisPayloa
     [vscode.Uri.joinPath(screenDir, 'ai-change-package.md'), aiMd],
     [vscode.Uri.joinPath(impactDir, 'latest-screen-impact.json'), JSON.stringify(result, null, 2)],
     [vscode.Uri.joinPath(impactDir, 'latest-screen-impact.md'), generateImpactReport(result)],
+    [vscode.Uri.joinPath(impactDir, 'latest-files-to-edit.json'), JSON.stringify(result.fileCandidates, null, 2)],
+    [vscode.Uri.joinPath(impactDir, 'latest-files-to-edit.md'), filesToEditMd],
     [vscode.Uri.joinPath(impactDir, 'latest-ai-change-package.json'), JSON.stringify(aiPackage, null, 2)],
     [vscode.Uri.joinPath(impactDir, 'latest-ai-change-package.md'), aiMd]
   ];
