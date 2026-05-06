@@ -4,6 +4,8 @@ import { enhanceWithLocalAi } from './commands/enhanceWithLocalAi';
 import { exportAgentsMd } from './commands/exportAgentsMd';
 import { generateAgentContext } from './commands/generateAgentContext';
 import { openOverview } from './commands/openOverview';
+import { importTracerInputsCommand } from './commands/importTracerInputs';
+import { importVisorScreenshotsCommand } from './commands/importVisorScreenshots';
 import { detectAiEnginesCommand, exportForEngineCommand } from './reversa-adapter/exportForEngines';
 import { ProjectSummary } from './types';
 
@@ -27,6 +29,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ticCoderLite.exportForCursor', () => exportForEngineCommand(context, 'cursor')),
     vscode.commands.registerCommand('ticCoderLite.exportForGemini', () => exportForEngineCommand(context, 'gemini-cli')),
     vscode.commands.registerCommand('ticCoderLite.enhanceWithLocalAi', () => enhanceWithLocalAi())
+    ,vscode.commands.registerCommand('ticCoderLite.importTracerInputs', () => importTracerInputsCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.importVisorScreenshots', () => importVisorScreenshotsCommand())
   );
 }
 

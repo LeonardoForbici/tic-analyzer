@@ -449,18 +449,22 @@ function renderReversaEngineSection(summary: ProjectSummary): string {
   const analysisRan = summary.totalFiles > 0;
 
   const phases = [
+    { id: 'reversa', label: 'Reversa', icon: '🧭', status: analysisRan ? 'completed' : 'pending' },
     { id: 'scout', label: 'Scout', icon: '🔍', status: analysisRan ? 'completed' : 'pending' },
-    { id: 'archaeologist', label: 'Archaeologist', icon: '⛏️', status: analysisRan ? 'partial' : 'pending' },
-    { id: 'detective', label: 'Detective', icon: '🕵️', status: summary.risks.risks.length > 0 ? 'partial' : (analysisRan ? 'completed' : 'pending') },
-    { id: 'architect', label: 'Architect', icon: '🏗️', status: analysisRan ? 'partial' : 'pending' },
-    { id: 'writer', label: 'Writer', icon: '📝', status: analysisRan ? 'partial' : 'pending' },
+    { id: 'archaeologist', label: 'Archaeologist', icon: '⛏️', status: analysisRan ? 'completed' : 'pending' },
+    { id: 'detective', label: 'Detective', icon: '🕵️', status: analysisRan ? 'completed' : 'pending' },
+    { id: 'architect', label: 'Architect', icon: '🏗️', status: analysisRan ? 'completed' : 'pending' },
+    { id: 'writer', label: 'Writer', icon: '📝', status: analysisRan ? 'completed' : 'pending' },
     { id: 'reviewer', label: 'Reviewer', icon: '🔬', status: analysisRan ? 'completed' : 'pending' },
-    { id: 'data-master', label: 'Data Master', icon: '🗄️', status: summary.inventory.plsql.detected ? 'partial' : (analysisRan ? 'completed' : 'pending') }
+    { id: 'tracer', label: 'Tracer', icon: '📈', status: 'pending' },
+    { id: 'visor', label: 'Visor', icon: '🖼️', status: 'pending' },
+    { id: 'data-master', label: 'Data Master', icon: '🗄️', status: analysisRan ? 'completed' : 'pending' },
+    { id: 'design-system', label: 'Design System', icon: '🎨', status: analysisRan ? 'completed' : 'pending' },
+    { id: 'chronicler', label: 'Chronicler', icon: '📚', status: analysisRan ? 'completed' : 'pending' }
   ];
 
   const statusBadge = (s: string) => {
     if (s === 'completed') return '<span class="badge badge-green">✅ Executado</span>';
-    if (s === 'partial') return '<span class="badge badge-yellow">🔄 Parcial</span>';
     return '<span class="badge badge-gray">⏳ Pendente</span>';
   };
 
