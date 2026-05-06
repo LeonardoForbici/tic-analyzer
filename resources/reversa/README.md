@@ -98,7 +98,7 @@ Reconnaissance  Excavation  Interpretation  Generation  Review
                                 Architect
 ```
 
-Independent agents (run at any phase): **Visor**, **Data Master**, **Design System**, **Tracer**
+Independent agents (run at any phase): **Visor**, **Data Master**, **Design System**, **Tracer**, **Chronicler**
 
 ---
 

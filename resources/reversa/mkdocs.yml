@@ -133,9 +133,11 @@ nav:
     - Architect: agentes/arquiteto.md
     - Writer: agentes/redator.md
     - Reviewer: agentes/revisor.md
+    - Tracer: agentes/tracer.md
     - Visor: agentes/visor.md
     - Data Master: agentes/data-master.md
     - Design System: agentes/design-system.md
+    - Chronicler: agentes/chronicler.md
   - Generated outputs: saidas/index.md
   - Developing from specs: desenvolvendo-com-specs.md
   - Contributing: contribuindo.md
