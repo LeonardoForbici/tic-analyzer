@@ -82,6 +82,12 @@ export async function openOverviewPanel(context: vscode.ExtensionContext): Promi
         await setLocalAiEnabled(false);
         vscode.window.showInformationMessage('TIC Coder Lite: IA Local desligada. O Modo Lite continua funcionando normalmente.');
         break;
+      case 'importTracerInputs':
+        await vscode.commands.executeCommand('ticCoderLite.importTracerInputs');
+        break;
+      case 'importVisorScreenshots':
+        await vscode.commands.executeCommand('ticCoderLite.importVisorScreenshots');
+        break;
       case 'openSettings':
         await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:tic.tic-coder-lite');
         break;

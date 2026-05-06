@@ -47,7 +47,7 @@ export async function runReversaLikePipeline(
 ): Promise<ReversaEngineResult> {
   const contextFiles: string[] = [];
   const sddFiles: string[] = [];
-  const agentFiles = detectAgentFiles(summary.scan.files.map((f) => f.relativePath));
+  const agentFiles = await detectAgentFiles(root, summary.scan.files.map((f) => f.relativePath));
 
   // ── Criar pastas base ────────────────────────────────────────────────────
   for (const dir of [REVERSA_DIR, CONTEXT_DIR, CONFIG_DIR]) {
@@ -268,11 +268,19 @@ async function write(root: vscode.WorkspaceFolder, relativePath: string, content
   await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
 }
 
-function detectAgentFiles(paths: string[]): string[] {
+async function detectAgentFiles(root: vscode.WorkspaceFolder, paths: string[]): Promise<string[]> {
   const wanted = ['AGENTS.md', 'CLAUDE.md', '.github/copilot-instructions.md', '.cursorrules', 'GEMINI.md'];
   const normalized = new Set(paths.map((p) => p.replace(/\\/g, '/')));
-  return wanted.filter((w) => normalized.has(w));
+  const found = wanted.filter((w) => normalized.has(w));
+  for (const f of wanted) {
+    try {
+      await vscode.workspace.fs.stat(toWorkspaceUri(root, f));
+      if (!found.includes(f)) found.push(f);
+    } catch {}
+  }
+  return found;
 }
+
 
 async function generateCoreAgentArtifacts(root: vscode.WorkspaceFolder): Promise<void> {
   const files: Record<string, string> = {

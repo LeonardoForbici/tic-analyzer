@@ -526,3 +526,15 @@ InsightGraph was used as an internal conceptual reference for local scan/analyze
 ## License
 
 MIT. See `LICENSE` and `NOTICE.md`.
+
+## Fluxo Reversa Engine (12 agentes)
+
+O TIC Coder Lite opera como **UI VS Code do Reversa Engine** com 12 agentes: Reversa, Scout, Archaeologist, Detective, Architect, Writer, Reviewer, Tracer, Visor, Data Master, Design System e Chronicler.
+
+- **Tracer** exige importação de logs/traces (`.log`, `.txt`, `.json`, `.ndjson`) para gerar `dynamic.md` e `runtime-evidence.md`.
+- **Visor** exige importação de screenshots (`.png`, `.jpg`, `.jpeg`, `.webp`) para gerar `screenshots-index.md`, `ui-analysis.md` e `user-flows.md`.
+- **Design System** analisa CSS/SCSS/themes quando existirem; se não houver, gera artefatos com 🔴 LACUNA.
+- **Chronicler** registra sessões de análise e changelog.
+- **status pending** = aguardando input.
+- **status completed** = artefatos gerados.
+- Não existe status `partial` ou `skipped` no estado dos agentes.

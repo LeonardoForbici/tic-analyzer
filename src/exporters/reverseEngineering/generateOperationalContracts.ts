@@ -73,7 +73,7 @@ const KNOWN_MODULE_METADATA: Record<string, {
       'IA Local é OPCIONAL — o TIC Coder Lite funciona completamente sem ela.',
       'Nunca torne a IA Local obrigatória ou bloqueie o fluxo principal se ela falhar.',
       'checkOllamaStatus.ts verifica disponibilidade antes de qualquer chamada.',
-      'Não introduza modelos grandes (>7B) como padrão — comece com qwen2.5-coder:1.5b.'
+      'Não introduza modelos grandes (>7B) como padrão — comece com qwen2.5-coder:3b.'
     ]
   },
   'Reversa Adapter': {

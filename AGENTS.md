@@ -102,3 +102,18 @@ A detecção de engines e o comportamento de escrita segura são adaptados conce
 - Data Master — database-analysis/plsql/database/*/erd.
 - Design System — design-system/tokens/components/themes.
 - Chronicler — session/history/changelog.
+
+## Matriz operacional dos 12 agentes
+
+- Reversa — papel: orquestração; status: pending/running/completed/failed; artefatos: `.tic-code/reversa/state.json`, `config.json`, `plan.md`; inputs: nenhum.
+- Scout — papel: inventário/superfície; status: pending/running/completed/failed; artefatos: `inventory.md`, `dependencies.md`; inputs: workspace scan.
+- Archaeologist — papel: análise de módulos; status: pending/running/completed/failed; artefatos: `code-analysis.md`, `sdd/*`; inputs: modules context.
+- Detective — papel: regras/estados/permissões; status: pending/running/completed/failed; artefatos: `domain.md`, `business-rules.md`, `state-machines.md`, `permissions.md`; inputs: código + contexto.
+- Architect — papel: arquitetura/C4/ERD; status: pending/running/completed/failed; artefatos: `architecture.md`, `c4-*`, `erd-complete.md`; inputs: grafo + inventário.
+- Writer — papel: contratos operacionais/SDD; status: pending/running/completed/failed; artefatos: `operational-contracts.md`, `openapi/*`, `user-stories/*`; inputs: saídas dos agentes anteriores.
+- Reviewer — papel: revisão e consistência; status: pending/running/completed/failed; artefatos: `confidence-report.md`, `review-report.md`; inputs: todos os artefatos.
+- Tracer — papel: evidência de runtime; status: pending/running/completed/failed; artefatos: `dynamic.md`, `traceability/runtime-evidence.md`; inputs: logs/traces importados.
+- Visor — papel: documentação de UI; status: pending/running/completed/failed; artefatos: `ui/screenshots-index.md`, `ui/ui-analysis.md`, `ui/user-flows.md`; inputs: screenshots importados.
+- Data Master — papel: banco/SQL/PLSQL; status: pending/running/completed/failed; artefatos: `data-dictionary.md`, `database-analysis.md`, `plsql-analysis.md`, `database/*`; inputs: SQL/PLSQL (ou 🔴 LACUNA sem banco).
+- Design System — papel: tokens/componentes/themes; status: pending/running/completed/failed; artefatos: `design-system/tokens.md`, `components.md`, `themes.md`; inputs: CSS/SCSS/themes (ou 🔴 LACUNA).
+- Chronicler — papel: histórico de sessões; status: pending/running/completed/failed; artefatos: `.tic-code/reversa/chronicler/session.md`, `history.json`, `reverse-engineering/changelog.md`; inputs: execução da análise.

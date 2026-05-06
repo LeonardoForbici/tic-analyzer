@@ -41,7 +41,7 @@ export function generateReversaState(summary: ProjectSummary): ReversaState {
     reviewer: mkAgent(now, { id: 'reviewer', name: 'Reviewer', role: 'Revisão e consistência', executionMode: 'deterministic', generatedFiles: ['.tic-code/reverse-engineering/confidence-report.md', '.tic-code/reverse-engineering/review-report.md', '.tic-code/reverse-engineering/traceability/risk-impact-matrix.md'] }),
     tracer: tracerPending,
     visor: visorPending,
-    dataMaster: mkAgent(now, { id: 'dataMaster', name: 'Data Master', role: 'Análise de banco de dados', executionMode: 'deterministic', generatedFiles: ['.tic-code/reverse-engineering/database-analysis.md', '.tic-code/reverse-engineering/plsql-analysis.md', '.tic-code/reverse-engineering/database/README.md', '.tic-code/reverse-engineering/database/tables.md'] }),
+    dataMaster: mkAgent(now, { id: 'dataMaster', name: 'Data Master', role: 'Análise de banco de dados', executionMode: 'deterministic', generatedFiles: ['.tic-code/reverse-engineering/data-dictionary.md','.tic-code/reverse-engineering/database-analysis.md','.tic-code/reverse-engineering/plsql-analysis.md','.tic-code/reverse-engineering/database/README.md','.tic-code/reverse-engineering/database/tables.md','.tic-code/reverse-engineering/database/views.md','.tic-code/reverse-engineering/database/procedures.md','.tic-code/reverse-engineering/database/functions.md','.tic-code/reverse-engineering/database/triggers.md','.tic-code/reverse-engineering/database/packages.md'] }),
     designSystem: mkAgent(now, { id: 'designSystem', name: 'Design System', role: 'Tokens e componentes de UI', executionMode: 'deterministic', generatedFiles: ['.tic-code/reverse-engineering/design-system/tokens.md', '.tic-code/reverse-engineering/design-system/components.md', '.tic-code/reverse-engineering/design-system/themes.md'] }),
     chronicler: mkAgent(now, { id: 'chronicler', name: 'Chronicler', role: 'Histórico e changelog', executionMode: 'deterministic', generatedFiles: ['.tic-code/reversa/chronicler/session.md', '.tic-code/reversa/chronicler/history.json', '.tic-code/reverse-engineering/changelog.md'] })
   };
@@ -50,6 +50,7 @@ export function generateReversaState(summary: ProjectSummary): ReversaState {
     version: '1.2.0', project: summary.workspaceName, engine: 'tic-coder-lite', docLevel: 'completo',
     outputFolder: '.tic-code/reverse-engineering', contextDir: '.tic-code/reversa/context',
     phase: 'review', completed: ['reconnaissance', 'excavation', 'interpretation', 'synthesis', 'generation', 'review', 'data'], pending: [], phases: [], agents,
-    checkpoints: {}, createdFiles: Object.values(agents).flatMap((a) => a.generatedFiles), createdAt: now, updatedAt: now
+    checkpoints: {}, createdFiles: Object.values(agents).flatMap((a) => a.generatedFiles), createdAt: now, updatedAt: now,
+    agentFiles: ['AGENTS.md', 'CLAUDE.md', '.github/copilot-instructions.md', '.cursorrules', 'GEMINI.md']
   };
 }

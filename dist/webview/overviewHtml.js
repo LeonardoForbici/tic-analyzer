@@ -431,11 +431,11 @@ function renderReversaEngineSection(summary) {
         { id: 'architect', label: 'Architect', icon: '🏗️', status: analysisRan ? 'completed' : 'pending' },
         { id: 'writer', label: 'Writer', icon: '📝', status: analysisRan ? 'completed' : 'pending' },
         { id: 'reviewer', label: 'Reviewer', icon: '🔬', status: analysisRan ? 'completed' : 'pending' },
-        { id: 'tracer', label: 'Tracer', icon: '📈', status: 'pending' },
-        { id: 'visor', label: 'Visor', icon: '🖼️', status: 'pending' },
+        { id: 'tracer', label: 'Tracer', icon: '📈', status: 'pending', executionMode: 'user-input', requiredInputs: ['logs/traces .log/.txt/.json/.ndjson'], generatedFiles: ['dynamic.md', 'runtime-evidence.md'] },
+        { id: 'visor', label: 'Visor', icon: '🖼️', status: 'pending', executionMode: 'user-input', requiredInputs: ['screenshots .png/.jpg/.jpeg/.webp'], generatedFiles: ['screenshots-index.md', 'ui-analysis.md', 'user-flows.md'] },
         { id: 'data-master', label: 'Data Master', icon: '🗄️', status: analysisRan ? 'completed' : 'pending' },
         { id: 'design-system', label: 'Design System', icon: '🎨', status: analysisRan ? 'completed' : 'pending' },
-        { id: 'chronicler', label: 'Chronicler', icon: '📚', status: analysisRan ? 'completed' : 'pending' }
+        { id: 'chronicler', label: 'Chronicler', icon: '📚', status: analysisRan ? 'completed' : 'pending', executionMode: 'deterministic', requiredInputs: [], generatedFiles: ['session.md', 'history.json', 'changelog.md'] }
     ];
     const statusBadge = (s) => {
         if (s === 'completed')
@@ -462,7 +462,7 @@ function renderReversaEngineSection(summary) {
       <p class="caption">Pipeline gera contexto em <code>.tic-code/reversa/</code> e especificações em <code>.tic-code/reverse-engineering/</code></p>
       <h3>Fases da Metodologia Reversa</h3>
       <div class="phase-grid">
-        ${phases.map((p) => `<div class="phase-item"><span>${p.icon}</span><span><strong>${p.label}</strong></span>${statusBadge(p.status)}</div>`).join('\n        ')}
+        ${phases.map((p) => `<div class="phase-item"><span>${p.icon}</span><span><strong>${p.label}</strong></span>${statusBadge(p.status)}<div class="caption">Modo: ${p.executionMode ?? 'deterministic'}</div><div class="caption">Inputs: ${(p.requiredInputs ?? []).join(', ') || 'nenhum'}</div><div class="caption">Arquivos: ${(p.generatedFiles ?? []).join(', ') || 'n/a'}</div>${p.id === 'tracer' ? '<button class=\"btn\" data-command=\"importTracerInputs\">Importar Logs/Traces</button>' : ''}${p.id === 'visor' ? '<button class=\"btn\" data-command=\"importVisorScreenshots\">Importar Screenshots</button>' : ''}</div>`).join('\n        ')}
       </div>
       <h3>Arquivos Gerados</h3>
       <div class="links-grid">

@@ -64,6 +64,7 @@ export interface ReversaState {
   createdFiles: string[];
   createdAt: string;
   updatedAt: string;
+  agentFiles?: string[];
 }
 
 export interface ReversaConfig {
