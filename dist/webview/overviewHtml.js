@@ -8,7 +8,7 @@ const databaseIndex_1 = require("../scanner/databaseIndex");
 const databaseLargeMode_1 = require("../scanner/databaseLargeMode");
 const config_1 = require("../utils/config");
 function renderOverviewHtml(input) {
-    const { summary, engines, agentContextPreview, nonce, localAiTaskLog, localAiConfig } = input;
+    const { summary, engines, agentContextPreview, nonce, localAiTaskLog, localAiConfig, reversaData } = input;
     const graph = (0, graphRenderer_1.buildWebviewGraphData)(summary.graph);
     const javaClasses = summary.inventory.javaSpring.files.length;
     const methods = estimateMethods(summary);
@@ -98,7 +98,7 @@ function renderOverviewHtml(input) {
       ${metric('Database / PL/SQL', plsql.files.length)}
     </section>
 
-    ${renderReversaEngineSection(summary)}
+    ${renderReversaEngineSection(summary, reversaData)}
 
     <section class="section">
       <h2>Configuração Fácil</h2>
@@ -421,8 +421,13 @@ function riskLabel(value) {
 function safeJson(value) {
     return JSON.stringify(value).replaceAll('</', '<\\/');
 }
-function renderReversaEngineSection(summary) {
+function renderReversaEngineSection(summary, reversaData) {
     const analysisRan = summary.totalFiles > 0;
+    const graphNodes = Array.isArray(reversaData?.graph?.nodes) ? reversaData?.graph?.nodes.length : summary.graph.stats.nodeCount;
+    const graphEdges = Array.isArray(reversaData?.graph?.edges) ? reversaData?.graph?.edges.length : summary.graph.stats.edgeCount;
+    const moduleCount = Array.isArray(reversaData?.modules) ? reversaData?.modules.length : summary.inventory.modules.length;
+    const riskCount = Array.isArray(reversaData?.risks) ? reversaData?.risks.length : summary.risks.summary.total;
+    const generatedFileCount = 8;
     const phases = [
         { id: 'reversa', label: 'Reversa', icon: '🧭', status: analysisRan ? 'completed' : 'pending' },
         { id: 'scout', label: 'Scout', icon: '🔍', status: analysisRan ? 'completed' : 'pending' },
@@ -455,11 +460,18 @@ function renderReversaEngineSection(summary) {
         { path: '.tic-code/reversa/context/risks.json', icon: '⚠️', generated: analysisRan },
         { path: '.tic-code/reverse-engineering/', icon: '📁', generated: analysisRan }
     ];
-    return `<section class="section">
+    return `<section class="section premium">
     <h2>Reversa Engine — TIC Coder Lite</h2>
+    <p class="caption">Motor de programação reversa embutido. Pipeline gera contexto em <code>.tic-code/reversa/</code>.</p>
+    <div class="metrics premium-metrics">
+      ${metric('Agentes mapeados', '12 / 12')}
+      ${metric('Módulos', moduleCount)}
+      ${metric('Riscos', riskCount)}
+      ${metric('Arquivos gerados', generatedFileCount)}
+      ${metric('Nós do grafo', graphNodes)}
+      ${metric('Arestas do grafo', graphEdges)}
+    </div>
     <div class="card">
-      <p><strong>Motor de programação reversa embutido</strong> — Metodologia Reversa by Sandeco (MIT).</p>
-      <p class="caption">Pipeline gera contexto em <code>.tic-code/reversa/</code> e especificações em <code>.tic-code/reverse-engineering/</code></p>
       <h3>Fases da Metodologia Reversa</h3>
       <div class="phase-grid">
         ${phases.map((p) => `<div class="phase-item"><span>${p.icon}</span><span><strong>${p.label}</strong></span>${statusBadge(p.status)}<div class="caption">Modo: ${p.executionMode ?? 'deterministic'}</div><div class="caption">Inputs: ${(p.requiredInputs ?? []).join(', ') || 'nenhum'}</div><div class="caption">Arquivos: ${(p.generatedFiles ?? []).join(', ') || 'n/a'}</div>${p.id === 'tracer' ? '<button class=\"btn\" data-command=\"importTracerInputs\">Importar Logs/Traces</button>' : ''}${p.id === 'visor' ? '<button class=\"btn\" data-command=\"importVisorScreenshots\">Importar Screenshots</button>' : ''}</div>`).join('\n        ')}
@@ -474,6 +486,7 @@ function renderReversaEngineSection(summary) {
         <span class="badge badge-yellow">🟡 INFERIDO</span>
         <span class="badge badge-red">🔴 LACUNA</span>
       </div>
+      ${reversaData?.state ? '<p class="caption">Dados reais carregados de state.json/context/*.json.</p>' : '<p class="caption">Fallback elegante ativo: execute uma análise para preencher dados do Reversa.</p>'}
     </div>
   </section>`;
 }

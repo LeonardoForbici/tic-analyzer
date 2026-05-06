@@ -160,15 +160,36 @@ async function render(panel, context, root, summary) {
         mode: aiSettings.mode,
         enabled: aiSettings.enabled
     };
+    const reversaData = await loadReversaData(root);
     panel.webview.html = (0, overviewHtml_1.renderOverviewHtml)({
         summary,
         engines,
         agentContextPreview: agentContextPreview.slice(0, 2600),
         nonce: getNonce(),
         localAiTaskLog,
-        localAiConfig
+        localAiConfig,
+        reversaData
     });
     await context.globalState.update('ticCoderLite.lastAnalysis', summary);
+}
+async function loadReversaData(root) {
+    const parseJson = async (uri) => {
+        try {
+            const content = await readTextIfExists(uri);
+            if (!content.trim())
+                return null;
+            return JSON.parse(content);
+        }
+        catch {
+            return null;
+        }
+    };
+    const base = vscode.Uri.joinPath(root.uri, '.tic-code', 'reversa');
+    const state = await parseJson(vscode.Uri.joinPath(base, 'state.json'));
+    const graph = await parseJson(vscode.Uri.joinPath(base, 'context', 'graph.json'));
+    const modules = await parseJson(vscode.Uri.joinPath(base, 'context', 'modules.json'));
+    const risks = await parseJson(vscode.Uri.joinPath(base, 'context', 'risks.json'));
+    return { state, graph, modules, risks };
 }
 async function readTextIfExists(uri) {
     try {

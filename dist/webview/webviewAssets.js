@@ -237,6 +237,45 @@ function getOverviewStyles() {
       font-size: 12px;
     }
     .db-item:last-child { border-bottom: 0; }
+    .premium {
+      background: radial-gradient(circle at top right, rgba(56, 189, 248, 0.14), transparent 30%), var(--panel);
+      border-color: color-mix(in srgb, var(--line) 75%, #2563eb 25%);
+    }
+    .premium-metrics .card {
+      background: linear-gradient(160deg, rgba(15, 23, 42, 0.86), rgba(2, 6, 23, 0.92));
+      border-color: rgba(56, 189, 248, 0.25);
+    }
+    .phase-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .phase-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      display: grid;
+      gap: 4px;
+      background: color-mix(in srgb, var(--bg) 80%, #0b1220 20%);
+    }
+    .links-grid { display: grid; gap: 8px; margin-bottom: 14px; }
+    .link-item {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: color-mix(in srgb, var(--bg) 84%, #0f172a 16%);
+    }
+    .badge { border-radius: 999px; padding: 2px 8px; font-size: 11px; display: inline-flex; align-items: center; }
+    .badge-green { background: rgba(34,197,94,.18); color: #86efac; border: 1px solid rgba(34,197,94,.45); }
+    .badge-yellow { background: rgba(245,158,11,.18); color: #fcd34d; border: 1px solid rgba(245,158,11,.45); }
+    .badge-red { background: rgba(239,68,68,.18); color: #fca5a5; border: 1px solid rgba(239,68,68,.45); }
+    .badge-gray { background: rgba(148,163,184,.18); color: #cbd5e1; border: 1px solid rgba(148,163,184,.4); }
+    .confidence-legend { display: flex; flex-wrap: wrap; gap: 8px; }
     @media (max-width: 980px) {
       .page { padding: 16px; }
       .header, .two-column, .graph-shell { display: grid; grid-template-columns: 1fr; }
