@@ -256,35 +256,68 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
     </section>
 
 
-    <section class="section">
-      <h2>Impacto por Tela</h2>
-      <p class="caption">Informe a URL de uma tela e descubra o impacto provável no frontend, backend e banco.</p>
-      <div class="card">
-        <div class="two-column">
-          <div>
-            <label class="caption">URL da tela</label>
-            <input id="impactUrl" class="db-search-input" type="text" placeholder="/clientes/123" style="width:100%;margin:6px 0 10px">
-            <label class="caption">Descrição da mudança desejada</label>
-            <textarea id="impactChangeDescription" placeholder="Ex: adicionar validação de limite de crédito" style="width:100%;min-height:84px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
-            <input id="impactScreenName" class="db-search-input" type="text" placeholder="Nome da tela (opcional)" style="width:100%;margin:6px 0 10px">
-            <input id="impactVisibleTerms" class="db-search-input" type="text" placeholder="Palavras visíveis (opcional)" style="width:100%;margin:6px 0 10px">
-            <input id="impactMainAction" class="db-search-input" type="text" placeholder="Ação principal (opcional)" style="width:100%;margin:6px 0 10px">
-            <input id="impactTargetElement" class="db-search-input" type="text" placeholder="Elemento alvo (opcional)" style="width:100%;margin:6px 0 10px">
-            <input id="impactTargetField" class="db-search-input" type="text" placeholder="Campo alvo (opcional)" style="width:100%;margin:6px 0 10px">
-            <input id="impactTargetRule" class="db-search-input" type="text" placeholder="Regra alvo (opcional)" style="width:100%;margin:6px 0 10px">
-            <div class="actions" style="justify-content:flex-start;margin-top:10px">
-              <button class="btn primary" data-command="analyzeImpactByImage">Analisar Impacto</button>
-              <button class="btn" data-command="importImpactScreenshot">Importar Screenshot</button>
-              <button class="btn" data-command="estimateChangeCostWithLocalAi">Estimar com IA Local</button>
-              <button class="btn" data-command="exportChangePackageForPaidAi">Exportar para IA Paga</button>
-              <button class="btn" data-command="openImpactReport">Abrir relatório</button>
-              <button class="btn" data-command="openImpactJson">Abrir JSON</button>
-              <button class="btn" data-command="openFilesToEdit">Abrir arquivos para edição</button>
-            </div>
+    <section class="section visual-intel">
+      <div class="section-head">
+        <div>
+          <div class="kicker">Reconhecimento Visual</div>
+          <h2>Impacto por Screenshot</h2>
+          <p class="caption">Correlacione tela, rota, componente, API, backend e SQL/PLSQL com fingerprint visual local.</p>
+        </div>
+        <div class="actions">
+          <button class="btn" data-command="importVisorScreenshots">Documentar UI no Visor</button>
+          <button class="btn primary" data-command="importImpactScreenshotAndAnalyze">Importar screenshot + analisar</button>
+        </div>
+      </div>
+      <div class="visual-grid">
+        <div class="visual-form">
+          <div class="field-grid">
+            <label class="field">
+              <span>URL da tela</span>
+              <input id="impactUrl" class="control" type="text" placeholder="/clientes/123">
+            </label>
+            <label class="field">
+              <span>Nome da tela</span>
+              <input id="impactScreenName" class="control" type="text" placeholder="Opcional">
+            </label>
           </div>
-          <div class="detail">
-            ${renderImpactSummary(impactData)}
+          <label class="field">
+            <span>Descricao da mudanca desejada</span>
+            <textarea id="impactChangeDescription" class="control textarea" placeholder="Ex: adicionar validacao de limite de credito"></textarea>
+          </label>
+          <div class="field-grid">
+            <label class="field">
+              <span>Palavras visiveis</span>
+              <input id="impactVisibleTerms" class="control" type="text" placeholder="botao salvar, limite, cliente">
+            </label>
+            <label class="field">
+              <span>Acao principal</span>
+              <input id="impactMainAction" class="control" type="text" placeholder="Salvar, filtrar, pagar">
+            </label>
+            <label class="field">
+              <span>Elemento alvo</span>
+              <input id="impactTargetElement" class="control" type="text" placeholder="Tabela, modal, campo">
+            </label>
+            <label class="field">
+              <span>Campo alvo</span>
+              <input id="impactTargetField" class="control" type="text" placeholder="Opcional">
+            </label>
           </div>
+          <label class="field">
+            <span>Regra alvo</span>
+            <input id="impactTargetRule" class="control" type="text" placeholder="Opcional">
+          </label>
+          <div class="actions visual-actions">
+            <button class="btn primary" data-command="analyzeImpactByImage">Analisar por pistas</button>
+            <button class="btn" data-command="importImpactScreenshot">Importar screenshot</button>
+            <button class="btn" data-command="estimateChangeCostWithLocalAi">Estimar com IA Local</button>
+            <button class="btn" data-command="exportChangePackageForPaidAi">Exportar pacote IA</button>
+            <button class="btn" data-command="openImpactReport">Relatorio</button>
+            <button class="btn" data-command="openImpactJson">JSON</button>
+            <button class="btn" data-command="openFilesToEdit">Arquivos</button>
+          </div>
+        </div>
+        <div class="detail impact-panel">
+          ${renderImpactSummary(impactData)}
         </div>
       </div>
     </section>
@@ -423,36 +456,46 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
 function renderImpactSummary(impactData?: OverviewHtmlInput['impactData']): string {
   const impact = impactData?.latestImpact;
   if (!impact) {
-    return `<div class="pill-list"><span class="badge badge-gray">Nenhuma análise de impacto executada ainda.</span></div>
-      <p class="caption" style="margin-top:10px">Fluxo visual: <strong>Frontend → API → Backend → SQL → Banco/PLSQL</strong></p>`;
+    return `<div class="impact-empty">
+      <span class="badge badge-gray">Nenhuma analise executada</span>
+      <strong>Pronto para fingerprint visual</strong>
+      <p class="caption">Importe um screenshot ou preencha as pistas da tela para gerar frontend, API, backend e SQL/PLSQL provaveis.</p>
+    </div>`;
   }
   const filesToReview = impact.impactEstimate.recommendedFilesToReview ?? [];
   const filesToEdit = (impactData?.latestFilesToEdit ?? impact.fileCandidates).slice(0, 10);
   const cost = impactData?.latestCostEstimate;
+  const metadata = impact.fingerprint.screenshotMetadata;
+  const visual = impact.fingerprint.visualRecognition;
+  const dimension = metadata.width && metadata.height ? `${metadata.width}x${metadata.height}` : 'N/A';
   return `
-    <div class="pill-list">
-      <span class="badge badge-blue">Impacto ${escapeHtml(impact.impactEstimate.level)}</span>
-      <span class="badge badge-gray">Score ${impact.impactEstimate.score}</span>
-      <span class="badge badge-gray">Esforço ${escapeHtml(impact.impactEstimate.estimatedEffort.label)}</span>
+    <div class="impact-scoreboard">
+      <div class="score-tile strong"><span>${impact.impactEstimate.score}</span><small>score</small></div>
+      <div class="score-tile"><span>${impact.frontendMatches.length}</span><small>frontend</small></div>
+      <div class="score-tile"><span>${impact.apiCalls.length}</span><small>API</small></div>
+      <div class="score-tile"><span>${impact.databaseImpact.tables.length}</span><small>tabelas</small></div>
     </div>
-    <ul style="margin-top:10px">
+    <div class="pill-list" style="margin-top:10px">
+      <span class="badge badge-blue">Impacto ${escapeHtml(impact.impactEstimate.level)}</span>
+      <span class="badge badge-gray">Esforco ${escapeHtml(impact.impactEstimate.estimatedEffort.label)}</span>
+      <span class="badge badge-gray">${escapeHtml(metadata.confidence ?? 'GAP')}</span>
+    </div>
+    <ul class="impact-list">
       <li><span>URL</span><span class="caption mono">${escapeHtml(impact.input.url ?? 'N/A')}</span></li>
-      <li><span>Mudança desejada</span><span class="caption">${escapeHtml(impact.input.changeDescription || 'N/A')}</span></li>
-      <li><span>Screenshot path</span><span class="caption mono">${escapeHtml(impact.input.screenshotPath ?? 'N/A')}</span></li>
+      <li><span>Tela inferida</span><span class="caption">${escapeHtml(visual?.probableScreen ?? impact.input.userHints.screenName ?? 'N/A')}</span></li>
+      <li><span>Dimensao</span><span class="caption mono">${escapeHtml(dimension)} / ${escapeHtml(metadata.viewport ?? 'N/A')}</span></li>
+      <li><span>Assinatura</span><span class="caption mono">${escapeHtml(metadata.visualSignature ?? 'N/A')}</span></li>
+      <li><span>Screenshot</span><span class="caption mono">${escapeHtml(impact.input.screenshotFileName ?? 'N/A')}</span></li>
     </ul>
-    <p class="caption" style="margin-top:10px">Fluxo visual: <strong>Frontend → API → Backend → SQL → Banco/PLSQL</strong></p>
-    <ul>
-      <li><span>Frontend</span><span class="caption">${impact.frontendMatches.length} matches</span></li>
-      <li><span>API</span><span class="caption">${impact.apiCalls.length} chamadas</span></li>
-      <li><span>Backend</span><span class="caption">${impact.backendFlow.length} nós</span></li>
-      <li><span>SQL</span><span class="caption">${impact.databaseImpact.sqlFiles.length} arquivos</span></li>
-      <li><span>Banco/PLSQL</span><span class="caption">${impact.databaseImpact.tables.length} tabelas</span></li>
-    </ul>
-    <p class="caption" style="margin-top:8px"><strong>Arquivos prováveis para edição:</strong> ${filesToEdit.map((f) => escapeHtml(f.file)).join(', ') || 'N/A'}</p>
+    <div class="trace-rail" aria-label="Fluxo visual">
+      <span>Frontend</span><span>API</span><span>Backend</span><span>SQL</span><span>PLSQL</span>
+    </div>
+    <p class="caption" style="margin-top:8px"><strong>Arquivos provaveis:</strong> ${filesToEdit.map((f) => escapeHtml(f.file)).join(', ') || 'N/A'}</p>
     <p class="caption"><strong>Arquivos para revisar:</strong> ${filesToReview.map((f) => escapeHtml(f)).join(', ') || 'N/A'}</p>
     <p class="caption"><strong>Riscos:</strong> ${impact.impactEstimate.risks.map((r) => escapeHtml(r)).join(' | ') || 'N/A'}</p>
     <p class="caption"><strong>Perguntas:</strong> ${impact.questions.map((q) => escapeHtml(q)).join(' | ') || 'N/A'}</p>
-    ${cost ? `<p class="caption"><strong>Estimativa IA Local:</strong> modelo ${escapeHtml(String(cost.model ?? 'N/A'))}, resposta ${escapeHtml(String(cost.response ?? 'N/A'))} — <code>.tic-code/impact/latest-cost-estimate.md</code></p>` : ''}
+    ${visual ? `<p class="caption"><strong>Sinais visuais:</strong> ${visual.signals.map((signal) => escapeHtml(signal)).join(' | ')}</p>` : ''}
+    ${cost ? `<p class="caption"><strong>Estimativa IA Local:</strong> modelo ${escapeHtml(String(cost.model ?? 'N/A'))}, resposta ${escapeHtml(String(cost.response ?? 'N/A'))} - <code>.tic-code/impact/latest-cost-estimate.md</code></p>` : ''}
   `;
 }
 
@@ -547,7 +590,7 @@ function renderReversaEngineSection(summary: ProjectSummary, reversaData?: Overv
     { id: 'writer', label: 'Writer', icon: '📝', status: analysisRan ? 'completed' : 'pending' },
     { id: 'reviewer', label: 'Reviewer', icon: '🔬', status: analysisRan ? 'completed' : 'pending' },
     { id: 'tracer', label: 'Tracer', icon: '📈', status: 'pending', executionMode: 'user-input', requiredInputs: ['logs/traces .log/.txt/.json/.ndjson'], generatedFiles: ['dynamic.md','runtime-evidence.md'] },
-    { id: 'visor', label: 'Visor', icon: '🖼️', status: 'pending', executionMode: 'user-input', requiredInputs: ['screenshots .png/.jpg/.jpeg/.webp'], generatedFiles: ['screenshots-index.md','ui-analysis.md','user-flows.md'] },
+    { id: 'visor', label: 'Visor', icon: '🖼️', status: 'pending', executionMode: 'user-input', requiredInputs: ['screenshots .png/.jpg/.jpeg/.webp'], generatedFiles: ['screenshots-index.md','ui-analysis.md','user-flows.md','screenshots-analysis.json'] },
     { id: 'data-master', label: 'Data Master', icon: '🗄️', status: analysisRan ? 'completed' : 'pending' },
     { id: 'design-system', label: 'Design System', icon: '🎨', status: analysisRan ? 'completed' : 'pending' },
     { id: 'chronicler', label: 'Chronicler', icon: '📚', status: analysisRan ? 'completed' : 'pending', executionMode: 'deterministic', requiredInputs: [], generatedFiles: ['session.md','history.json','changelog.md'] }

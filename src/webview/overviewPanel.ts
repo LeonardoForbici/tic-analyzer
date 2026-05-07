@@ -5,7 +5,7 @@ import { writeTicCodeFolder } from '../exporters/writeTicCodeFolder';
 import { detectEngines } from '../reversa-adapter/detectEngines';
 import type { ProjectSummary } from '../types';
 import { renderOverviewHtml } from './overviewHtml';
-import type { FileEditCandidate, ScreenImpactResult } from '../impact/impactTypes';
+import type { FileEditCandidate, ScreenImpactInput, ScreenImpactResult } from '../impact/impactTypes';
 
 export async function openOverviewPanel(context: vscode.ExtensionContext): Promise<void> {
   const root = getWorkspaceRoot();
@@ -90,6 +90,7 @@ export async function openOverviewPanel(context: vscode.ExtensionContext): Promi
         break;
       case 'importVisorScreenshots':
         await vscode.commands.executeCommand('ticCoderLite.importVisorScreenshots');
+        if (summary) { await render(panel, context, root, summary); }
         break;
       case 'analyzeImpactByImage':
         await vscode.commands.executeCommand('ticCoderLite.analyzeImpactByImage', message.payload);
@@ -97,6 +98,15 @@ export async function openOverviewPanel(context: vscode.ExtensionContext): Promi
         break;
       case 'importImpactScreenshot':
         await vscode.commands.executeCommand('ticCoderLite.importImpactScreenshot');
+        if (summary) { await render(panel, context, root, summary); }
+        break;
+      case 'importImpactScreenshotAndAnalyze':
+        {
+          const imported = await vscode.commands.executeCommand<ScreenImpactInput | undefined>('ticCoderLite.importImpactScreenshot');
+          if (imported) {
+            await vscode.commands.executeCommand('ticCoderLite.analyzeImpactByImage', { useLatestScreenInput: true });
+          }
+        }
         if (summary) { await render(panel, context, root, summary); }
         break;
       case 'estimateChangeCostWithLocalAi':

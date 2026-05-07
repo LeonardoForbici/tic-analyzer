@@ -41,6 +41,8 @@ export interface TicCoderLiteConfig {
     fastModel: string;
     qualityModel: string;
     mode: 'auto' | 'fast' | 'quality';
+    visionEnabled: boolean;
+    visionModel: string;
   };
   database: DatabaseConfig;
 }
@@ -80,7 +82,9 @@ export function getTicCoderLiteConfig(): TicCoderLiteConfig {
       model: config.get<string>('localAi.model', 'qwen2.5-coder:3b'),
       fastModel: config.get<string>('localAi.fastModel', 'qwen2.5-coder:3b'),
       qualityModel: config.get<string>('localAi.qualityModel', 'qwen2.5-coder:7b'),
-      mode: validateMode(config.get<string>('localAi.mode', 'auto'))
+      mode: validateMode(config.get<string>('localAi.mode', 'auto')),
+      visionEnabled: config.get<boolean>('localAi.visionEnabled', true),
+      visionModel: config.get<string>('localAi.visionModel', 'llava:7b')
     },
     database: {
       largeMode: config.get<boolean>('database.largeMode', true),

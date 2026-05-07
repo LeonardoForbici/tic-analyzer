@@ -68,7 +68,9 @@ function getTicCoderLiteConfig() {
             model: config.get('localAi.model', 'qwen2.5-coder:3b'),
             fastModel: config.get('localAi.fastModel', 'qwen2.5-coder:3b'),
             qualityModel: config.get('localAi.qualityModel', 'qwen2.5-coder:7b'),
-            mode: validateMode(config.get('localAi.mode', 'auto'))
+            mode: validateMode(config.get('localAi.mode', 'auto')),
+            visionEnabled: config.get('localAi.visionEnabled', true),
+            visionModel: config.get('localAi.visionModel', 'llava:7b')
         },
         database: {
             largeMode: config.get('database.largeMode', true),

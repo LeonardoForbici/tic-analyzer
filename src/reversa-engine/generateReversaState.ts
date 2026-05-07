@@ -27,7 +27,7 @@ export function generateReversaState(summary: ProjectSummary): ReversaState {
   const visorPending = mkAgent(now, {
     id: 'visor', name: 'Visor', role: 'Documentação de UI via screenshots', executionMode: 'user-input',
     status: 'pending', requiredInputs: ['Importar screenshots .png/.jpg/.jpeg/.webp em .tic-code/reversa/inputs/visor/'],
-    generatedFiles: ['.tic-code/reverse-engineering/ui/screenshots-index.md', '.tic-code/reverse-engineering/ui/ui-analysis.md', '.tic-code/reverse-engineering/ui/user-flows.md'],
+    generatedFiles: ['.tic-code/reverse-engineering/ui/screenshots-index.md', '.tic-code/reverse-engineering/ui/ui-analysis.md', '.tic-code/reverse-engineering/ui/user-flows.md', '.tic-code/reverse-engineering/ui/screenshots-analysis.json'],
     warnings: ['Aguardando importação de screenshots.']
   });
 

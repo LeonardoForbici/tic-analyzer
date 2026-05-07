@@ -289,6 +289,7 @@ async function generateCoreAgentArtifacts(root: vscode.WorkspaceFolder): Promise
     '.tic-code/reverse-engineering/ui/screenshots-index.md': '# Screenshots Index\n\nNenhum screenshot importado.\n',
     '.tic-code/reverse-engineering/ui/ui-analysis.md': '# UI Analysis\n\nLacuna: screenshots não fornecidas.\n',
     '.tic-code/reverse-engineering/ui/user-flows.md': '# User Flows\n\nLacuna: sem fluxo inferido por falta de imagens.\n',
+    '.tic-code/reverse-engineering/ui/screenshots-analysis.json': '[]\n',
     '.tic-code/reverse-engineering/database/README.md': '# Database\n\nArtefatos de banco gerados por análise estática.\n',
     '.tic-code/reverse-engineering/database/tables.md': '# Tables\n\nBanco não detectado ou sem DDL explícito.\n',
     '.tic-code/reverse-engineering/database/views.md': '# Views\n\nSem views detectadas.\n',

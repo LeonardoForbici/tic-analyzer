@@ -115,6 +115,16 @@
           "default": "qwen2.5-coder:7b",
           "description": "Modelo usado para tarefas complexas (PL/SQL, regras de negócio, domínio, state machines, permissões, arquivos críticos). Pode ser maior."
         },
+        "ticCoderLite.localAi.visionEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ativa reconhecimento opcional de screenshots com modelo local vision do Ollama quando a IA Local estiver ligada."
+        },
+        "ticCoderLite.localAi.visionModel": {
+          "type": "string",
+          "default": "llava:7b",
+          "description": "Modelo vision do Ollama usado para extrair texto e elementos de screenshots. Ex: llava:7b, llava:latest ou moondream:latest."
+        },
         "ticCoderLite.localAi.mode": {
           "type": "string",
           "enum": [
@@ -266,8 +276,9 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "tsc -p ./ --noEmit",
+    "verify:package": "node scripts/verify-package-files.js",
     "package": "vsce package --no-dependencies --allow-missing-repository",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "npm run compile && npm run verify:package"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

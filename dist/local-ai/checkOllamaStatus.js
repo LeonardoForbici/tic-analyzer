@@ -45,7 +45,9 @@ function getLocalAiSettings() {
         model: config.get('model', 'qwen2.5-coder:3b'),
         fastModel: config.get('fastModel', 'qwen2.5-coder:3b'),
         qualityModel: config.get('qualityModel', 'qwen2.5-coder:7b'),
-        mode: config.get('mode', 'fast')
+        mode: config.get('mode', 'fast'),
+        visionEnabled: config.get('visionEnabled', true),
+        visionModel: config.get('visionModel', 'llava:7b')
     };
 }
 async function checkOllamaStatus(settings = getLocalAiSettings()) {
@@ -58,25 +60,28 @@ async function checkOllamaStatus(settings = getLocalAiSettings()) {
             models: [],
             fastModelAvailable: false,
             qualityModelAvailable: false,
-            message: 'A IA Local está desativada nas configurações. O Modo Lite continua funcionando normalmente.'
+            visionModelAvailable: false,
+            message: 'A IA Local esta desativada nas configuracoes. O Modo Lite continua funcionando normalmente.'
         };
     }
     try {
         const client = new ollamaClient_1.OllamaClient({ baseUrl: settings.ollamaUrl, model: settings.fastModel });
-        const models = (await client.listModels()).map((m) => m.name);
+        const models = (await client.listModels()).map((model) => model.name);
         const fastModelAvailable = models.includes(settings.fastModel);
         const qualityModelAvailable = models.includes(settings.qualityModel);
+        const visionModelAvailable = settings.visionEnabled && models.includes(settings.visionModel);
         const anyAvailable = fastModelAvailable || qualityModelAvailable;
         let message;
         if (anyAvailable) {
             const available = [
                 fastModelAvailable ? settings.fastModel : null,
-                qualityModelAvailable ? settings.qualityModel : null
+                qualityModelAvailable ? settings.qualityModel : null,
+                visionModelAvailable ? `${settings.visionModel} (vision)` : null
             ].filter(Boolean).join(', ');
-            message = `Ollama disponível com: ${available}.`;
+            message = `Ollama disponivel com: ${available}.`;
         }
         else {
-            message = `Ollama está em execução, mas nenhum modelo configurado foi encontrado. Instale com: ollama pull ${settings.fastModel}`;
+            message = `Ollama esta em execucao, mas nenhum modelo configurado foi encontrado. Instale com: ollama pull ${settings.fastModel}`;
         }
         return {
             ok: anyAvailable,
@@ -86,6 +91,7 @@ async function checkOllamaStatus(settings = getLocalAiSettings()) {
             models,
             fastModelAvailable,
             qualityModelAvailable,
+            visionModelAvailable,
             message
         };
     }
@@ -98,7 +104,8 @@ async function checkOllamaStatus(settings = getLocalAiSettings()) {
             models: [],
             fastModelAvailable: false,
             qualityModelAvailable: false,
-            message: `Ollama não está acessível em ${settings.ollamaUrl}. Inicie o Ollama localmente ou continue usando o Modo Lite sem IA.`
+            visionModelAvailable: false,
+            message: `Ollama nao esta acessivel em ${settings.ollamaUrl}. Inicie o Ollama localmente ou continue usando o Modo Lite sem IA.`
         };
     }
 }
