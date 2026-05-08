@@ -171,6 +171,7 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
         <p>A IA Padrão grava arquivos nativos para ferramentas de codificação assistida.</p>
         <div class="actions">
           <button class="btn primary" data-command="exportForCodex">Exportar para Codex</button>
+          <button class="btn" data-command="exportForClaude">Exportar para Claude</button>
           <button class="btn" data-command="openTicCodeFolder">Abrir .tic-code</button>
         <button class="btn" data-command="openReverseEngineeringFolder">Abrir reverse-engineering</button>
           <button class="btn" data-command="exportForCopilot">Exportar para Copilot</button>
