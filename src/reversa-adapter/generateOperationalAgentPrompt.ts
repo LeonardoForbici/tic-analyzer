@@ -102,6 +102,7 @@ Antes de alterar código, leia:
 
 | Artefato | Conteúdo |
 | --- | --- |
+| \`.tic-code/reversa/reversa-task.md\` | **Prompt ativo:** instruções para completar a eng. reversa |
 | \`.tic-code/reverse-engineering/operational-contracts.md\` | Contratos operacionais por módulo |
 | \`.tic-code/reverse-engineering/business-rules.md\` | Regras de negócio candidatas |
 | \`.tic-code/reverse-engineering/confidence-report.md\` | Cobertura e lacunas |
@@ -109,8 +110,12 @@ Antes de alterar código, leia:
 | \`.tic-code/reverse-engineering/architecture.md\` | Arquitetura detectada |
 | \`.tic-code/reverse-engineering/gaps.md\` | Lacunas 🔴 não confirmadas |
 | \`.tic-code/reverse-engineering/questions.md\` | Perguntas para o especialista |
+| \`.tic-code/reverse-engineering/ui/ui-analysis.md\` | Análise de UI (screenshots) |
+| \`.tic-code/reverse-engineering/ui/vision-prompt.md\` | Prompt para IA com visão (Claude/Gemini/GPT) |
 | \`.tic-code/reverse-engineering/traceability/code-spec-matrix.md\` | Rastreabilidade código ↔ spec |
-| \`.tic-code/reverse-engineering/traceability/risk-impact-matrix.md\` | Riscos ↔ impacto ↔ módulo |`;
+| \`.tic-code/reverse-engineering/traceability/risk-impact-matrix.md\` | Riscos ↔ impacto ↔ módulo |
+
+> 💡 Para completar as lacunas 🔴 com IA, leia \`.tic-code/reversa/reversa-task.md\` e execute as fases descritas.`;
 
   // ── Instruções operacionais ───────────────────────────────────────────────
   const operationalInstructions = renderOperationalInstructions(engineName);

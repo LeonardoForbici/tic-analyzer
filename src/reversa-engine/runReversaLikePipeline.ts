@@ -34,6 +34,7 @@ import { generateReversaState } from './generateReversaState';
 import { generateReversaConfig, renderManifestYaml } from './generateReversaConfig';
 import { generateReversaPlan } from './generateReversaPlan';
 import { generateReversaSddStructure } from './generateReversaSddStructure';
+import { generateReversaTaskPrompt } from './generateReversaTaskPrompt';
 import { copyEmbeddedReversa } from './copyEmbeddedReversa';
 import type { ReversaEngineResult } from './reversaEngineTypes';
 import type { ReversaSurface, ReversaModulesContext } from './reversaEngineTypes';
@@ -100,6 +101,9 @@ export async function runReversaLikePipeline(
 
   const plan = generateReversaPlan(summary);
   await write(root, PLAN_FILE, plan);
+
+  const taskPrompt = generateReversaTaskPrompt(summary);
+  await write(root, `${REVERSA_DIR}/reversa-task.md`, taskPrompt);
 
   await write(root, VERSION_FILE, REVERSA_VERSION);
 

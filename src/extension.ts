@@ -16,6 +16,7 @@ import { exportAiReviewPromptCommand, openChangeFirewallReportCommand, openLegac
 import { runChangeFirewallOnGitDiffCommand, runChangeTwinCommand } from './change-firewall/runChangeTwin';
 import { generateChangeApprovalPackCommand, openChangeApprovalPackCommand } from './change-firewall/generateChangeApprovalPack';
 import { analyzeDependencyChangeCommand, openDepImpactReportCommand, openDepImpactMigrationPlanCommand, openDepImpactApprovalPackCommand } from './dependency-impact/analyzeDependencyChange';
+import { analyzeWhatIfCommand } from './commands/analyzeWhatIf';
 import { ProjectSummary } from './types';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -57,6 +58,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ,vscode.commands.registerCommand('ticCoderLite.openDepImpactReport', () => openDepImpactReportCommand())
     ,vscode.commands.registerCommand('ticCoderLite.openDepImpactMigrationPlan', () => openDepImpactMigrationPlanCommand())
     ,vscode.commands.registerCommand('ticCoderLite.openDepImpactApprovalPack', () => openDepImpactApprovalPackCommand())
+    ,vscode.commands.registerCommand('ticCoderLite.analyzeWhatIf', () => analyzeWhatIfCommand(context))
   );
 }
 
@@ -102,6 +104,7 @@ class TicCoderLiteTreeProvider implements vscode.TreeDataProvider<TicCoderLiteIt
       commandItem('Impacto por Imagem/Tela: Analisar', 'ticCoderLite.analyzeImpactByImage', 'Mapear frontend → backend → SQL/PLSQL por URL de tela'),
       commandItem('AI Change Firewall: Simular Mudanca', 'ticCoderLite.runChangeTwin', 'Gerar Change Twin sem alterar codigo'),
       commandItem('AI Change Firewall: Validar Diff', 'ticCoderLite.runChangeFirewallOnGitDiff', 'Cruzar diff local com regras, contratos e antibodies'),
+      commandItem('What-If: Analisar Impacto de Mudança', 'ticCoderLite.analyzeWhatIf', 'Analisar todos os pontos impactados por uma mudança hipotética'),
       summaryItem(summary)
     ];
   }

@@ -1092,8 +1092,139 @@ function getOverviewScript(nonce) {
         document.querySelectorAll('.mpg-tab').forEach((panel) => {
           panel.style.display = panel.id === ('mpg-tab-' + tab) ? '' : 'none';
         });
+        if (tab === 'visual-graph') renderMultiProjectGraph();
       });
     });
+
+    function renderMultiProjectGraph() {
+      const svg = document.getElementById('mpgVisSvg');
+      if (!svg) return;
+      const pg = state.projectGraph && state.projectGraph.projectGraph;
+      const cl = state.projectGraph && state.projectGraph.crossProjectLinks;
+      if (!pg || !pg.projects || !pg.projects.length) {
+        svg.innerHTML = '<text x="20" y="30" font-size="13" fill="var(--muted)">Rode Analisar Workspace para gerar o grafo multi-projeto.</text>';
+        return;
+      }
+
+      const projects = pg.projects;
+      const crossLinks = cl && cl.links ? cl.links : [];
+      const W = 900, H = 520;
+      svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+      svg.innerHTML = '';
+
+      const layerYMap = { frontend: 30, mobile: 30, backend: 200, shared: 200, database: 380, infra: 460 };
+      const colorMap = { frontend: '#38bdf8', mobile: '#c4b5fd', backend: '#86efac', shared: '#fdba74', database: '#fcd34d', infra: '#94a3b8' };
+      const layerKeys = ['frontend', 'mobile', 'backend', 'shared', 'database', 'infra'];
+      const layerGroups = {};
+      for (const lk of layerKeys) layerGroups[lk] = projects.filter((p) => p.kind === lk);
+
+      // Position projects
+      const projectPos = new Map();
+      const BOX_H = 110, BOX_GAP = 20;
+      for (const lk of layerKeys) {
+        const group = layerGroups[lk];
+        if (!group.length) continue;
+        const boxW = Math.min(200, Math.floor((W - 40 - BOX_GAP * (group.length - 1)) / group.length));
+        const totalW = group.length * boxW + (group.length - 1) * BOX_GAP;
+        const startX = (W - totalW) / 2;
+        group.forEach((p, i) => {
+          projectPos.set(p.id, { x: startX + i * (boxW + BOX_GAP), y: layerYMap[lk], w: boxW, h: BOX_H, color: colorMap[lk] || '#94a3b8' });
+        });
+      }
+
+      // Defs: arrowhead
+      const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+      const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+      marker.setAttribute('id', 'mpg-arrow'); marker.setAttribute('markerWidth', '8'); marker.setAttribute('markerHeight', '8');
+      marker.setAttribute('refX', '7'); marker.setAttribute('refY', '3'); marker.setAttribute('orient', 'auto');
+      const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      arrowPath.setAttribute('d', 'M0,0 L0,6 L8,3 z'); arrowPath.setAttribute('fill', '#38bdf8');
+      marker.appendChild(arrowPath); defs.appendChild(marker); svg.appendChild(defs);
+
+      // Deduplicate cross-project links
+      const pairMap = new Map();
+      for (const lnk of crossLinks) {
+        const key = lnk.fromProjectId + '→' + lnk.toProjectId;
+        if (!pairMap.has(key)) pairMap.set(key, { fromProjectId: lnk.fromProjectId, toProjectId: lnk.toProjectId, count: 0, endpoints: [] });
+        const e = pairMap.get(key); e.count++;
+        if (lnk.endpoint && e.endpoints.length < 3) e.endpoints.push((lnk.method || 'GET') + ' ' + lnk.endpoint);
+      }
+
+      // Draw edges
+      for (const [, link] of pairMap) {
+        const from = projectPos.get(link.fromProjectId);
+        const to = projectPos.get(link.toProjectId);
+        if (!from || !to) continue;
+        const x1 = from.x + from.w / 2, y1 = from.y + from.h;
+        const x2 = to.x + to.w / 2, y2 = to.y;
+        const midY = (y1 + y2) / 2;
+        const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        pathEl.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + midY + ' ' + x2 + ',' + midY + ' ' + x2 + ',' + y2);
+        pathEl.setAttribute('fill', 'none'); pathEl.setAttribute('stroke', '#38bdf8');
+        pathEl.setAttribute('stroke-width', String(Math.min(5, 1.5 + link.count * 0.5)));
+        pathEl.setAttribute('stroke-opacity', '0.75'); pathEl.setAttribute('marker-end', 'url(#mpg-arrow)');
+        svg.appendChild(pathEl);
+        if (link.endpoints.length > 0) {
+          const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          lbl.setAttribute('x', String((x1 + x2) / 2)); lbl.setAttribute('y', String(midY - 5));
+          lbl.setAttribute('text-anchor', 'middle'); lbl.setAttribute('font-size', '9'); lbl.setAttribute('fill', '#38bdf8');
+          lbl.textContent = link.endpoints[0].slice(0, 38) + (link.endpoints.length > 1 ? ' +' + (link.endpoints.length - 1) : '');
+          svg.appendChild(lbl);
+        }
+      }
+
+      // Draw project boxes
+      for (const p of projects) {
+        const pos = projectPos.get(p.id);
+        if (!pos) continue;
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', pos.x); rect.setAttribute('y', pos.y);
+        rect.setAttribute('width', pos.w); rect.setAttribute('height', pos.h);
+        rect.setAttribute('rx', '8'); rect.setAttribute('fill', 'var(--panel-2)');
+        rect.setAttribute('stroke', pos.color); rect.setAttribute('stroke-width', '2');
+        svg.appendChild(rect);
+        const kindT = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        kindT.setAttribute('x', String(pos.x + 8)); kindT.setAttribute('y', String(pos.y + 16));
+        kindT.setAttribute('font-size', '9'); kindT.setAttribute('fill', pos.color); kindT.setAttribute('font-weight', 'bold');
+        kindT.textContent = (p.kind || '').toUpperCase(); svg.appendChild(kindT);
+        const nameT = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        nameT.setAttribute('x', String(pos.x + pos.w / 2)); nameT.setAttribute('y', String(pos.y + 40));
+        nameT.setAttribute('text-anchor', 'middle'); nameT.setAttribute('font-size', '12');
+        nameT.setAttribute('font-weight', '600'); nameT.setAttribute('fill', 'var(--fg)');
+        nameT.textContent = (p.name || '').length > 22 ? (p.name || '').slice(0, 19) + '...' : (p.name || '');
+        svg.appendChild(nameT);
+        const stackT = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        stackT.setAttribute('x', String(pos.x + pos.w / 2)); stackT.setAttribute('y', String(pos.y + 60));
+        stackT.setAttribute('text-anchor', 'middle'); stackT.setAttribute('font-size', '9'); stackT.setAttribute('fill', 'var(--muted)');
+        stackT.textContent = (p.stack || []).slice(0, 3).join(', '); svg.appendChild(stackT);
+        const statsT = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        statsT.setAttribute('x', String(pos.x + pos.w / 2)); statsT.setAttribute('y', String(pos.y + 80));
+        statsT.setAttribute('text-anchor', 'middle'); statsT.setAttribute('font-size', '9'); statsT.setAttribute('fill', 'var(--muted)');
+        statsT.textContent = (p.files || 0) + ' arq · ' + (p.risks || 0) + ' riscos'; svg.appendChild(statsT);
+        // Link count badge
+        const lc = [...pairMap.values()].filter((lnk) => lnk.fromProjectId === p.id || lnk.toProjectId === p.id).reduce((s, lnk) => s + lnk.count, 0);
+        if (lc > 0) {
+          const bRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          bRect.setAttribute('x', String(pos.x + pos.w - 34)); bRect.setAttribute('y', String(pos.y + 8));
+          bRect.setAttribute('width', '26'); bRect.setAttribute('height', '14');
+          bRect.setAttribute('rx', '7'); bRect.setAttribute('fill', '#38bdf866'); svg.appendChild(bRect);
+          const bT = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          bT.setAttribute('x', String(pos.x + pos.w - 21)); bT.setAttribute('y', String(pos.y + 19));
+          bT.setAttribute('text-anchor', 'middle'); bT.setAttribute('font-size', '9'); bT.setAttribute('fill', '#38bdf8');
+          bT.textContent = lc + ' 🔗'; svg.appendChild(bT);
+        }
+      }
+
+      // Layer labels on the left
+      const layerLabels = { frontend: 'Frontend', mobile: 'Mobile', backend: 'Backend / API', shared: 'Shared', database: 'SQL / Database', infra: 'Infra' };
+      for (const lk of layerKeys) {
+        if (!layerGroups[lk].length) continue;
+        const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        lbl.setAttribute('x', '6'); lbl.setAttribute('y', String(layerYMap[lk] + 20));
+        lbl.setAttribute('font-size', '9'); lbl.setAttribute('fill', colorMap[lk] || '#94a3b8'); lbl.setAttribute('font-weight', 'bold');
+        lbl.textContent = (layerLabels[lk] || lk).toUpperCase(); svg.appendChild(lbl);
+      }
+    }
   </script>`;
 }
 //# sourceMappingURL=webviewAssets.js.map

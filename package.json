@@ -99,6 +99,10 @@
         "title": "TIC Coder Lite: Validar Diff Atual com AI Change Firewall"
       },
       {
+        "command": "ticCoderLite.analyzeWhatIf",
+        "title": "TIC Coder Lite: What-If – Analisar Impacto de Mudança Hipotética"
+      },
+      {
         "command": "ticCoderLite.openChangeFirewallReport",
         "title": "TIC Coder Lite: Abrir Relatório do AI Change Firewall"
       },

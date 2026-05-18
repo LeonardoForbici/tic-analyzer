@@ -151,6 +151,7 @@ Antes de qualquer mudança, leia:
 | --- | --- |
 | \`.tic-code/reversa/state.json\` | Estado da pipeline (fases, checkpoints) |
 | \`.tic-code/reversa/plan.md\` | Plano completo de análise |
+| \`.tic-code/reversa/reversa-task.md\` | **Prompt ativo:** instruções para completar a eng. reversa |
 | \`.tic-code/reverse-engineering/operational-contracts.md\` | Contratos por módulo |
 | \`.tic-code/reverse-engineering/business-rules.md\` | Regras de negócio candidatas |
 | \`.tic-code/reverse-engineering/confidence-report.md\` | Cobertura e lacunas |
@@ -158,8 +159,13 @@ Antes de qualquer mudança, leia:
 | \`.tic-code/reverse-engineering/architecture.md\` | Arquitetura detectada |
 | \`.tic-code/reverse-engineering/gaps.md\` | Lacunas 🔴 abertas |
 | \`.tic-code/reverse-engineering/questions.md\` | Perguntas para especialistas |
+| \`.tic-code/reverse-engineering/ui/ui-analysis.md\` | Análise de UI (screenshots) |
+| \`.tic-code/reverse-engineering/ui/vision-prompt.md\` | Prompt para IA com visão (anexar imagens) |
 | \`.tic-code/reverse-engineering/traceability/code-spec-matrix.md\` | Rastreabilidade código ↔ spec |
-| \`.tic-code/reverse-engineering/traceability/risk-impact-matrix.md\` | Riscos ↔ impacto |`;
+| \`.tic-code/reverse-engineering/traceability/risk-impact-matrix.md\` | Riscos ↔ impacto |
+
+> 💡 Para completar as lacunas 🔴 com análise semântica, leia \`.tic-code/reversa/reversa-task.md\` e execute as fases.
+> 📸 Para análise visual de UI com IA paga: copie \`vision-prompt.md\` + anexe as imagens no chat (Claude/Gemini/GPT).`;
 }
 
 function buildInstructionsSection(engineLabel: string): string {

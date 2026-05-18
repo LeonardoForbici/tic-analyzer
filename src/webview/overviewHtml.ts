@@ -665,6 +665,7 @@ function renderProjectGraphSection(data?: OverviewHtmlInput['projectGraphData'])
 
     <div class="graph-tabs" style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap">
       <button class="btn compact mpg-tab-btn active" data-tab="pontes">Pontes (${crossLinks.length})</button>
+      <button class="btn compact mpg-tab-btn" data-tab="visual-graph">🗺️ Grafo Visual</button>
       <button class="btn compact mpg-tab-btn" data-tab="frontend">Frontend API (${(fe as unknown[]).flatMap((f: unknown) => ((f as Record<string, unknown>)['calls'] as unknown[] ?? [])).length})</button>
       <button class="btn compact mpg-tab-btn" data-tab="backend">Backend Endpoints (${(be as unknown[]).flatMap((b: unknown) => ((b as Record<string, unknown>)['endpoints'] as unknown[] ?? [])).length})</button>
     </div>
@@ -693,6 +694,13 @@ function renderProjectGraphSection(data?: OverviewHtmlInput['projectGraphData'])
           }).join('')}
         </tbody>
       </table></div>`}
+    </div>
+
+    <div id="mpg-tab-visual-graph" class="mpg-tab" style="display:none">
+      <p class="caption" style="margin-bottom:8px">Cada caixa é um projeto. As setas mostram pontes de API detectadas entre projetos.</p>
+      <div style="overflow-x:auto;background:var(--panel);border-radius:8px;padding:4px">
+        <svg id="mpgVisSvg" width="900" height="520" style="display:block;max-width:100%"></svg>
+      </div>
     </div>
 
     <div id="mpg-tab-frontend" class="mpg-tab" style="display:none">

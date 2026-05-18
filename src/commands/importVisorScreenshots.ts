@@ -63,12 +63,15 @@ export async function importVisorScreenshotsCommand(): Promise<void> {
         primaryAction: shot.primaryAction
       });
     }
-    const docs = generateUiDocs(analysis);
+
+    const workspaceName = root.name || path.basename(root.uri.fsPath);
+    const docs = generateUiDocs(analysis, workspaceName);
     const uiDir = vscode.Uri.joinPath(root.uri, '.tic-code', 'reverse-engineering', 'ui');
     await vscode.workspace.fs.createDirectory(uiDir);
     await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(uiDir, 'screenshots-index.md'), Buffer.from(docs.index, 'utf8'));
     await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(uiDir, 'ui-analysis.md'), Buffer.from(docs.analysis, 'utf8'));
     await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(uiDir, 'user-flows.md'), Buffer.from(docs.flows, 'utf8'));
+    await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(uiDir, 'vision-prompt.md'), Buffer.from(docs.visionPrompt, 'utf8'));
     await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(uiDir, 'screenshots-analysis.json'), Buffer.from(JSON.stringify(analysis, null, 2), 'utf8'));
 
     const warnings = [...new Set(analysis.flatMap((shot) => shot.warnings))];
@@ -79,6 +82,7 @@ export async function importVisorScreenshotsCommand(): Promise<void> {
         '.tic-code/reverse-engineering/ui/screenshots-index.md',
         '.tic-code/reverse-engineering/ui/ui-analysis.md',
         '.tic-code/reverse-engineering/ui/user-flows.md',
+        '.tic-code/reverse-engineering/ui/vision-prompt.md',
         '.tic-code/reverse-engineering/ui/screenshots-analysis.json'
       ],
       confidenceSummary: {
@@ -89,7 +93,19 @@ export async function importVisorScreenshotsCommand(): Promise<void> {
       warnings,
       errors: []
     });
-    vscode.window.showInformationMessage(`Visor: ${accepted.length} screenshot(s) importado(s) com reconhecimento visual local.`);
+
+    const action = await vscode.window.showInformationMessage(
+      `Visor: ${accepted.length} screenshot(s) importado(s). Para análise visual com IA paga (Claude/Gemini/GPT), use o vision-prompt.md gerado.`,
+      'Abrir Vision Prompt',
+      'Abrir UI Analysis'
+    );
+    if (action === 'Abrir Vision Prompt') {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(uiDir, 'vision-prompt.md'));
+      await vscode.window.showTextDocument(doc);
+    } else if (action === 'Abrir UI Analysis') {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(uiDir, 'ui-analysis.md'));
+      await vscode.window.showTextDocument(doc);
+    }
   } catch (error) {
     await updateAgentState(root, 'visor', { status: 'failed', errors: [String(error)] });
     vscode.window.showErrorMessage('Visor: falha ao importar/analisar screenshots.');

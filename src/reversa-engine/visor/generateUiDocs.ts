@@ -1,12 +1,21 @@
 import type { VisorShot } from './analyzeVisorScreenshots';
 import { formatBytes } from './screenshotRecognition';
+import { generateVisionPrompt } from './generateVisionPrompt';
 
-export function generateUiDocs(shots: VisorShot[]): { index: string; analysis: string; flows: string } {
+export interface UiDocsOutput {
+  index: string;
+  analysis: string;
+  flows: string;
+  visionPrompt: string;
+}
+
+export function generateUiDocs(shots: VisorShot[], projectName?: string): UiDocsOutput {
   const ordered = [...shots].sort((a, b) => (a.flowStage ?? 9999) - (b.flowStage ?? 9999));
   return {
     index: renderIndex(ordered),
     analysis: renderAnalysis(ordered),
-    flows: renderFlows(ordered)
+    flows: renderFlows(ordered),
+    visionPrompt: generateVisionPrompt(ordered, projectName ?? 'projeto')
   };
 }
 
@@ -38,8 +47,30 @@ function renderAnalysis(shots: VisorShot[]): string {
     return '# UI Analysis\n\n- GAP: Nenhum screenshot importado para analise.\n';
   }
 
+  const header = `# UI Analysis
+
+> **Para Copilot/IA sem visão:** Este arquivo contém TODOS os metadados textuais extraídos das screenshots.
+> Use estas informações para entender a UI do sistema sem precisar ver as imagens.
+>
+> **Para Claude/Gemini/GPT (com visão):** Consulte \`.tic-code/reverse-engineering/ui/vision-prompt.md\`
+> para um prompt otimizado — cole no chat junto com as imagens para análise visual completa.
+
+## Resumo Executivo
+
+- Total de telas analisadas: ${shots.length}
+- Com confiança alta (CONFIRMED): ${shots.filter((s) => combinedConfidence(s) === 'CONFIRMED').length}
+- Com inferência (INFERRED): ${shots.filter((s) => combinedConfidence(s) === 'INFERRED').length}
+- Com lacunas (GAP): ${shots.filter((s) => combinedConfidence(s) === 'GAP').length}
+- Tipos de tela detectados: ${[...new Set(shots.map((s) => s.screenType))].filter((t) => t !== 'unknown').join(', ') || 'nenhum'}
+- Viewports: ${[...new Set(shots.map((s) => s.viewport))].filter((v) => v !== 'unknown').join(', ') || 'GAP'}
+
+---
+
+`;
+
   const body = shots.map((shot) => `## ${cell(shot.localVision?.screenName ?? shot.probableScreen)}
-- Arquivo: ${shot.fileName}
+- Arquivo: \`${shot.fileName}\`
+- Caminho: \`.tic-code/reversa/inputs/visor/${shot.fileName}\`
 - Formato/dimensao: ${shot.format} ${dimensions(shot)} (${formatBytes(shot.sizeBytes)})
 - Viewport/orientacao: ${shot.viewport} / ${shot.orientation}
 - Tipo/estado: ${shot.screenType} / ${shot.uiState}
@@ -56,18 +87,32 @@ ${list(shot.signals)}
 ${list(shot.candidateTerms)}
 
 ### Rotas candidatas
+> Use estas rotas para buscar no código: grep por estes paths em arquivos de router/routes
 ${list(shot.routeCandidates)}
 
 ### Componentes candidatos
+> Busque por estes nomes de componente nos arquivos fonte do projeto
 ${list(shot.componentCandidates)}
 
 ### Lacunas e alertas
 ${list(shot.warnings)}
 `).join('\n');
 
-  return `# UI Analysis
+  const footer = `
+---
 
-${body}`;
+## Instrução para Agente de IA (Copilot/Claude/etc.)
+
+Ao receber uma tarefa de modificação de UI neste projeto:
+
+1. Consulte este arquivo para identificar QUAL tela é afetada
+2. Use as **rotas candidatas** para localizar o arquivo de rota/router
+3. Use os **componentes candidatos** para buscar o componente fonte real
+4. Valide com \`.tic-code/reverse-engineering/code-analysis.md\` para confirmar dependências
+5. Se a confiança for 🟡 ou 🔴, pergunte ao usuário antes de modificar
+`;
+
+  return header + body + footer;
 }
 
 function renderFlows(shots: VisorShot[]): string {
