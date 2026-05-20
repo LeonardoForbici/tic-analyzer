@@ -427,8 +427,16 @@ function detectMultipleProjects(scan, risks) {
         const fileCount = dirFiles.length;
         const riskCount = risks?.risks.filter((r) => r.file.startsWith(`${dir}/`)).length ?? 0;
         const evidence = dirFiles.slice(0, 5).map((f) => f.relativePath);
+        // Use the canonical kind as the ID so that cross-project bridge IDs
+        // ('frontend', 'backend', …) match the project IDs rendered by the UI,
+        // which prefers the detectProjects() canonical set. For workspaces with
+        // multiple dirs of the same kind (rare), the first wins and later ones
+        // are aliased to the same ID – bridges still display correctly.
+        const canonicalId = projects.some((p) => p.id === dirKind)
+            ? `${dirKind}-${slugify(dir)}`
+            : dirKind;
         projects.push({
-            id: slugify(dir),
+            id: canonicalId,
             name: dir,
             rootPath: scan.rootPath,
             relativePath: dir,
@@ -461,6 +469,15 @@ function classifyTopLevelDir(dir, files) {
     const hasNextConfig = relPaths.some((r) => r.endsWith('next.config.js'));
     const hasAngular = relPaths.some((r) => r.endsWith('angular.json'));
     const hasPackageJson = relPaths.some((r) => r.endsWith('package.json'));
+    // A Node.js project whose directory name signals backend/API must not be
+    // captured by the (hasPackageJson && !hasJava) frontend catch-all below.
+    const isNodeBackendByName = hasPackageJson && !hasJava &&
+        (lower.includes('backend') || lower.includes('-api') ||
+            lower.includes('_api') || lower.endsWith('api') ||
+            lower.includes('-service') || lower.includes('_service') ||
+            lower.includes('server'));
+    if (isNodeBackendByName)
+        return 'backend';
     if (lower.includes('frontend') || lower.includes('client') || lower.includes('web') || lower.includes('ui') ||
         hasReact || hasVite || hasNextConfig || hasAngular ||
         (hasPackageJson && !hasJava))
