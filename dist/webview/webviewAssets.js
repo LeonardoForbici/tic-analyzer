@@ -1131,8 +1131,6 @@ function getOverviewScript(nonce) {
       });
     });
 
-    renderMultiProjectGraph();
-
     function renderMultiProjectGraph() {
       const svg = document.getElementById('mpgVisSvg');
       if (!svg) return;

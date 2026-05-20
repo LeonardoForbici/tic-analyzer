@@ -496,6 +496,158 @@ function renderWorkspaceIntelligence(projects, projectGraphData) {
   </section>`;
 }
 // ─── 3. Project Graph ────────────────────────────────────────────────────────
+function buildMultiProjectSvg(projects, crossLinks) {
+    const BG = '#0f172a', PANEL2 = '#253347', FG = '#e2e8f0', MUTED = '#64748b';
+    const colorByKind = {
+        frontend: '#38bdf8', mobile: '#c4b5fd', backend: '#86efac',
+        shared: '#fdba74', database: '#fcd34d', infra: '#94a3b8'
+    };
+    const layerKeys = ['frontend', 'mobile', 'backend', 'shared', 'database', 'infra'];
+    const layerLabels = {
+        frontend: 'Frontend', mobile: 'Mobile', backend: 'Backend/API',
+        shared: 'Shared', database: 'SQL/DB', infra: 'Infra'
+    };
+    if (!projects.length) {
+        return `<svg xmlns="http://www.w3.org/2000/svg" width="860" height="80">
+      <rect width="860" height="80" fill="${BG}"/>
+      <text x="20" y="44" font-size="13" fill="${MUTED}" font-family="monospace">Rode Analisar Workspace para gerar o grafo multi-projeto.</text>
+    </svg>`;
+    }
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const trunc = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
+    const W = 860, PAD_L = 56, BOX_MIN_W = 220, BOX_H = 100, BOX_GAP = 16, LAYER_GAP = 44, TOP_PAD = 24;
+    const projs = projects.map((p) => {
+        const r = p;
+        return { id: String(r['id'] ?? ''), name: String(r['name'] ?? r['id'] ?? ''), kind: String(r['kind'] ?? 'unknown'), files: Number(r['files'] ?? 0), risks: Number(r['risks'] ?? 0), stack: r['stack'] ?? [] };
+    }).filter((p) => layerKeys.includes(p.kind));
+    const links = crossLinks.map((l) => {
+        const r = l;
+        return { fromProjectId: String(r['fromProjectId'] ?? ''), toProjectId: String(r['toProjectId'] ?? ''), method: String(r['method'] ?? ''), endpoint: String(r['endpoint'] ?? ''), fromFile: String(r['fromFile'] ?? ''), toFile: String(r['toFile'] ?? ''), confidence: String(r['confidence'] ?? 'INFERRED'), type: String(r['type'] ?? '') };
+    });
+    const layerGroups = {};
+    for (const lk of layerKeys)
+        layerGroups[lk] = projs.filter((p) => p.kind === lk);
+    const boxW = (p) => Math.max(BOX_MIN_W, Math.min(trunc(p.name, 30).length * 8 + 40, 320));
+    const layerH = (lk) => layerGroups[lk].length ? BOX_H + 24 : 0;
+    const layerY = {};
+    let curY = TOP_PAD;
+    for (const lk of layerKeys) {
+        if (!layerGroups[lk].length)
+            continue;
+        layerY[lk] = curY;
+        curY += layerH(lk) + LAYER_GAP;
+    }
+    const totalH = Math.max(curY + 16, 160);
+    // Compute box positions
+    const boxPos = new Map();
+    for (const lk of layerKeys) {
+        const group = layerGroups[lk];
+        if (!group.length)
+            continue;
+        const usable = W - PAD_L;
+        const totalW = group.reduce((s, p) => s + boxW(p), 0) + (group.length - 1) * BOX_GAP;
+        let cx = PAD_L + Math.max((usable - totalW) / 2, 0);
+        for (const p of group) {
+            const w = boxW(p);
+            boxPos.set(p.id, { x: cx, y: (layerY[lk] ?? 0) + 8, w, h: BOX_H, color: colorByKind[lk] ?? '#94a3b8' });
+            cx += w + BOX_GAP;
+        }
+    }
+    const parts = [];
+    // Background
+    parts.push(`<rect width="${W}" height="${totalH}" fill="${BG}"/>`);
+    // Arrowhead defs
+    parts.push(`<defs>
+    <marker id="ah" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#38bdf8"/></marker>
+    <marker id="ahdb" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#fcd34d"/></marker>
+    <marker id="ahgap" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#f87171"/></marker>
+  </defs>`);
+    // Layer bands
+    for (const lk of layerKeys) {
+        if (!layerGroups[lk].length || layerY[lk] === undefined)
+            continue;
+        const col = colorByKind[lk] ?? '#94a3b8';
+        const lh = layerH(lk);
+        const ly = layerY[lk];
+        parts.push(`<rect x="0" y="${ly}" width="${W}" height="${lh}" fill="${col}" fill-opacity="0.07"/>`);
+        parts.push(`<rect x="0" y="${ly}" width="${PAD_L - 4}" height="${lh}" fill="${col}" fill-opacity="0.18"/>`);
+        const lmy = ly + lh / 2;
+        parts.push(`<text x="${PAD_L / 2}" y="${lmy}" text-anchor="middle" dominant-baseline="middle" font-size="8" font-weight="bold" fill="${col}" font-family="monospace" transform="rotate(-90,${PAD_L / 2},${lmy})">${esc(layerLabels[lk] ?? lk)}</text>`);
+    }
+    // Cross-project edges (drawn before boxes so boxes render on top)
+    const drawnLinks = new Set();
+    for (const link of links) {
+        const fb = boxPos.get(link.fromProjectId);
+        const tb = boxPos.get(link.toProjectId);
+        if (!fb || !tb)
+            continue;
+        const ck = link.fromProjectId + '→' + link.toProjectId + link.endpoint;
+        if (drawnLinks.has(ck))
+            continue;
+        drawnLinks.add(ck);
+        const x1 = fb.x + fb.w / 2, y1 = fb.y + fb.h;
+        const x2 = tb.x + tb.w / 2, y2 = tb.y;
+        const midY = (y1 + y2) / 2;
+        const isDb = link.type.includes('DATABASE');
+        const isGap = link.confidence === 'GAP';
+        const col = isGap ? '#f87171' : isDb ? '#fcd34d' : '#38bdf8';
+        const aid = isGap ? 'ahgap' : isDb ? 'ahdb' : 'ah';
+        const dash = isDb ? 'stroke-dasharray="4 2"' : '';
+        const label = ((link.method || '') + ' ' + (link.endpoint || '')).trim();
+        const lbl = trunc(label, 28);
+        parts.push(`<path d="M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}" fill="none" stroke="${col}" stroke-width="2" stroke-opacity="0.8" ${dash} marker-end="url(#${aid})"/>`);
+        if (lbl) {
+            const mx = (x1 + x2) / 2, my = midY;
+            const lw = lbl.length * 5.8 + 6;
+            parts.push(`<rect x="${mx - lw / 2}" y="${my - 13}" width="${lw}" height="13" rx="3" fill="${BG}" fill-opacity="0.9"/>`);
+            parts.push(`<text x="${mx}" y="${my - 3}" text-anchor="middle" font-size="9" fill="${col}" font-family="monospace">${esc(lbl)}</text>`);
+        }
+    }
+    // Project boxes
+    for (const p of projs) {
+        const pos = boxPos.get(p.id);
+        if (!pos)
+            continue;
+        const col = pos.color;
+        const subtitle = (p.stack.slice(0, 2).join(' · ') || p.kind) + `  ${p.files} arq`;
+        parts.push(`<rect x="${pos.x - 2}" y="${pos.y - 2}" width="${pos.w + 4}" height="${pos.h + 4}" rx="10" fill="${col}" fill-opacity="0.1"/>`);
+        parts.push(`<rect x="${pos.x}" y="${pos.y}" width="${pos.w}" height="${pos.h}" rx="8" fill="${PANEL2}" stroke="${col}" stroke-width="1.5"/>`);
+        parts.push(`<rect x="${pos.x}" y="${pos.y}" width="${pos.w}" height="36" rx="8" fill="${col}" fill-opacity="0.2"/>`);
+        parts.push(`<text x="${pos.x + 10}" y="${pos.y + 16}" font-size="11" font-weight="bold" fill="${col}" font-family="monospace">${esc(trunc(p.name, 30))}</text>`);
+        parts.push(`<text x="${pos.x + 10}" y="${pos.y + 29}" font-size="8" fill="${MUTED}">${esc(subtitle)}</text>`);
+        if (p.risks > 0) {
+            const riskColor = p.risks > 10 ? '#f87171' : '#fcd34d';
+            parts.push(`<text x="${pos.x + pos.w - 8}" y="${pos.y + 16}" text-anchor="end" font-size="9" fill="${riskColor}">⚠ ${p.risks}</text>`);
+        }
+        // Files linked in cross-project links for this project (as chips)
+        const outLinks = links.filter((l) => l.fromProjectId === p.id);
+        const inLinks = links.filter((l) => l.toProjectId === p.id);
+        const relatedFiles = [...new Set([
+                ...outLinks.map((l) => l.fromFile ? l.fromFile.split('/').pop() ?? '' : ''),
+                ...inLinks.map((l) => l.toFile ? l.toFile.split('/').pop() ?? '' : '')
+            ])].filter(Boolean).slice(0, 4);
+        if (relatedFiles.length) {
+            let chipX = pos.x + 8;
+            const chipY = pos.y + 46;
+            for (const fname of relatedFiles) {
+                const fw = Math.min(fname.length * 5.5 + 10, pos.w - 16);
+                if (chipX + fw > pos.x + pos.w - 4)
+                    break;
+                parts.push(`<rect x="${chipX}" y="${chipY}" width="${fw}" height="16" rx="4" fill="${col}" fill-opacity="0.15"/>`);
+                parts.push(`<text x="${chipX + 5}" y="${chipY + 11}" font-size="8" fill="${FG}" font-family="monospace">${esc(trunc(fname, 22))}</text>`);
+                chipX += fw + 4;
+            }
+        }
+        else {
+            parts.push(`<text x="${pos.x + pos.w / 2}" y="${pos.y + 62}" text-anchor="middle" font-size="9" fill="${MUTED}">nenhuma ponte detectada</text>`);
+        }
+    }
+    // No-project fallback
+    if (!projs.length) {
+        parts.push(`<text x="${W / 2}" y="${totalH / 2}" text-anchor="middle" font-size="12" fill="${MUTED}">Projetos detectados mas sem kind mapeado. Rode Analisar Workspace.</text>`);
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${totalH}" style="display:block">${parts.join('')}</svg>`;
+}
 function renderProjectGraphSection(data) {
     const pg = data?.projectGraph;
     const cl = data?.crossProjectLinks;
@@ -516,6 +668,7 @@ function renderProjectGraphSection(data) {
     const projects = pg ? (pg['projects'] ?? []) : [];
     const crossLinks = cl ? (cl['links'] ?? []) : [];
     const gaps = cl ? (cl['gaps'] ?? []) : [];
+    const svgHtml = buildMultiProjectSvg(projects, crossLinks);
     return `
   <section class="section">
     <div class="section-head">
@@ -530,11 +683,8 @@ function renderProjectGraphSection(data) {
       </div>
     </div>
 
-    <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:16px">
-      <div style="overflow-x:auto;background:var(--panel);border-radius:8px;padding:4px;flex:1;min-width:0">
-        <svg id="mpgVisSvg" width="900" height="480" style="display:block;max-width:100%;min-height:200px"></svg>
-      </div>
-      <div id="mpgDetail" style="display:none;width:240px;flex-shrink:0;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:11px;line-height:1.6"></div>
+    <div style="overflow-x:auto;border-radius:8px;margin-bottom:16px">
+      ${svgHtml}
     </div>
 
     <div class="graph-tabs" style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">
