@@ -1139,27 +1139,28 @@ function getOverviewScript(nonce) {
       const pgData = state.projectGraph;
       const pg = pgData && pgData.projectGraph;
       const cl = pgData && pgData.crossProjectLinks;
+
+      // Explicit colors — no CSS vars inside SVG attributes (they don't resolve in VSCode webview)
+      const BG = '#0f172a', PANEL = '#1e293b', PANEL2 = '#263548', FG = '#e2e8f0', MUTED = '#64748b';
+      const colorByKind = { frontend: '#38bdf8', mobile: '#c4b5fd', backend: '#86efac', shared: '#fdba74', database: '#fcd34d', infra: '#94a3b8' };
+      const layerKeys = ['frontend', 'mobile', 'backend', 'shared', 'database', 'infra'];
+      const layerLabels = { frontend: 'Frontend', mobile: 'Mobile', backend: 'Backend / API', shared: 'Shared', database: 'SQL / DB', infra: 'Infra' };
+
       if (!pg || !pg.projects || !pg.projects.length) {
-        svg.innerHTML = '<text x="20" y="30" font-size="13" fill="var(--muted)">Rode Analisar Workspace para gerar o grafo multi-projeto.</text>';
+        svg.setAttribute('height', '80');
+        svg.innerHTML = '<rect width="100%" height="80" fill="' + BG + '"/>'
+          + '<text x="20" y="44" font-size="13" fill="' + MUTED + '" font-family="monospace">Rode Analisar Workspace para gerar o grafo multi-projeto.</text>';
         return;
       }
 
       const projects = pg.projects;
-      const allNodes = pg.nodes || [];
-      const allEdges = pg.edges || [];
+      const allNodes = (pg.nodes || []);
+      const allEdges = (pg.edges || []);
       const crossLinks = (cl && cl.links) ? cl.links : [];
 
-      // Layout constants
-      const W = 900, PADDING = 12, LAYER_LABEL_W = 72;
-      const NODE_W = 132, NODE_H = 48, NODE_GAP_X = 8, NODE_GAP_Y = 6, NODES_PER_ROW = 4;
-      const BOX_PAD = 10, BOX_HEADER_H = 34, LAYER_GAP = 52, LEGEND_H = 26;
-
-      const colorByKind = { frontend: '#38bdf8', mobile: '#c4b5fd', backend: '#86efac', shared: '#fdba74', database: '#fcd34d', infra: '#94a3b8' };
-      const layerKeys = ['frontend', 'mobile', 'backend', 'shared', 'database', 'infra'];
-      const layerLabels = { frontend: 'Frontend', mobile: 'Mobile', backend: 'Backend / API', shared: 'Shared', database: 'SQL / DB', infra: 'Infra' };
       const KEY_MODULES = new Set(['controller', 'service', 'repository', 'entity', 'component', 'page', 'router', 'guard', 'dto', 'config', 'database', 'security', 'model', 'hook', 'api', 'util']);
 
-      // --- Assign nodes to projects (top architectural nodes, max 12) ---
+      // Assign nodes to projects (top 12 per project, key modules first)
       const projectNodeMap = new Map();
       for (const p of projects) projectNodeMap.set(p.id, []);
       for (const node of allNodes) {
@@ -1174,49 +1175,54 @@ function getOverviewScript(nonce) {
         }).slice(0, 12));
       }
 
-      // --- Box dimensions ---
+      const W = 880, PAD_L = 60, NODE_W = 128, NODE_H = 44, NODE_GAP_X = 6, NODE_GAP_Y = 5, NODES_PER_ROW = 4;
+      const BOX_PAD = 10, BOX_HEADER_H = 38, LAYER_GAP = 48, TOP_PAD = 30;
+
       const layerGroups = {};
-      for (const lk of layerKeys) layerGroups[lk] = projects.filter((p) => p.kind === lk);
+      for (const lk of layerKeys) layerGroups[lk] = projects.filter((p) => (p.kind || 'unknown') === lk);
 
       const boxDim = (pid) => {
         const nodes = projectNodeMap.get(pid) || [];
-        const rows = Math.max(1, Math.ceil(nodes.length / NODES_PER_ROW));
-        const cols = Math.min(nodes.length || 1, NODES_PER_ROW);
-        return { w: Math.max(BOX_PAD * 2 + cols * NODE_W + (cols - 1) * NODE_GAP_X, 160), h: BOX_HEADER_H + BOX_PAD + rows * (NODE_H + NODE_GAP_Y) };
+        const cnt = nodes.length;
+        const rows = Math.max(1, Math.ceil(cnt / NODES_PER_ROW));
+        const cols = Math.min(cnt || 1, NODES_PER_ROW);
+        const w = Math.max(BOX_PAD * 2 + cols * NODE_W + (cols - 1) * NODE_GAP_X, 200);
+        const h = BOX_HEADER_H + BOX_PAD + rows * (NODE_H + NODE_GAP_Y) + BOX_PAD;
+        return { w, h };
       };
 
       const layerH = (lk) => {
-        const g = layerGroups[lk];
-        return g.length ? Math.max(...g.map((p) => boxDim(p.id).h)) + 24 : 0;
+        const g = layerGroups[lk] || [];
+        if (!g.length) return 0;
+        return Math.max(...g.map((p) => boxDim(p.id).h)) + 24;
       };
 
-      // --- Vertical layout per layer ---
       const layerY = {};
-      let curY = LEGEND_H + 10;
+      let curY = TOP_PAD;
       for (const lk of layerKeys) {
-        if (!layerGroups[lk].length) continue;
+        if (!(layerGroups[lk] || []).length) continue;
         layerY[lk] = curY;
         curY += layerH(lk) + LAYER_GAP;
       }
-      const totalH = Math.max(curY, 200);
+      const totalH = Math.max(curY + 20, 200);
 
-      // --- Horizontal layout per project inside layer ---
+      // Horizontal layout per project inside layer
       const projectPos = new Map();
       for (const lk of layerKeys) {
-        const group = layerGroups[lk];
+        const group = layerGroups[lk] || [];
         if (!group.length) continue;
-        const usableW = W - LAYER_LABEL_W - PADDING;
+        const usableW = W - PAD_L;
         const totalBoxW = group.reduce((s, p) => s + boxDim(p.id).w, 0);
-        const gap = Math.max((usableW - totalBoxW) / (group.length + 1), 8);
-        let cx = LAYER_LABEL_W + PADDING + gap;
+        const gap = Math.max((usableW - totalBoxW) / (group.length + 1), 12);
+        let cx = PAD_L + gap;
         for (const p of group) {
           const d = boxDim(p.id);
-          projectPos.set(p.id, { x: cx, y: layerY[lk] + 8, w: d.w, h: d.h, color: colorByKind[lk] || '#94a3b8' });
+          projectPos.set(p.id, { x: cx, y: (layerY[lk] || 0) + 8, w: d.w, h: d.h, color: colorByKind[lk] || '#94a3b8' });
           cx += d.w + gap;
         }
       }
 
-      // --- Node positions inside each box ---
+      // Node positions inside boxes
       const nodePos = new Map();
       for (const p of projects) {
         const pos = projectPos.get(p.id);
@@ -1224,7 +1230,7 @@ function getOverviewScript(nonce) {
         (projectNodeMap.get(p.id) || []).forEach((node, i) => {
           const col = i % NODES_PER_ROW, row = Math.floor(i / NODES_PER_ROW);
           const nx = pos.x + BOX_PAD + col * (NODE_W + NODE_GAP_X);
-          const ny = pos.y + BOX_HEADER_H + BOX_PAD + row * (NODE_H + NODE_GAP_Y);
+          const ny = pos.y + BOX_HEADER_H + row * (NODE_H + NODE_GAP_Y);
           nodePos.set(node.id, { x: nx, y: ny, cx: nx + NODE_W / 2, cy: ny + NODE_H / 2,
             top: { x: nx + NODE_W / 2, y: ny }, bottom: { x: nx + NODE_W / 2, y: ny + NODE_H },
             left: { x: nx, y: ny + NODE_H / 2 }, right: { x: nx + NODE_W, y: ny + NODE_H / 2 } });
@@ -1232,96 +1238,109 @@ function getOverviewScript(nonce) {
       }
       const visibleIds = new Set(nodePos.keys());
 
-      // --- Render ---
+      // Build SVG
       svg.setAttribute('viewBox', '0 0 ' + W + ' ' + totalH);
       svg.setAttribute('height', String(totalH));
       svg.innerHTML = '';
 
-      // Defs: arrowheads per type
+      // Background
+      const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      bgRect.setAttribute('width', String(W)); bgRect.setAttribute('height', String(totalH)); bgRect.setAttribute('fill', BG);
+      svg.appendChild(bgRect);
+
+      // Arrowhead defs
       const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-      for (const [id, color] of [['arr-http','#38bdf8'],['arr-call','#86efac'],['arr-db','#fcd34d'],['arr-imp','#a78bfa'],['arr-gap','#f87171']]) {
+      for (const [id, color] of [['ah','#38bdf8'],['ah-db','#fcd34d'],['ah-call','#86efac'],['ah-gap','#f87171']]) {
         const mk = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-        mk.setAttribute('id', id); mk.setAttribute('markerWidth', '8'); mk.setAttribute('markerHeight', '6');
-        mk.setAttribute('refX', '7'); mk.setAttribute('refY', '3'); mk.setAttribute('orient', 'auto');
+        mk.setAttribute('id', id); mk.setAttribute('markerWidth', '9'); mk.setAttribute('markerHeight', '6');
+        mk.setAttribute('refX', '8'); mk.setAttribute('refY', '3'); mk.setAttribute('orient', 'auto');
         const mp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        mp.setAttribute('d', 'M0,0 L0,6 L8,3 z'); mp.setAttribute('fill', color);
+        mp.setAttribute('d', 'M0,0 L0,6 L9,3 z'); mp.setAttribute('fill', color);
         mk.appendChild(mp); defs.appendChild(mk);
       }
       svg.appendChild(defs);
 
-      // Legend
-      const legendData = [['HTTP/REST','#38bdf8',''],['Function Call','#86efac','5,3'],['Database','#fcd34d','3,3'],['Import/Use','#a78bfa','8,3,2,3']];
-      let lx = LAYER_LABEL_W + PADDING;
-      for (const [label, color, dash] of legendData) {
-        const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        ln.setAttribute('x1', String(lx)); ln.setAttribute('y1', '13'); ln.setAttribute('x2', String(lx + 22)); ln.setAttribute('y2', '13');
-        ln.setAttribute('stroke', color); ln.setAttribute('stroke-width', '2'); if (dash) ln.setAttribute('stroke-dasharray', dash);
-        svg.appendChild(ln);
-        const ap = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        ap.setAttribute('d', 'M' + (lx+18) + ',10 L' + (lx+22) + ',13 L' + (lx+18) + ',16 z'); ap.setAttribute('fill', color);
-        svg.appendChild(ap);
-        const lt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        lt.setAttribute('x', String(lx + 26)); lt.setAttribute('y', '17'); lt.setAttribute('font-size', '9'); lt.setAttribute('fill', 'var(--fg)');
-        lt.textContent = label; svg.appendChild(lt);
-        lx += 30 + label.length * 5.5 + 10;
-      }
-
-      // Layer backgrounds + labels
+      // Layer bands
       for (const lk of layerKeys) {
-        if (!layerGroups[lk].length || layerY[lk] === undefined) continue;
-        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        bg.setAttribute('x', '0'); bg.setAttribute('y', String(layerY[lk]));
-        bg.setAttribute('width', String(W)); bg.setAttribute('height', String(layerH(lk)));
-        bg.setAttribute('fill', colorByKind[lk] || '#94a3b8'); bg.setAttribute('fill-opacity', '0.04');
-        svg.appendChild(bg);
-        const ll = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        ll.setAttribute('x', '4'); ll.setAttribute('y', String(layerY[lk] + 16)); ll.setAttribute('font-size', '8');
-        ll.setAttribute('fill', colorByKind[lk] || '#94a3b8'); ll.setAttribute('font-weight', 'bold');
-        ll.textContent = (layerLabels[lk] || lk).toUpperCase(); svg.appendChild(ll);
+        const g = layerGroups[lk] || [];
+        if (!g.length || layerY[lk] === undefined) continue;
+        const color = colorByKind[lk] || '#94a3b8';
+        const lh = layerH(lk);
+        // Band background
+        const band = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        band.setAttribute('x', '0'); band.setAttribute('y', String(layerY[lk]));
+        band.setAttribute('width', String(W)); band.setAttribute('height', String(lh));
+        band.setAttribute('fill', color); band.setAttribute('fill-opacity', '0.06');
+        svg.appendChild(band);
+        // Left label strip
+        const strip = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        strip.setAttribute('x', '0'); strip.setAttribute('y', String(layerY[lk]));
+        strip.setAttribute('width', String(PAD_L - 4)); strip.setAttribute('height', String(lh));
+        strip.setAttribute('fill', color); strip.setAttribute('fill-opacity', '0.14');
+        svg.appendChild(strip);
+        // Layer label (rotated)
+        const lt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        const lmy = layerY[lk] + lh / 2;
+        lt.setAttribute('x', String(PAD_L / 2)); lt.setAttribute('y', String(lmy));
+        lt.setAttribute('text-anchor', 'middle'); lt.setAttribute('dominant-baseline', 'middle');
+        lt.setAttribute('font-size', '9'); lt.setAttribute('font-weight', 'bold'); lt.setAttribute('fill', color);
+        lt.setAttribute('transform', 'rotate(-90,' + (PAD_L / 2) + ',' + lmy + ')');
+        lt.textContent = (layerLabels[lk] || lk).toUpperCase(); svg.appendChild(lt);
       }
 
-      // Helper: draw a bezier edge
-      const drawEdge = (x1, y1, x2, y2, stroke, dash, markerId, onClick, label) => {
+      // Helper: cubic bezier edge
+      const detail = document.getElementById('mpgDetail');
+      const drawEdge = (x1, y1, x2, y2, color, dash, arrowId, onClick, label) => {
         const midY = (y1 + y2) / 2;
-        const pe = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        pe.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + midY + ' ' + x2 + ',' + midY + ' ' + x2 + ',' + y2);
-        pe.setAttribute('fill', 'none'); pe.setAttribute('stroke', stroke); pe.setAttribute('stroke-width', '1.5');
-        pe.setAttribute('stroke-opacity', '0.7'); pe.setAttribute('marker-end', 'url(#' + markerId + ')');
-        if (dash) pe.setAttribute('stroke-dasharray', dash);
-        if (onClick) { pe.setAttribute('cursor', 'pointer'); pe.addEventListener('click', onClick);
-          pe.addEventListener('mouseenter', () => { pe.setAttribute('stroke-opacity', '1'); pe.setAttribute('stroke-width', '2.5'); });
-          pe.addEventListener('mouseleave', () => { pe.setAttribute('stroke-opacity', '0.7'); pe.setAttribute('stroke-width', '1.5'); }); }
-        svg.appendChild(pe);
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + midY + ' ' + x2 + ',' + midY + ' ' + x2 + ',' + y2);
+        path.setAttribute('fill', 'none'); path.setAttribute('stroke', color); path.setAttribute('stroke-width', '2');
+        path.setAttribute('stroke-opacity', '0.75'); path.setAttribute('marker-end', 'url(#' + arrowId + ')');
+        if (dash) path.setAttribute('stroke-dasharray', dash);
+        if (onClick) {
+          path.setAttribute('cursor', 'pointer');
+          path.addEventListener('click', onClick);
+          path.addEventListener('mouseenter', () => { path.setAttribute('stroke-width', '3'); path.setAttribute('stroke-opacity', '1'); });
+          path.addEventListener('mouseleave', () => { path.setAttribute('stroke-width', '2'); path.setAttribute('stroke-opacity', '0.75'); });
+        }
+        svg.appendChild(path);
         if (label) {
+          const mx = (x1 + x2) / 2, my = midY;
+          const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          const lw = Math.min(label.length * 5.5, 130), lh2 = 14;
+          bg.setAttribute('x', String(mx - lw / 2 - 3)); bg.setAttribute('y', String(my - lh2));
+          bg.setAttribute('width', String(lw + 6)); bg.setAttribute('height', String(lh2));
+          bg.setAttribute('rx', '3'); bg.setAttribute('fill', BG); bg.setAttribute('fill-opacity', '0.85');
+          svg.appendChild(bg);
           const lt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-          lt.setAttribute('x', String((x1 + x2) / 2 + 4)); lt.setAttribute('y', String(midY - 3));
-          lt.setAttribute('text-anchor', 'middle'); lt.setAttribute('font-size', '8');
-          lt.setAttribute('fill', stroke); lt.setAttribute('pointer-events', 'none');
-          lt.textContent = label.length > 26 ? label.slice(0, 23) + '…' : label; svg.appendChild(lt);
+          lt.setAttribute('x', String(mx)); lt.setAttribute('y', String(my - 4));
+          lt.setAttribute('text-anchor', 'middle'); lt.setAttribute('font-size', '9');
+          lt.setAttribute('fill', color); lt.setAttribute('pointer-events', 'none'); lt.setAttribute('font-family', 'monospace');
+          lt.textContent = label.length > 24 ? label.slice(0, 21) + '…' : label; svg.appendChild(lt);
         }
       };
 
-      const detail = document.getElementById('mpgDetail');
-
-      // Within-project edges
+      // Within-project edges (show internal deps if any)
       const drawnE = new Set();
       for (const edge of allEdges) {
         if (edge.crossProject || !visibleIds.has(edge.from) || !visibleIds.has(edge.to)) continue;
         const ek = edge.from + '→' + edge.to; if (drawnE.has(ek)) continue; drawnE.add(ek);
         const fp = nodePos.get(edge.from), tp = nodePos.get(edge.to); if (!fp || !tp) continue;
-        let stroke = '#a78bfa', dash = '8,3,2,3', mid = 'arr-imp';
-        if (edge.type === 'CALLS') { stroke = '#86efac'; dash = '5,3'; mid = 'arr-call'; }
-        else if (edge.type === 'READS_TABLE' || edge.type === 'WRITES_TABLE') { stroke = '#fcd34d'; dash = '3,3'; mid = 'arr-db'; }
-        drawEdge(fp.bottom.x, fp.bottom.y, tp.top.x, tp.top.y, stroke, dash, mid, null, '');
+        let col = '#a78bfa', dash = '6,3', aid = 'ah';
+        if (edge.type === 'CALLS') { col = '#86efac'; dash = '4,2'; aid = 'ah-call'; }
+        else if (edge.type === 'READS_TABLE' || edge.type === 'WRITES_TABLE') { col = '#fcd34d'; dash = '3,2'; aid = 'ah-db'; }
+        drawEdge(fp.bottom.x, fp.bottom.y, tp.top.x, tp.top.y, col, dash, aid, null, '');
       }
 
-      // Cross-project edges (individual file→file when possible, else box→box)
+      // Cross-project edges
       const drawnC = new Set();
       for (const link of crossLinks) {
         const ck = (link.fromFile || link.fromProjectId) + '→' + (link.toFile || link.endpoint || link.toProjectId);
         if (drawnC.has(ck)) continue; drawnC.add(ck);
-        const fromNid = [...visibleIds].find((id) => id === link.fromFile || id.endsWith('/' + link.fromFile?.split('/').pop()));
-        const toNid = link.toFile ? [...visibleIds].find((id) => id === link.toFile || id.endsWith('/' + link.toFile?.split('/').pop())) : null;
+
+        // Try to connect individual nodes; fallback to project box centers
+        const fromNid = [...visibleIds].find((id) => id === link.fromFile || id.endsWith('/' + (link.fromFile || '').split('/').pop()));
+        const toNid = link.toFile ? [...visibleIds].find((id) => id === link.toFile || id.endsWith('/' + (link.toFile || '').split('/').pop())) : null;
         let x1, y1, x2, y2;
         if (fromNid && toNid) {
           const fp = nodePos.get(fromNid), tp = nodePos.get(toNid);
@@ -1331,102 +1350,122 @@ function getOverviewScript(nonce) {
           if (!fb || !tb) continue;
           x1 = fb.x + fb.w / 2; y1 = fb.y + fb.h; x2 = tb.x + tb.w / 2; y2 = tb.y;
         }
-        let stroke = '#38bdf8', dash = '', mid = 'arr-http';
-        if (link.type === 'BACKEND_USES_DATABASE') { stroke = '#fcd34d'; dash = '3,3'; mid = 'arr-db'; }
-        if (link.confidence === 'GAP') { stroke = '#f87171'; mid = 'arr-gap'; }
+
+        let col = '#38bdf8', dash = '', aid = 'ah';
+        if ((link.type || '').includes('DATABASE')) { col = '#fcd34d'; dash = '4,2'; aid = 'ah-db'; }
+        if (link.confidence === 'GAP') { col = '#f87171'; aid = 'ah-gap'; }
+
         const routeLabel = ((link.method || '') + ' ' + (link.endpoint || '')).trim();
         const onClick = () => {
           if (!detail) return;
-          const cb = link.confidence === 'CONFIRMED' ? '🟢' : link.confidence === 'INFERRED' ? '🟡' : '🔴';
-          detail.innerHTML = '<strong>Ponte Cross-Project</strong><hr style="border-color:var(--border);margin:4px 0">'
-            + '<div><b>De:</b> <span class="mono" style="font-size:10px">' + escapeHtml(mpgBaseName(link.fromFile || link.fromProjectId)) + '</span></div>'
-            + '<div><b>Para:</b> <span class="mono" style="font-size:10px">' + escapeHtml(mpgBaseName(link.toFile || link.endpoint || '')) + '</span></div>'
-            + '<div><b>Endpoint:</b> <code style="font-size:10px">' + escapeHtml((link.method || 'GET') + ' ' + (link.endpoint || '')) + '</code></div>'
-            + '<div><b>Confiança:</b> ' + cb + ' ' + escapeHtml(link.confidence || '') + '</div>'
-            + (link.evidence && link.evidence.length ? '<div style="margin-top:6px"><b>Evidência:</b><br><code style="font-size:9px;word-break:break-all;opacity:0.8">' + escapeHtml(link.evidence[0]) + '</code></div>' : '');
+          const cb = link.confidence === 'CONFIRMED' ? '🟢 CONFIRMADO' : link.confidence === 'INFERRED' ? '🟡 INFERIDO' : '🔴 LACUNA';
           detail.style.display = 'block';
+          detail.innerHTML = '<strong style="font-size:12px">' + escapeHtml(mpgBaseName(link.fromFile || link.fromProjectId || '')) + '</strong>'
+            + '<div style="color:#64748b;font-size:10px;margin:2px 0 6px">→ ' + escapeHtml(mpgBaseName(link.toFile || link.endpoint || '')) + '</div>'
+            + '<div><code style="font-size:11px;color:#38bdf8">' + escapeHtml((link.method || 'GET') + ' ' + (link.endpoint || '')) + '</code></div>'
+            + '<div style="margin-top:6px"><b>De:</b> ' + escapeHtml(link.fromProjectId || '') + '</div>'
+            + '<div><b>Para:</b> ' + escapeHtml(link.toProjectId || '') + '</div>'
+            + '<div style="margin-top:6px">' + cb + '</div>'
+            + (link.evidence && link.evidence.length ? '<div style="margin-top:8px;font-size:9px;color:#94a3b8;word-break:break-all;font-family:monospace">' + escapeHtml(link.evidence[0]) + '</div>' : '');
         };
-        drawEdge(x1, y1, x2, y2, stroke, dash, mid, onClick, routeLabel);
+        drawEdge(x1, y1, x2, y2, col, dash, aid, onClick, routeLabel);
       }
 
-      // Project boxes
+      // Project boxes (drawn after edges so they're on top)
       for (const p of projects) {
         const pos = projectPos.get(p.id); if (!pos) continue;
+        const col = pos.color;
+        // Box shadow/glow
+        const glow = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        glow.setAttribute('x', String(pos.x - 2)); glow.setAttribute('y', String(pos.y - 2));
+        glow.setAttribute('width', String(pos.w + 4)); glow.setAttribute('height', String(pos.h + 4));
+        glow.setAttribute('rx', '10'); glow.setAttribute('fill', col); glow.setAttribute('fill-opacity', '0.12');
+        svg.appendChild(glow);
+        // Box body
         const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         rect.setAttribute('x', String(pos.x)); rect.setAttribute('y', String(pos.y));
         rect.setAttribute('width', String(pos.w)); rect.setAttribute('height', String(pos.h));
-        rect.setAttribute('rx', '8'); rect.setAttribute('fill', 'var(--panel-2)');
-        rect.setAttribute('stroke', pos.color); rect.setAttribute('stroke-width', '1.5'); svg.appendChild(rect);
-        const kt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        kt.setAttribute('x', String(pos.x + 8)); kt.setAttribute('y', String(pos.y + 13));
-        kt.setAttribute('font-size', '8'); kt.setAttribute('fill', pos.color); kt.setAttribute('font-weight', 'bold');
-        kt.textContent = (p.kind || '').toUpperCase(); svg.appendChild(kt);
+        rect.setAttribute('rx', '8'); rect.setAttribute('fill', PANEL2); rect.setAttribute('stroke', col); rect.setAttribute('stroke-width', '1.5');
+        svg.appendChild(rect);
+        // Header strip
+        const hdr = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        hdr.setAttribute('x', String(pos.x)); hdr.setAttribute('y', String(pos.y));
+        hdr.setAttribute('width', String(pos.w)); hdr.setAttribute('height', String(BOX_HEADER_H));
+        hdr.setAttribute('rx', '8'); hdr.setAttribute('fill', col); hdr.setAttribute('fill-opacity', '0.18');
+        svg.appendChild(hdr);
+        // Project name
+        const pn = (p.name || p.id || '');
         const nt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        nt.setAttribute('x', String(pos.x + pos.w / 2)); nt.setAttribute('y', String(pos.y + 26));
-        nt.setAttribute('text-anchor', 'middle'); nt.setAttribute('font-size', '12'); nt.setAttribute('font-weight', '600'); nt.setAttribute('fill', 'var(--fg)');
-        const pn = (p.name || p.id || ''); nt.textContent = pn.length > 26 ? pn.slice(0, 23) + '…' : pn; svg.appendChild(nt);
-        const st = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-        st.setAttribute('x', String(pos.x + pos.w - 6)); st.setAttribute('y', String(pos.y + 13));
-        st.setAttribute('text-anchor', 'end'); st.setAttribute('font-size', '8'); st.setAttribute('fill', 'var(--muted)');
-        st.textContent = (p.files || 0) + ' arq'; svg.appendChild(st);
+        nt.setAttribute('x', String(pos.x + 10)); nt.setAttribute('y', String(pos.y + 16));
+        nt.setAttribute('font-size', '11'); nt.setAttribute('font-weight', 'bold'); nt.setAttribute('fill', col);
+        nt.textContent = pn.length > 28 ? pn.slice(0, 25) + '…' : pn; svg.appendChild(nt);
+        // Subtitle: stack + files
+        const st = (p.stack || []).slice(0, 2).join(' · ') || (p.kind || '');
+        const st2 = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        st2.setAttribute('x', String(pos.x + 10)); st2.setAttribute('y', String(pos.y + 30));
+        st2.setAttribute('font-size', '8'); st2.setAttribute('fill', MUTED);
+        st2.textContent = st + '  ' + (p.files || 0) + ' arq · ' + (p.risks || 0) + ' riscos'; svg.appendChild(st2);
+        // No-nodes hint
+        if (!(projectNodeMap.get(p.id) || []).length) {
+          const hint = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          hint.setAttribute('x', String(pos.x + pos.w / 2)); hint.setAttribute('y', String(pos.y + BOX_HEADER_H + 28));
+          hint.setAttribute('text-anchor', 'middle'); hint.setAttribute('font-size', '9'); hint.setAttribute('fill', MUTED);
+          hint.textContent = 'Rode Analisar Workspace para ver arquivos'; svg.appendChild(hint);
+        }
       }
 
       // Individual nodes inside boxes
       const modColors = { controller:'#f59e0b', service:'#06b6d4', repository:'#ec4899', entity:'#10b981',
         dto:'#3b82f6', component:'#8b5cf6', page:'#6366f1', router:'#6366f1', guard:'#f43f5e',
         config:'#64748b', security:'#f43f5e', model:'#10b981', database:'#fcd34d', api:'#38bdf8', util:'#94a3b8' };
-      const modIcons = { controller:'⚙', service:'⚡', repository:'🗄', entity:'◈', dto:'📦',
-        component:'◻', page:'📄', router:'⇄', guard:'🔒', config:'⚙', security:'🔒',
-        model:'◈', database:'🗃', api:'🔗', util:'🔧' };
 
       for (const p of projects) {
         for (const node of (projectNodeMap.get(p.id) || [])) {
           const np = nodePos.get(node.id); if (!np) continue;
           const nc = modColors[node.module] || '#94a3b8';
-          const ni = modIcons[node.module] || '◻';
-          const g = document.createElementNS('http://www.w3.org/2000/svg', 'g'); g.setAttribute('cursor', 'pointer');
-          const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-          bg.setAttribute('x', String(np.x)); bg.setAttribute('y', String(np.y));
-          bg.setAttribute('width', String(NODE_W)); bg.setAttribute('height', String(NODE_H));
-          bg.setAttribute('rx', '5'); bg.setAttribute('fill', 'var(--panel)'); bg.setAttribute('stroke', nc); bg.setAttribute('stroke-width', '1.5');
-          const ib = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-          ib.setAttribute('x', String(np.x)); ib.setAttribute('y', String(np.y)); ib.setAttribute('width', '22'); ib.setAttribute('height', String(NODE_H));
-          ib.setAttribute('rx', '5'); ib.setAttribute('fill', nc); ib.setAttribute('fill-opacity', '0.18');
-          const it = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-          it.setAttribute('x', String(np.x + 11)); it.setAttribute('y', String(np.y + NODE_H / 2 + 4));
-          it.setAttribute('text-anchor', 'middle'); it.setAttribute('font-size', '12'); it.textContent = ni;
           const lbl = mpgBaseName(node.label || node.id);
+          const g = document.createElementNS('http://www.w3.org/2000/svg', 'g'); g.setAttribute('cursor', 'pointer');
+          // Node background
+          const nbg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          nbg.setAttribute('x', String(np.x)); nbg.setAttribute('y', String(np.y));
+          nbg.setAttribute('width', String(NODE_W)); nbg.setAttribute('height', String(NODE_H));
+          nbg.setAttribute('rx', '4'); nbg.setAttribute('fill', PANEL); nbg.setAttribute('stroke', nc); nbg.setAttribute('stroke-width', '1.2');
+          // Left accent bar
+          const bar = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          bar.setAttribute('x', String(np.x)); bar.setAttribute('y', String(np.y));
+          bar.setAttribute('width', '4'); bar.setAttribute('height', String(NODE_H));
+          bar.setAttribute('rx', '4'); bar.setAttribute('fill', nc);
+          // Label
           const lt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-          lt.setAttribute('x', String(np.x + 28)); lt.setAttribute('y', String(np.y + 17));
-          lt.setAttribute('font-size', '9'); lt.setAttribute('font-weight', '600'); lt.setAttribute('fill', 'var(--fg)');
-          lt.textContent = lbl.length > 15 ? lbl.slice(0, 12) + '…' : lbl;
+          lt.setAttribute('x', String(np.x + 10)); lt.setAttribute('y', String(np.y + 16));
+          lt.setAttribute('font-size', '9'); lt.setAttribute('font-weight', '600'); lt.setAttribute('fill', FG);
+          lt.textContent = lbl.length > 16 ? lbl.slice(0, 13) + '…' : lbl;
+          // Module tag
           const mt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-          mt.setAttribute('x', String(np.x + 28)); mt.setAttribute('y', String(np.y + 30));
+          mt.setAttribute('x', String(np.x + 10)); mt.setAttribute('y', String(np.y + 29));
           mt.setAttribute('font-size', '8'); mt.setAttribute('fill', nc); mt.textContent = node.module || '';
+          // Risk indicator
           if (node.riskLevel === 'high' || node.riskLevel === 'medium') {
             const rd = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            rd.setAttribute('cx', String(np.x + NODE_W - 6)); rd.setAttribute('cy', String(np.y + 7)); rd.setAttribute('r', '4');
+            rd.setAttribute('cx', String(np.x + NODE_W - 7)); rd.setAttribute('cy', String(np.y + 8)); rd.setAttribute('r', '4');
             rd.setAttribute('fill', node.riskLevel === 'high' ? '#f87171' : '#fcd34d'); g.appendChild(rd);
           }
-          g.appendChild(bg); g.appendChild(ib); g.appendChild(it); g.appendChild(lt); g.appendChild(mt);
-          g.addEventListener('mouseenter', () => bg.setAttribute('stroke-width', '2.5'));
-          g.addEventListener('mouseleave', () => bg.setAttribute('stroke-width', '1.5'));
+          g.appendChild(nbg); g.appendChild(bar); g.appendChild(lt); g.appendChild(mt);
+          g.addEventListener('mouseenter', () => nbg.setAttribute('stroke-width', '2'));
+          g.addEventListener('mouseleave', () => nbg.setAttribute('stroke-width', '1.2'));
           g.addEventListener('click', (ev) => {
             ev.stopPropagation();
             if (!detail) return;
             const crossOut = crossLinks.filter((l) => l.fromFile === node.id || l.fromFile === node.path);
             const crossIn = crossLinks.filter((l) => l.toFile === node.id || l.toFile === node.path);
-            const edgeOut = allEdges.filter((e) => e.from === node.id && visibleIds.has(e.to));
-            const edgeIn = allEdges.filter((e) => e.to === node.id && visibleIds.has(e.from));
-            detail.innerHTML = '<strong>' + escapeHtml(lbl) + '</strong><hr style="border-color:var(--border);margin:4px 0">'
-              + '<div><b>Módulo:</b> ' + escapeHtml(node.module || node.type || '—') + '</div>'
-              + '<div><b>Linguagem:</b> ' + escapeHtml(node.language || '—') + '</div>'
-              + (node.riskLevel && node.riskLevel !== 'low' ? '<div><b>Risco:</b> ' + (node.riskLevel === 'high' ? '🔴' : '🟡') + ' ' + node.riskLevel + '</div>' : '')
-              + '<div style="margin-top:6px"><b>Entrantes:</b> ' + (edgeIn.length + crossIn.length) + ' &nbsp; <b>Saintes:</b> ' + (edgeOut.length + crossOut.length) + '</div>'
-              + (crossOut.length ? '<div style="margin-top:4px"><b>API calls:</b><br>' + crossOut.slice(0, 3).map((l) => '<code style="font-size:9px">' + escapeHtml((l.method||'GET') + ' ' + (l.endpoint||'')) + '</code>').join('<br>') + '</div>' : '')
-              + (crossIn.length ? '<div style="margin-top:4px"><b>Chamado por:</b><br>' + crossIn.slice(0, 3).map((l) => '<code style="font-size:9px">' + escapeHtml(mpgBaseName(l.fromFile||'')) + '</code>').join('<br>') + '</div>' : '')
-              + '<div style="margin-top:6px;font-size:9px;color:var(--muted);word-break:break-all">' + escapeHtml(node.path || node.id) + '</div>';
             detail.style.display = 'block';
+            detail.innerHTML = '<strong style="font-size:12px">' + escapeHtml(lbl) + '</strong>'
+              + '<div style="font-size:9px;color:#64748b;margin:2px 0 8px">' + escapeHtml(node.path || node.id) + '</div>'
+              + '<div><b>Módulo:</b> ' + escapeHtml(node.module || '—') + '</div>'
+              + '<div><b>Linguagem:</b> ' + escapeHtml(node.language || '—') + '</div>'
+              + (node.riskLevel && node.riskLevel !== 'low' ? '<div style="margin-top:4px"><b>Risco:</b> ' + (node.riskLevel === 'high' ? '🔴' : '🟡') + ' ' + node.riskLevel + '</div>' : '')
+              + (crossOut.length ? '<div style="margin-top:8px"><b>API calls:</b><br>' + crossOut.slice(0, 4).map((l) => '<code style="font-size:9px;display:block;color:#38bdf8">' + escapeHtml((l.method||'GET') + ' ' + (l.endpoint||'')) + '</code>').join('') + '</div>' : '')
+              + (crossIn.length ? '<div style="margin-top:8px"><b>Chamado por:</b><br>' + crossIn.slice(0, 3).map((l) => '<code style="font-size:9px;display:block;color:#a78bfa">' + escapeHtml(mpgBaseName(l.fromFile||'')) + '</code>').join('') + '</div>' : '');
           });
           svg.appendChild(g);
         }
