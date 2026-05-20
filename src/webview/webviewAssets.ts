@@ -725,6 +725,24 @@ export function getOverviewScript(nonce: string): string {
       const width = Math.max(720, wrap?.clientWidth || 900);
       const height = Math.max(520, wrap?.clientHeight || 560);
       const graph = filteredGraph();
+
+      svg.innerHTML = '';
+      svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+
+      if (!graph.nodes.length) {
+        const emptyMsg = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        emptyMsg.setAttribute('x', String(width / 2));
+        emptyMsg.setAttribute('y', String(height / 2));
+        emptyMsg.setAttribute('text-anchor', 'middle');
+        emptyMsg.setAttribute('font-size', '13');
+        emptyMsg.setAttribute('fill', 'var(--muted, #64748b)');
+        emptyMsg.textContent = 'Nenhum nó encontrado. Rode Analisar Workspace ou mude o filtro de origem.';
+        svg.appendChild(emptyMsg);
+        $('graphVisible').textContent = '0 nós visíveis';
+        log('Grafo vazio — nós em state.graph: ' + state.graph.nodes.length + ', filtro: ' + graphState.origin);
+        return;
+      }
+
       const byId = new Map(graph.nodes.map((node) => [node.id, node]));
       const connectedToSelected = new Set();
       for (const edge of graph.edges) {
@@ -732,8 +750,6 @@ export function getOverviewScript(nonce: string): string {
         if (edge.to === graphState.selectedNodeId) connectedToSelected.add(edge.from);
       }
 
-      svg.innerHTML = '';
-      svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
       const root = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       root.setAttribute('transform', 'translate(' + graphState.panX + ' ' + graphState.panY + ') scale(' + graphState.zoom + ')');
       svg.appendChild(root);
@@ -1153,16 +1169,19 @@ export function getOverviewScript(nonce: string): string {
       const layerKeys = ['frontend', 'mobile', 'backend', 'shared', 'database', 'infra'];
       const layerLabels = { frontend: 'Frontend', mobile: 'Mobile', backend: 'Backend / API', shared: 'Shared', database: 'SQL / DB', infra: 'Infra' };
 
-      if (!pg || !pg.projects || !pg.projects.length) {
+      // Fallback: use in-memory detected projects when project-graph.json is absent
+      const projects = (pg && pg.projects && pg.projects.length) ? pg.projects : (state.projects || []);
+
+      if (!projects.length) {
         svg.setAttribute('height', '80');
         svg.innerHTML = '<rect width="100%" height="80" fill="' + BG + '"/>'
           + '<text x="20" y="44" font-size="13" fill="' + MUTED + '" font-family="monospace">Rode Analisar Workspace para gerar o grafo multi-projeto.</text>';
         return;
       }
 
-      const projects = pg.projects;
-      const allNodes = (pg.nodes || []);
-      const allEdges = (pg.edges || []);
+      // Use pg.nodes when available; fall back to state.graph.nodes (always present)
+      const allNodes = (pg && pg.nodes && pg.nodes.length) ? pg.nodes : (state.graph ? state.graph.nodes : []);
+      const allEdges = (pg && pg.edges && pg.edges.length) ? pg.edges : (state.graph ? state.graph.edges : []);
       const crossLinks = (cl && cl.links) ? cl.links : [];
 
       const KEY_MODULES = new Set(['controller', 'service', 'repository', 'entity', 'component', 'page', 'router', 'guard', 'dto', 'config', 'database', 'security', 'model', 'hook', 'api', 'util']);
@@ -1171,9 +1190,21 @@ export function getOverviewScript(nonce: string): string {
       const projectNodeMap = new Map();
       for (const p of projects) projectNodeMap.set(p.id, []);
       for (const node of allNodes) {
-        if (!node.projectId || node.origin !== 'internal') continue;
-        const bucket = projectNodeMap.get(node.projectId);
-        if (bucket) bucket.push(node);
+        if (node.origin !== 'internal') continue;
+        // Try direct projectId match first
+        const directBucket = node.projectId ? projectNodeMap.get(node.projectId) : undefined;
+        if (directBucket) { directBucket.push(node); continue; }
+        // Fallback: path-prefix match (handles projectId='workspace' from single-root projects)
+        let assigned = false;
+        for (const p of projects) {
+          const rel = (p.relativePath || '').toLowerCase().replace(/\\/g, '/');
+          if (rel === '.' || rel === '') {
+            projectNodeMap.get(p.id).push(node); assigned = true; break;
+          } else if (node.path && node.path.toLowerCase().replace(/\\/g, '/').startsWith(rel + '/')) {
+            projectNodeMap.get(p.id).push(node); assigned = true; break;
+          }
+        }
+        if (!assigned && projects.length === 1) projectNodeMap.get(projects[0].id).push(node);
       }
       for (const [pid, nodes] of projectNodeMap) {
         projectNodeMap.set(pid, nodes.sort((a, b) => {
@@ -1484,5 +1515,7 @@ export function getOverviewScript(nonce: string): string {
     function mpgBaseName(p) {
       return p ? p.replace(/\\/g, '/').split('/').pop() || p : '';
     }
+
+    renderMultiProjectGraph();
   </script>`;
 }

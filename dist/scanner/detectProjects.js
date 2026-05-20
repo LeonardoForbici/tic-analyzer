@@ -15,6 +15,14 @@ const FRONTEND_MARKERS = {
     dirs: ['src', 'public'],
     packagePatterns: ['react', 'vue', 'angular', 'next', 'svelte', 'astro', 'vite']
 };
+const PROJECT_ROOT_HINTS = {
+    backend: ['backend', 'api', 'server', 'service'],
+    frontend: ['frontend', 'client', 'web', 'ui'],
+    mobile: ['mobile', 'app'],
+    infra: ['infra', 'deploy', 'k8s', 'helm', 'terraform'],
+    shared: ['shared', 'libs', 'packages', 'common'],
+    database: ['database', 'db', 'sql', 'oracle', 'plsql']
+};
 function detectProjects(scan, risks) {
     const projects = new Map();
     // Detectar Backend
@@ -77,7 +85,7 @@ function detectBackend(scan, risks) {
         }
     }
     if (evidence.length > 0) {
-        const backendRoot = commonProjectRoot(evidence);
+        const backendRoot = inferProjectRoot(evidence, 'backend');
         return {
             id: 'backend',
             name: 'Backend',
@@ -119,7 +127,7 @@ function detectFrontend(scan, risks) {
         evidence.push(...packageJsonFiles.slice(0, 3).map((f) => f.relativePath));
     }
     if (evidence.length > 0) {
-        const frontendRoot = commonProjectRoot(evidence);
+        const frontendRoot = inferProjectRoot(evidence, 'frontend');
         return {
             id: 'frontend',
             name: 'Frontend',
@@ -162,7 +170,7 @@ function detectMobile(scan, risks) {
         evidence.push(...libDirFiles.slice(0, 5).map((f) => f.relativePath));
     }
     if (evidence.length > 0) {
-        const mobileRoot = commonProjectRoot(evidence);
+        const mobileRoot = inferProjectRoot(evidence, 'mobile');
         return {
             id: 'mobile',
             name: 'Mobile',
@@ -222,7 +230,7 @@ function detectInfra(scan, risks) {
         }
     }
     if (evidence.length > 0) {
-        const infraRoot = commonProjectRoot(evidence);
+        const infraRoot = inferProjectRoot(evidence, 'infra');
         return {
             id: 'infra',
             name: 'Infraestrutura',
@@ -259,7 +267,7 @@ function detectShared(scan, risks) {
         stack.push('Shared Library');
     }
     if (evidence.length > 0) {
-        const sharedRoot = commonProjectRoot(evidence);
+        const sharedRoot = inferProjectRoot(evidence, 'shared');
         return {
             id: 'shared',
             name: 'Shared / Libs',
@@ -293,7 +301,7 @@ function detectDatabase(scan, risks) {
             id: 'database',
             name: 'Database / PL/SQL',
             rootPath: scan.rootPath,
-            relativePath: commonDatabaseRoot(databaseFiles.map((file) => file.relativePath)),
+            relativePath: inferProjectRoot(databaseFiles.map((file) => file.relativePath), 'database'),
             kind: 'database',
             stack,
             evidence,
@@ -308,10 +316,19 @@ function isDatabaseFile(relativePath, extension) {
     const first = relativePath.split('/')[0]?.toLowerCase();
     return PLSQL_EXTENSIONS.has(extension.toLowerCase()) || DATABASE_DIRS.has(first);
 }
-function commonDatabaseRoot(files) {
-    const firstSegments = files.map((file) => file.split('/')[0]).filter(Boolean);
-    const preferred = firstSegments.find((segment) => DATABASE_DIRS.has(segment.toLowerCase()));
-    return preferred ?? '.';
+function inferProjectRoot(files, kind) {
+    const normalized = files.map(normalizeRelativePath);
+    const hints = PROJECT_ROOT_HINTS[kind];
+    const hintedRoots = normalized
+        .map((file) => rootFromHints(file, hints))
+        .filter((root) => root !== null);
+    if (hintedRoots.length === 1) {
+        return hintedRoots[0];
+    }
+    if (hintedRoots.length > 1) {
+        return commonProjectRoot(hintedRoots);
+    }
+    return commonProjectRoot(normalized);
 }
 function commonProjectRoot(files) {
     if (files.length === 0)
@@ -330,6 +347,17 @@ function commonProjectRoot(files) {
         }
     }
     return common > 0 ? segments[0].slice(0, common).join('/') : '.';
+}
+function rootFromHints(filePath, hints) {
+    const segments = normalizeRelativePath(filePath).split('/').filter(Boolean);
+    const hintIndex = segments.findIndex((segment) => hints.includes(segment.toLowerCase()));
+    if (hintIndex <= 0) {
+        return null;
+    }
+    return segments.slice(0, hintIndex + 1).join('/');
+}
+function normalizeRelativePath(filePath) {
+    return filePath.replace(/\\/g, '/').replace(/^\.\/+/, '');
 }
 function isBackendPath(path) {
     const lower = path.toLowerCase();

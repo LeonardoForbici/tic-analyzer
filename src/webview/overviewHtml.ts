@@ -563,7 +563,7 @@ function buildMultiProjectSvg(
   };
 
   if (!projects.length) {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="860" height="80">
+    return `<svg id="mpgVisSvg" xmlns="http://www.w3.org/2000/svg" width="860" height="80">
       <rect width="860" height="80" fill="${BG}"/>
       <text x="20" y="44" font-size="13" fill="${MUTED}" font-family="monospace">Rode Analisar Workspace para gerar o grafo multi-projeto.</text>
     </svg>`;
@@ -716,7 +716,7 @@ function buildMultiProjectSvg(
     parts.push(`<text x="${W / 2}" y="${totalH / 2}" text-anchor="middle" font-size="12" fill="${MUTED}">Projetos detectados mas sem kind mapeado. Rode Analisar Workspace.</text>`);
   }
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${totalH}" style="display:block">${parts.join('')}</svg>`;
+  return `<svg id="mpgVisSvg" xmlns="http://www.w3.org/2000/svg" width="${W}" height="${totalH}" style="display:block">${parts.join('')}</svg>`;
 }
 
 function renderProjectGraphSection(

@@ -225,7 +225,11 @@ function normalizeEndpointKey(method: string, endpointPath: string): string {
 
 function normalizePath(p: string): string {
   // Replace path params {id}, :id with __PARAM__
-  return p.replace(/\{[^}]+\}/g, '__PARAM__').replace(/:[A-Za-z_]+/g, '__PARAM__').toLowerCase();
+  return p
+    .replace(/\{[^}]+\}/g, '__PARAM__')
+    .replace(/:[A-Za-z_]+/g, '__PARAM__')
+    .replace(/\/+$/, '')
+    .toLowerCase();
 }
 
 function normalizePathParams(p: string): string {

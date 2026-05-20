@@ -65,6 +65,12 @@ const HTTP_PATTERNS: Array<{ label: string; pattern: RegExp; methodGroup: number
     methodGroup: 1,
     pathGroup: 2
   },
+  {
+    label: 'client',
+    pattern: /\b(?:[A-Za-z_$][\w$]*?(?:Client|Service|Api|Request|Fetcher)|client|service|request|fetcher|httpService)\.(get|post|put|delete|patch)\s*\(\s*['"`]([^'"`]+)['"`]/g,
+    methodGroup: 1,
+    pathGroup: 2
+  },
   // useQuery('key', () => fetch/axios...)
   {
     label: 'useQuery',
@@ -164,7 +170,7 @@ function extractApiCalls(filePath: string, content: string, projectId: string): 
 
   // Pattern: this.http.get(this.varName) or this.http.get(varName)
   if (urlConstants.size > 0) {
-    const VAR_CALL_PATTERN = /\b(http(?:Client)?|axios|api)\.(get|post|put|delete|patch)\s*\(\s*(?:this\.)?(\w+)/g;
+    const VAR_CALL_PATTERN = /\b(http(?:Client)?|axios|api|(?:[A-Za-z_$][\w$]*?(?:Client|Service|Api|Request|Fetcher)|client|service|request|fetcher|httpService))\.(get|post|put|delete|patch)\s*\(\s*(?:this\.)?(\w+)/g;
     let varMatch: RegExpExecArray | null;
     while ((varMatch = VAR_CALL_PATTERN.exec(content)) !== null) {
       const varName = varMatch[3];
@@ -253,6 +259,7 @@ function normalizePath(raw: string): string {
     const idx = p.indexOf('/');
     p = p.slice(idx);
   }
+  p = p.replace(/\/+$/, '');
   return p || raw.split('?')[0].split('#')[0].trim();
 }
 

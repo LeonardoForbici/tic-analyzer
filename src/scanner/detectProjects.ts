@@ -1,4 +1,4 @@
-import type { DetectedProject } from '../types';
+import type { DetectedProject, DetectedProjectKind } from '../types';
 import type { RiskReport } from './detectRisks';
 import type { ScanResult } from './scanWorkspace';
 
@@ -16,6 +16,15 @@ const FRONTEND_MARKERS = {
   files: ['vite.config.ts', 'vite.config.js', 'next.config.js', 'angular.json', 'src/App.tsx', 'src/main.tsx', 'package.json'],
   dirs: ['src', 'public'],
   packagePatterns: ['react', 'vue', 'angular', 'next', 'svelte', 'astro', 'vite']
+};
+
+const PROJECT_ROOT_HINTS: Record<Exclude<DetectedProjectKind, 'unknown'>, string[]> = {
+  backend: ['backend', 'api', 'server', 'service'],
+  frontend: ['frontend', 'client', 'web', 'ui'],
+  mobile: ['mobile', 'app'],
+  infra: ['infra', 'deploy', 'k8s', 'helm', 'terraform'],
+  shared: ['shared', 'libs', 'packages', 'common'],
+  database: ['database', 'db', 'sql', 'oracle', 'plsql']
 };
 
 export function detectProjects(scan: ScanResult, risks?: RiskReport): DetectedProject[] {
@@ -91,7 +100,7 @@ function detectBackend(scan: ScanResult, risks: RiskReport | undefined): Detecte
   }
 
   if (evidence.length > 0) {
-    const backendRoot = commonProjectRoot(evidence);
+    const backendRoot = inferProjectRoot(evidence, 'backend');
     return {
       id: 'backend',
       name: 'Backend',
@@ -136,7 +145,7 @@ function detectFrontend(scan: ScanResult, risks: RiskReport | undefined): Detect
   }
 
   if (evidence.length > 0) {
-    const frontendRoot = commonProjectRoot(evidence);
+    const frontendRoot = inferProjectRoot(evidence, 'frontend');
     return {
       id: 'frontend',
       name: 'Frontend',
@@ -188,7 +197,7 @@ function detectMobile(scan: ScanResult, risks: RiskReport | undefined): Detected
   }
 
   if (evidence.length > 0) {
-    const mobileRoot = commonProjectRoot(evidence);
+    const mobileRoot = inferProjectRoot(evidence, 'mobile');
     return {
       id: 'mobile',
       name: 'Mobile',
@@ -260,7 +269,7 @@ function detectInfra(scan: ScanResult, risks: RiskReport | undefined): DetectedP
   }
 
   if (evidence.length > 0) {
-    const infraRoot = commonProjectRoot(evidence);
+    const infraRoot = inferProjectRoot(evidence, 'infra');
     return {
       id: 'infra',
       name: 'Infraestrutura',
@@ -303,7 +312,7 @@ function detectShared(scan: ScanResult, risks: RiskReport | undefined): Detected
   }
 
   if (evidence.length > 0) {
-    const sharedRoot = commonProjectRoot(evidence);
+    const sharedRoot = inferProjectRoot(evidence, 'shared');
     return {
       id: 'shared',
       name: 'Shared / Libs',
@@ -342,7 +351,7 @@ function detectDatabase(scan: ScanResult, risks: RiskReport | undefined): Detect
       id: 'database',
       name: 'Database / PL/SQL',
       rootPath: scan.rootPath,
-      relativePath: commonDatabaseRoot(databaseFiles.map((file) => file.relativePath)),
+      relativePath: inferProjectRoot(databaseFiles.map((file) => file.relativePath), 'database'),
       kind: 'database',
       stack,
       evidence,
@@ -360,10 +369,22 @@ function isDatabaseFile(relativePath: string, extension: string): boolean {
   return PLSQL_EXTENSIONS.has(extension.toLowerCase()) || DATABASE_DIRS.has(first);
 }
 
-function commonDatabaseRoot(files: string[]): string {
-  const firstSegments = files.map((file) => file.split('/')[0]).filter(Boolean);
-  const preferred = firstSegments.find((segment) => DATABASE_DIRS.has(segment.toLowerCase()));
-  return preferred ?? '.';
+function inferProjectRoot(files: string[], kind: Exclude<DetectedProjectKind, 'unknown'>): string {
+  const normalized = files.map(normalizeRelativePath);
+  const hints = PROJECT_ROOT_HINTS[kind];
+  const hintedRoots = normalized
+    .map((file) => rootFromHints(file, hints))
+    .filter((root): root is string => root !== null);
+
+  if (hintedRoots.length === 1) {
+    return hintedRoots[0];
+  }
+
+  if (hintedRoots.length > 1) {
+    return commonProjectRoot(hintedRoots);
+  }
+
+  return commonProjectRoot(normalized);
 }
 
 function commonProjectRoot(files: string[]): string {
@@ -383,6 +404,19 @@ function commonProjectRoot(files: string[]): string {
   }
 
   return common > 0 ? segments[0].slice(0, common).join('/') : '.';
+}
+
+function rootFromHints(filePath: string, hints: string[]): string | null {
+  const segments = normalizeRelativePath(filePath).split('/').filter(Boolean);
+  const hintIndex = segments.findIndex((segment) => hints.includes(segment.toLowerCase()));
+  if (hintIndex <= 0) {
+    return null;
+  }
+  return segments.slice(0, hintIndex + 1).join('/');
+}
+
+function normalizeRelativePath(filePath: string): string {
+  return filePath.replace(/\\/g, '/').replace(/^\.\/+/, '');
 }
 
 function isBackendPath(path: string): boolean {

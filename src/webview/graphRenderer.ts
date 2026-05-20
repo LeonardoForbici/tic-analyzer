@@ -63,10 +63,19 @@ export function buildWebviewGraphData(graph: LightweightGraph): WebviewGraphData
   }
 
   // Selecionar até 180 nós do conjunto interno, priorizando por grau e risco
-  const selectedNodes = internalNodes
+  const byDegree = (a: (typeof internalNodes)[0], b: (typeof internalNodes)[0]) =>
+    (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.path.localeCompare(b.path);
+
+  let selectedNodes = internalNodes
     .filter((node) => centralPaths.has(node.path) || connectedIds.has(node.id) || node.riskLevel || node.module !== 'unknown')
-    .sort((a, b) => (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.path.localeCompare(b.path))
+    .sort(byDegree)
     .slice(0, 180);
+
+  // Fallback: se o filtro foi muito restritivo (projeto sem módulos mapeados),
+  // exibe todos os nós internos ordenados por grau para que o Grafo Bruto nunca fique vazio.
+  if (selectedNodes.length < 10 && internalNodes.length > 0) {
+    selectedNodes = internalNodes.slice().sort(byDegree).slice(0, 180);
+  }
 
   const selectedIds = new Set(selectedNodes.map((node) => node.id));
   // Arestas apenas entre nós internos
