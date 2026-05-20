@@ -285,6 +285,7 @@ function getOverviewStyles() {
     .edge.dim { opacity: .08; }
     .node { cursor: pointer; }
     .node circle.core {
+      fill: currentColor;
       stroke: rgba(255,255,255,.88);
       stroke-width: 1.3;
       filter: drop-shadow(0 0 8px currentColor);

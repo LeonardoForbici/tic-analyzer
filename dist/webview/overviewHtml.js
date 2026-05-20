@@ -94,7 +94,7 @@ function renderOverviewHtml(input) {
     <!-- ══════════════════════════════════════════════════════════════════════
          3. GRAFO MULTI-PROJETO
          ══════════════════════════════════════════════════════════════════════ -->
-    ${renderProjectGraphSection(projectGraphData)}
+    ${renderProjectGraphSection(projectGraphData, detectedProjects)}
 
     <!-- ══════════════════════════════════════════════════════════════════════
          4. FLUXO FRONTEND → BACKEND → BANCO
@@ -515,7 +515,7 @@ function buildMultiProjectSvg(projects, crossLinks) {
     }
     const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const trunc = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
-    const W = 860, PAD_L = 56, BOX_MIN_W = 220, BOX_H = 100, BOX_GAP = 16, LAYER_GAP = 44, TOP_PAD = 24;
+    const W = 860, PAD_L = 48, BOX_MIN_W = 180, BOX_H = 92, BOX_GAP = 14, LAYER_GAP = 28, TOP_PAD = 16;
     const projs = projects.map((p) => {
         const r = p;
         return { id: String(r['id'] ?? ''), name: String(r['name'] ?? r['id'] ?? ''), kind: String(r['kind'] ?? 'unknown'), files: Number(r['files'] ?? 0), risks: Number(r['risks'] ?? 0), stack: r['stack'] ?? [] };
@@ -648,7 +648,7 @@ function buildMultiProjectSvg(projects, crossLinks) {
     }
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${totalH}" style="display:block">${parts.join('')}</svg>`;
 }
-function renderProjectGraphSection(data) {
+function renderProjectGraphSection(data, detectedProjects) {
     const pg = data?.projectGraph;
     const cl = data?.crossProjectLinks;
     const fe = data?.frontendApiIndex ?? [];
@@ -665,7 +665,11 @@ function renderProjectGraphSection(data) {
       </div>
     </section>`;
     }
-    const projects = pg ? (pg['projects'] ?? []) : [];
+    // Prefer detectedProjects (all 5+ projects) over project-graph.json's filtered subset
+    const pgProjects = pg ? (pg['projects'] ?? []) : [];
+    const projects = (detectedProjects && detectedProjects.length >= pgProjects.length)
+        ? detectedProjects
+        : pgProjects;
     const crossLinks = cl ? (cl['links'] ?? []) : [];
     const gaps = cl ? (cl['gaps'] ?? []) : [];
     const svgHtml = buildMultiProjectSvg(projects, crossLinks);

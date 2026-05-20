@@ -136,7 +136,7 @@ export function renderOverviewHtml(input: OverviewHtmlInput): string {
     <!-- ══════════════════════════════════════════════════════════════════════
          3. GRAFO MULTI-PROJETO
          ══════════════════════════════════════════════════════════════════════ -->
-    ${renderProjectGraphSection(projectGraphData)}
+    ${renderProjectGraphSection(projectGraphData, detectedProjects)}
 
     <!-- ══════════════════════════════════════════════════════════════════════
          4. FLUXO FRONTEND → BACKEND → BANCO
@@ -572,7 +572,7 @@ function buildMultiProjectSvg(
   const esc = (s: string) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const trunc = (s: string, n: number) => s.length > n ? s.slice(0, n - 1) + '…' : s;
 
-  const W = 860, PAD_L = 56, BOX_MIN_W = 220, BOX_H = 100, BOX_GAP = 16, LAYER_GAP = 44, TOP_PAD = 24;
+  const W = 860, PAD_L = 48, BOX_MIN_W = 180, BOX_H = 92, BOX_GAP = 14, LAYER_GAP = 28, TOP_PAD = 16;
 
   type Proj = { id: string; name: string; kind: string; files: number; risks: number; stack: string[] };
   type Link = { fromProjectId: string; toProjectId: string; method: string; endpoint: string; fromFile: string; toFile: string; confidence: string; type: string };
@@ -719,7 +719,10 @@ function buildMultiProjectSvg(
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${totalH}" style="display:block">${parts.join('')}</svg>`;
 }
 
-function renderProjectGraphSection(data?: OverviewHtmlInput['projectGraphData']): string {
+function renderProjectGraphSection(
+  data?: OverviewHtmlInput['projectGraphData'],
+  detectedProjects?: ProjectSummary['detectedProjects']
+): string {
   const pg = data?.projectGraph;
   const cl = data?.crossProjectLinks as Record<string, unknown> | null | undefined;
   const fe = data?.frontendApiIndex ?? [];
@@ -739,7 +742,11 @@ function renderProjectGraphSection(data?: OverviewHtmlInput['projectGraphData'])
     </section>`;
   }
 
-  const projects = pg ? (pg['projects'] as unknown[] ?? []) : [];
+  // Prefer detectedProjects (all 5+ projects) over project-graph.json's filtered subset
+  const pgProjects = pg ? (pg['projects'] as unknown[] ?? []) : [];
+  const projects: unknown[] = (detectedProjects && detectedProjects.length >= pgProjects.length)
+    ? detectedProjects as unknown[]
+    : pgProjects;
   const crossLinks = cl ? (cl['links'] as unknown[] ?? []) : [];
   const gaps = cl ? (cl['gaps'] as unknown[] ?? []) : [];
 
