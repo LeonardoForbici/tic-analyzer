@@ -10,6 +10,8 @@ export interface ParsedImport {
   specifier: string;
   kind: ImportKind;
   language: ImportLanguage;
+  lineNumber: number;
+  rawText: string;
 }
 
 export async function parseImports(rootPath: string, file: ScannedFile): Promise<ParsedImport[]> {
@@ -47,7 +49,9 @@ export function parseTypeScriptImports(sourcePath: string, content: string, lang
   for (const { kind, pattern } of patterns) {
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(content)) !== null) {
-      imports.push({ sourcePath, specifier: match[1], kind, language });
+      const lineNumber = content.slice(0, match.index).split('\n').length;
+      const rawText = match[0].replace(/\s+/g, ' ').trim().slice(0, 100);
+      imports.push({ sourcePath, specifier: match[1], kind, language, lineNumber, rawText });
     }
   }
 
@@ -60,12 +64,9 @@ export function parseJavaImports(sourcePath: string, content: string): ParsedImp
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(content)) !== null) {
-    imports.push({
-      sourcePath,
-      specifier: match[1],
-      kind: 'java-import',
-      language: 'java'
-    });
+    const lineNumber = content.slice(0, match.index).split('\n').length;
+    const rawText = match[0].replace(/\s+/g, ' ').trim().slice(0, 100);
+    imports.push({ sourcePath, specifier: match[1], kind: 'java-import', language: 'java', lineNumber, rawText });
   }
 
   return dedupeImports(imports);
@@ -92,7 +93,9 @@ export function parsePackageJsonDependencies(sourcePath: string, content: string
       sourcePath,
       specifier,
       kind: 'package-dependency' as const,
-      language: 'json' as const
+      language: 'json' as const,
+      lineNumber: 0,
+      rawText: specifier
     }));
 }
 

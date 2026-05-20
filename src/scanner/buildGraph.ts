@@ -48,6 +48,7 @@ export interface GraphEdge {
   type: GraphEdgeType;
   sourcePath: string;
   targetPath: string;
+  evidence?: string;
 }
 
 export interface LightweightGraph {
@@ -349,15 +350,11 @@ function resolveImportEdge(
     return undefined;
   }
 
+  const evidence = item.lineNumber > 0 ? `${item.rawText} (linha ${item.lineNumber})` : item.rawText;
+
   if (item.kind === 'package-dependency') {
     const packageNode = getPackageNode(packageNodes, item.specifier);
-    return {
-      from: sourceNode.id,
-      to: packageNode.id,
-      type: 'DEPENDS_ON',
-      sourcePath: item.sourcePath,
-      targetPath: packageNode.path
-    };
+    return { from: sourceNode.id, to: packageNode.id, type: 'DEPENDS_ON', sourcePath: item.sourcePath, targetPath: packageNode.path, evidence };
   }
 
   const targetPath = item.language === 'java'
@@ -367,26 +364,14 @@ function resolveImportEdge(
   if (targetPath && targetPath !== file.relativePath) {
     const targetNode = nodeByPath.get(targetPath);
     if (targetNode) {
-      return {
-        from: sourceNode.id,
-        to: targetNode.id,
-        type: 'IMPORTS',
-        sourcePath: item.sourcePath,
-        targetPath
-      };
+      return { from: sourceNode.id, to: targetNode.id, type: 'IMPORTS', sourcePath: item.sourcePath, targetPath, evidence };
     }
   }
 
   if (!item.specifier.startsWith('.') && !item.specifier.startsWith('/') && !item.specifier.startsWith('@/')) {
     const packageName = item.language === 'java' ? javaExternalPackage(item.specifier) : packageNameFromSpecifier(item.specifier);
     const packageNode = getPackageNode(packageNodes, packageName);
-    return {
-      from: sourceNode.id,
-      to: packageNode.id,
-      type: 'USES_PACKAGE',
-      sourcePath: item.sourcePath,
-      targetPath: packageNode.path
-    };
+    return { from: sourceNode.id, to: packageNode.id, type: 'USES_PACKAGE', sourcePath: item.sourcePath, targetPath: packageNode.path, evidence };
   }
 
   return undefined;

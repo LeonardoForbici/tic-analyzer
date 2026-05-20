@@ -23,6 +23,7 @@ export interface WebviewGraphEdge {
   from: string;
   to: string;
   type: string;
+  evidence?: string;
 }
 
 export interface WebviewGraphData {
@@ -115,7 +116,7 @@ export function buildWebviewGraphData(graph: LightweightGraph): WebviewGraphData
         visibleByDefault: node.visibleByDefault
       };
     }),
-    edges: visibleEdges.map((edge) => ({ from: edge.from, to: edge.to, type: edge.type })),
+    edges: visibleEdges.map((edge) => ({ from: edge.from, to: edge.to, type: edge.type, evidence: edge.evidence })),
     stats: {
       totalNodes: graph.nodes.length,
       totalEdges: graph.edges.length,
