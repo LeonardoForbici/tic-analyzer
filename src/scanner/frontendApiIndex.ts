@@ -37,10 +37,10 @@ export interface FrontendApiIndex {
 
 // Padrões de chamadas HTTP
 const HTTP_PATTERNS: Array<{ label: string; pattern: RegExp; methodGroup: number | null; pathGroup: number }> = [
-  // axios.get('/api/...') / axios.post(...)
+  // axios.get<T>('/api/...') — with optional TypeScript generic
   {
     label: 'axios',
-    pattern: /\baxios\.(get|post|put|delete|patch|head|options)\s*\(\s*['"`]([^'"`]+)['"`]/g,
+    pattern: /\baxios\.(get|post|put|delete|patch|head|options)(?:<[^>]*>)?\s*\(\s*['"`]([^'"`]+)['"`]/g,
     methodGroup: 1,
     pathGroup: 2
   },
@@ -51,23 +51,39 @@ const HTTP_PATTERNS: Array<{ label: string; pattern: RegExp; methodGroup: number
     methodGroup: null,
     pathGroup: 1
   },
-  // api.get(...) / api.post(...)
+  // api.get<T>(...) / api.post<T>(...) — with optional TypeScript generic
   {
     label: 'api',
-    pattern: /\bapi\.(get|post|put|delete|patch)\s*\(\s*['"`]([^'"`]+)['"`]/g,
+    pattern: /\bapi\.(get|post|put|delete|patch)(?:<[^>]*>)?\s*\(\s*['"`]([^'"`]+)['"`]/g,
     methodGroup: 1,
     pathGroup: 2
   },
-  // http.get(...) / httpClient.get(...)
+  // Angular HttpClient: this.http.get<T>('/api/...') — with optional generic
   {
     label: 'http',
-    pattern: /\bhttp(?:Client)?\.(get|post|put|delete|patch)\s*\(\s*['"`]([^'"`]+)['"`]/g,
+    pattern: /\bhttp(?:Client)?\.(get|post|put|delete|patch)(?:<[^>]*>)?\s*\(\s*['"`]([^'"`]+)['"`]/g,
     methodGroup: 1,
     pathGroup: 2
   },
+  // Generic service/client: service.get<T>('/api/...') — with optional generic
   {
     label: 'client',
-    pattern: /\b(?:[A-Za-z_$][\w$]*?(?:Client|Service|Api|Request|Fetcher)|client|service|request|fetcher|httpService)\.(get|post|put|delete|patch)\s*\(\s*['"`]([^'"`]+)['"`]/g,
+    pattern: /\b(?:[A-Za-z_$][\w$]*?(?:Client|Service|Api|Request|Fetcher)|client|service|request|fetcher|httpService)\.(get|post|put|delete|patch)(?:<[^>]*>)?\s*\(\s*['"`]([^'"`]+)['"`]/g,
+    methodGroup: 1,
+    pathGroup: 2
+  },
+  // Angular HttpClient template literal: http.get<T>(`${baseUrl}/api/...`)
+  // Captures the path segment after the variable expression
+  {
+    label: 'http-template',
+    pattern: /\bhttp(?:Client)?\.(get|post|put|delete|patch)(?:<[^>]*>)?\s*\(\s*`(?:\$\{[^}]+\})?(\/[^`$\s][^`]*)`/g,
+    methodGroup: 1,
+    pathGroup: 2
+  },
+  // String concatenation: http.get<T>(baseUrl + '/api/...')
+  {
+    label: 'http-concat',
+    pattern: /\bhttp(?:Client)?\.(get|post|put|delete|patch)(?:<[^>]*>)?\s*\([^)'"` \t\n]*\+\s*['"`](\/[^'"`\n]+)['"`]/g,
     methodGroup: 1,
     pathGroup: 2
   },
@@ -168,9 +184,9 @@ function extractApiCalls(filePath: string, content: string, projectId: string): 
     }
   }
 
-  // Pattern: this.http.get(this.varName) or this.http.get(varName)
+  // Pattern: this.http.get<T>(this.varName) or this.http.get(varName) — with optional generic
   if (urlConstants.size > 0) {
-    const VAR_CALL_PATTERN = /\b(http(?:Client)?|axios|api|(?:[A-Za-z_$][\w$]*?(?:Client|Service|Api|Request|Fetcher)|client|service|request|fetcher|httpService))\.(get|post|put|delete|patch)\s*\(\s*(?:this\.)?(\w+)/g;
+    const VAR_CALL_PATTERN = /\b(http(?:Client)?|axios|api|(?:[A-Za-z_$][\w$]*?(?:Client|Service|Api|Request|Fetcher)|client|service|request|fetcher|httpService))\.(get|post|put|delete|patch)(?:<[^>]*>)?\s*\(\s*(?:this\.)?(\w+)/g;
     let varMatch: RegExpExecArray | null;
     while ((varMatch = VAR_CALL_PATTERN.exec(content)) !== null) {
       const varName = varMatch[3];
