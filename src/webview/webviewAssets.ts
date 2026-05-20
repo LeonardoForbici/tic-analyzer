@@ -1128,8 +1128,6 @@ export function getOverviewScript(nonce: string): string {
       });
     });
 
-    renderMultiProjectGraph();
-
     function renderMultiProjectGraph() {
       const svg = document.getElementById('mpgVisSvg');
       if (!svg) return;
