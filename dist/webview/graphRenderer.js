@@ -68,7 +68,7 @@ function buildWebviewGraphData(graph) {
                 visibleByDefault: node.visibleByDefault
             };
         }),
-        edges: visibleEdges.map((edge) => ({ from: edge.from, to: edge.to, type: edge.type })),
+        edges: visibleEdges.map((edge) => ({ from: edge.from, to: edge.to, type: edge.type, evidence: edge.evidence })),
         stats: {
             totalNodes: graph.nodes.length,
             totalEdges: graph.edges.length,

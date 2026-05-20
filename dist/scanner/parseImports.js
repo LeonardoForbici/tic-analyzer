@@ -70,7 +70,9 @@ function parseTypeScriptImports(sourcePath, content, language = 'typescript') {
     for (const { kind, pattern } of patterns) {
         let match;
         while ((match = pattern.exec(content)) !== null) {
-            imports.push({ sourcePath, specifier: match[1], kind, language });
+            const lineNumber = content.slice(0, match.index).split('\n').length;
+            const rawText = match[0].replace(/\s+/g, ' ').trim().slice(0, 100);
+            imports.push({ sourcePath, specifier: match[1], kind, language, lineNumber, rawText });
         }
     }
     return dedupeImports(imports);
@@ -80,12 +82,9 @@ function parseJavaImports(sourcePath, content) {
     const pattern = /^\s*import\s+(?:static\s+)?([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\.\*)+)\s*;/gm;
     let match;
     while ((match = pattern.exec(content)) !== null) {
-        imports.push({
-            sourcePath,
-            specifier: match[1],
-            kind: 'java-import',
-            language: 'java'
-        });
+        const lineNumber = content.slice(0, match.index).split('\n').length;
+        const rawText = match[0].replace(/\s+/g, ' ').trim().slice(0, 100);
+        imports.push({ sourcePath, specifier: match[1], kind: 'java-import', language: 'java', lineNumber, rawText });
     }
     return dedupeImports(imports);
 }
@@ -109,7 +108,9 @@ function parsePackageJsonDependencies(sourcePath, content) {
         sourcePath,
         specifier,
         kind: 'package-dependency',
-        language: 'json'
+        language: 'json',
+        lineNumber: 0,
+        rawText: specifier
     }));
 }
 function extractJavaPackage(content) {

@@ -1125,9 +1125,10 @@ export function getOverviewScript(nonce: string): string {
         document.querySelectorAll('.mpg-tab').forEach((panel) => {
           panel.style.display = panel.id === ('mpg-tab-' + tab) ? '' : 'none';
         });
-        if (tab === 'visual-graph') renderMultiProjectGraph();
       });
     });
+
+    renderMultiProjectGraph();
 
     function renderMultiProjectGraph() {
       const svg = document.getElementById('mpgVisSvg');

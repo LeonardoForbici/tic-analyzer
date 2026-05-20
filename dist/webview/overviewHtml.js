@@ -516,71 +516,6 @@ function renderProjectGraphSection(data) {
     const projects = pg ? (pg['projects'] ?? []) : [];
     const crossLinks = cl ? (cl['links'] ?? []) : [];
     const gaps = cl ? (cl['gaps'] ?? []) : [];
-    const kindBorder = { frontend: '#38bdf8', backend: '#86efac', database: '#fcd34d', mobile: '#c4b5fd', shared: '#fdba74', infra: '#94a3b8' };
-    const sortedProjects = [...projects].sort((a, b) => {
-        const order = { frontend: 0, mobile: 1, backend: 2, shared: 3, database: 4, infra: 5 };
-        return (order[a['kind']] ?? 9) - (order[b['kind']] ?? 9);
-    });
-    const linksByPair = new Map();
-    for (const l of crossLinks) {
-        const lnk = l;
-        const key = `${lnk['fromProjectId']}→${lnk['toProjectId']}`;
-        const existing = linksByPair.get(key);
-        const conf = String(lnk['confidence'] ?? 'GAP');
-        const bestConf = existing ? (existing.conf === 'CONFIRMED' ? 'CONFIRMED' : conf) : conf;
-        linksByPair.set(key, { count: (existing?.count ?? 0) + 1, conf: bestConf });
-    }
-    // Layered view: Frontend → API/Endpoints → Backend → SQL/Database
-    const frontendProjects = sortedProjects.filter((p) => p['kind'] === 'frontend' || p['kind'] === 'mobile');
-    const backendProjects = sortedProjects.filter((p) => p['kind'] === 'backend' || p['kind'] === 'shared');
-    const databaseProjects = sortedProjects.filter((p) => p['kind'] === 'database');
-    const infraProjects = sortedProjects.filter((p) => p['kind'] === 'infra');
-    const renderLayer = (label, projs, color) => {
-        if (projs.length === 0)
-            return '';
-        return `<div class="mpg-layer">
-      <div class="mpg-layer-label" style="color:${color}">${escapeHtml(label)}</div>
-      <div class="mpg-layer-cards">
-        ${projs.map((p) => {
-            const proj = p;
-            const kind = String(proj['kind'] ?? 'unknown');
-            const border = kindBorder[kind] ?? '#94a3b8';
-            const name = String(proj['name'] ?? proj['id']);
-            const files = String(proj['files'] ?? 0);
-            const risks = String(proj['risks'] ?? 0);
-            const stack = proj['stack']?.slice(0, 3).join(', ') ?? '';
-            return `<div class="mpg-card" style="border-color:${border}">
-            <div style="font-weight:600;font-size:13px">${escapeHtml(name)}</div>
-            ${stack ? `<div class="caption">${escapeHtml(stack)}</div>` : ''}
-            <div class="caption">${files} arq · ${risks} riscos</div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
-    };
-    const layerArrow = `<div class="mpg-arrow">↓</div>`;
-    const layersHtml = [
-        renderLayer('Frontend Projects', frontendProjects, '#38bdf8'),
-        frontendProjects.length > 0 && backendProjects.length > 0 ? layerArrow : '',
-        backendProjects.length > 0 ? `<div class="mpg-layer"><div class="mpg-layer-label" style="color:#86efac">API / Endpoints</div><div class="caption" style="text-align:center;padding:4px 0">${crossLinks.length} ponte(s) detectada(s) · ${gaps.length} lacuna(s)</div></div>` : '',
-        backendProjects.length > 0 ? layerArrow : '',
-        renderLayer('Backend Projects', backendProjects, '#86efac'),
-        (backendProjects.length > 0 || frontendProjects.length > 0) && databaseProjects.length > 0 ? layerArrow : '',
-        renderLayer('SQL / Database', databaseProjects, '#fcd34d'),
-        infraProjects.length > 0 ? renderLayer('Infra', infraProjects, '#94a3b8') : ''
-    ].filter(Boolean).join('');
-    // Cross-project link details
-    const connectorItems = [...linksByPair.entries()].slice(0, 20).map(([key, info]) => {
-        const [from, to] = key.split('→');
-        const confClass = info.conf === 'CONFIRMED' ? 'badge-green' : info.conf === 'INFERRED' ? 'badge-yellow' : 'badge-gray';
-        return `<div class="mpg-link-row">
-      <span class="mono">${escapeHtml(from)}</span>
-      <span class="mpg-link-arrow">→</span>
-      <span class="mono">${escapeHtml(to)}</span>
-      <span class="badge ${confClass}">${escapeHtml(info.conf)}</span>
-      <span class="caption">(${info.count} link${info.count !== 1 ? 's' : ''})</span>
-    </div>`;
-    }).join('');
     return `
   <section class="section">
     <div class="section-head">
@@ -595,15 +530,15 @@ function renderProjectGraphSection(data) {
       </div>
     </div>
 
-    <div class="mpg-layers">${layersHtml}</div>
+    <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:16px">
+      <div style="overflow-x:auto;background:var(--panel);border-radius:8px;padding:4px;flex:1;min-width:0">
+        <svg id="mpgVisSvg" width="900" height="480" style="display:block;max-width:100%;min-height:200px"></svg>
+      </div>
+      <div id="mpgDetail" style="display:none;width:240px;flex-shrink:0;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:11px;line-height:1.6"></div>
+    </div>
 
-    ${connectorItems ? `<div class="mpg-connectors">${connectorItems}
-      ${gaps.length > 0 ? `<div class="caption" style="color:#fca5a5;margin-top:6px">⚠️ ${gaps.length} chamada(s) sem endpoint correspondente (lacuna)</div>` : ''}
-    </div>` : ''}
-
-    <div class="graph-tabs" style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap">
+    <div class="graph-tabs" style="display:flex;gap:8px;margin:8px 0;flex-wrap:wrap">
       <button class="btn compact mpg-tab-btn active" data-tab="pontes">Pontes (${crossLinks.length})</button>
-      <button class="btn compact mpg-tab-btn" data-tab="visual-graph">🗺️ Grafo Visual</button>
       <button class="btn compact mpg-tab-btn" data-tab="frontend">Frontend API (${fe.flatMap((f) => (f['calls'] ?? [])).length})</button>
       <button class="btn compact mpg-tab-btn" data-tab="backend">Backend Endpoints (${be.flatMap((b) => (b['endpoints'] ?? [])).length})</button>
     </div>
@@ -632,13 +567,6 @@ function renderProjectGraphSection(data) {
     }).join('')}
         </tbody>
       </table></div>`}
-    </div>
-
-    <div id="mpg-tab-visual-graph" class="mpg-tab" style="display:none">
-      <p class="caption" style="margin-bottom:8px">Cada caixa é um projeto. As setas mostram pontes de API detectadas entre projetos.</p>
-      <div style="overflow-x:auto;background:var(--panel);border-radius:8px;padding:4px">
-        <svg id="mpgVisSvg" width="900" height="520" style="display:block;max-width:100%"></svg>
-      </div>
     </div>
 
     <div id="mpg-tab-frontend" class="mpg-tab" style="display:none">

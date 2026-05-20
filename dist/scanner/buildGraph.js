@@ -270,15 +270,10 @@ function resolveImportEdge(item, file, scan, fileByPath, nodeByPath, packageNode
     if (!sourceNode) {
         return undefined;
     }
+    const evidence = item.lineNumber > 0 ? `${item.rawText} (linha ${item.lineNumber})` : item.rawText;
     if (item.kind === 'package-dependency') {
         const packageNode = getPackageNode(packageNodes, item.specifier);
-        return {
-            from: sourceNode.id,
-            to: packageNode.id,
-            type: 'DEPENDS_ON',
-            sourcePath: item.sourcePath,
-            targetPath: packageNode.path
-        };
+        return { from: sourceNode.id, to: packageNode.id, type: 'DEPENDS_ON', sourcePath: item.sourcePath, targetPath: packageNode.path, evidence };
     }
     const targetPath = item.language === 'java'
         ? resolveJavaImport(item.specifier, javaClassIndex)
@@ -286,25 +281,13 @@ function resolveImportEdge(item, file, scan, fileByPath, nodeByPath, packageNode
     if (targetPath && targetPath !== file.relativePath) {
         const targetNode = nodeByPath.get(targetPath);
         if (targetNode) {
-            return {
-                from: sourceNode.id,
-                to: targetNode.id,
-                type: 'IMPORTS',
-                sourcePath: item.sourcePath,
-                targetPath
-            };
+            return { from: sourceNode.id, to: targetNode.id, type: 'IMPORTS', sourcePath: item.sourcePath, targetPath, evidence };
         }
     }
     if (!item.specifier.startsWith('.') && !item.specifier.startsWith('/') && !item.specifier.startsWith('@/')) {
         const packageName = item.language === 'java' ? javaExternalPackage(item.specifier) : (0, parseImports_1.packageNameFromSpecifier)(item.specifier);
         const packageNode = getPackageNode(packageNodes, packageName);
-        return {
-            from: sourceNode.id,
-            to: packageNode.id,
-            type: 'USES_PACKAGE',
-            sourcePath: item.sourcePath,
-            targetPath: packageNode.path
-        };
+        return { from: sourceNode.id, to: packageNode.id, type: 'USES_PACKAGE', sourcePath: item.sourcePath, targetPath: packageNode.path, evidence };
     }
     return undefined;
 }
