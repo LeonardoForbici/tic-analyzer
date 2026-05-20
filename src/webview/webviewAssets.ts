@@ -1067,15 +1067,26 @@ export function getOverviewScript(nonce: string): string {
 
     // Defer graph rendering until the advanced section is opened
     let graphInitialized = false;
+    const initGraph = () => {
+      if (graphInitialized) return;
+      graphInitialized = true;
+      try {
+        applyLayout('agrupado');
+        selectNode(graphState.selectedNodeId);
+      } catch (err) {
+        log('Erro ao inicializar grafo: ' + (err && err.message ? err.message : String(err)));
+      }
+    };
     const graphDetails = document.querySelector('.advanced-graph-details');
     if (graphDetails) {
       graphDetails.addEventListener('toggle', () => {
-        if (graphDetails.open && !graphInitialized) {
-          graphInitialized = true;
-          applyLayout('agrupado');
-          selectNode(graphState.selectedNodeId);
-        }
+        if (graphDetails.open) initGraph();
       });
+      // Init immediately if the details was restored as open by the webview
+      if (graphDetails.open) initGraph();
+    } else {
+      // Fallback: no details wrapper, just init
+      initGraph();
     }
 
     // Database search functionality

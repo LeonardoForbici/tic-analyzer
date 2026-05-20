@@ -653,7 +653,7 @@ function renderProjectGraphSection(data, detectedProjects) {
     const cl = data?.crossProjectLinks;
     const fe = data?.frontendApiIndex ?? [];
     const be = data?.backendEndpointIndex ?? [];
-    const hasData = pg || cl || fe.length > 0 || be.length > 0;
+    const hasData = pg || cl || fe.length > 0 || be.length > 0 || (detectedProjects && detectedProjects.length > 0);
     if (!hasData) {
         return `
     <section class="section">
