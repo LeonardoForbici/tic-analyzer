@@ -36,6 +36,18 @@ export async function exportForEngineCommand(context: vscode.ExtensionContext, e
     return undefined;
   }
 
+  if (engineId === 'github-copilot') {
+    const confirm = await vscode.window.showWarningMessage(
+      '⚠️ Atenção: exportar para .github/copilot-instructions.md faz o GitHub Copilot carregar esse arquivo automaticamente em TODOS os chats, consumindo tokens da sua cota mesmo quando você não pedir. Deseja continuar?',
+      { modal: true },
+      'Continuar mesmo assim',
+      'Cancelar'
+    );
+    if (confirm !== 'Continuar mesmo assim') {
+      return undefined;
+    }
+  }
+
   const summary = getLastAnalysis(context) ?? await analyzeWorkspace(root);
   await writeTicCodeFolder(root, summary, context.extensionUri);
 

@@ -1202,10 +1202,10 @@ export function getOverviewScript(nonce: string): string {
         // Fallback: path-prefix match (handles projectId='workspace' from single-root projects)
         let assigned = false;
         for (const p of projects) {
-          const rel = (p.relativePath || '').toLowerCase().replace(/\\/g, '/');
+          const rel = (p.relativePath || '').toLowerCase().replace(/\\\\/g, '/');
           if (rel === '.' || rel === '') {
             projectNodeMap.get(p.id).push(node); assigned = true; break;
-          } else if (node.path && node.path.toLowerCase().replace(/\\/g, '/').startsWith(rel + '/')) {
+          } else if (node.path && node.path.toLowerCase().replace(/\\\\/g, '/').startsWith(rel + '/')) {
             projectNodeMap.get(p.id).push(node); assigned = true; break;
           }
         }
@@ -1518,7 +1518,7 @@ export function getOverviewScript(nonce: string): string {
     }
 
     function mpgBaseName(p) {
-      return p ? p.replace(/\\/g, '/').split('/').pop() || p : '';
+      return p ? p.replace(/\\\\/g, '/').split('/').pop() || p : '';
     }
 
     try { renderMultiProjectGraph(); } catch (err) { console.error('[TIC Coder Lite] renderMultiProjectGraph failed:', err); }

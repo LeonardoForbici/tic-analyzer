@@ -203,7 +203,7 @@ async function applyBeginnerSetup(): Promise<void> {
   const config = vscode.workspace.getConfiguration('ticCoderLite');
   const target = vscode.ConfigurationTarget.Workspace;
   await config.update('localAi.enabled', false, target);
-  await config.update('scan.maxFiles', 30000, target);
+  await config.update('scan.maxFiles', 80000, target);
   await config.update('scan.maxFileSizeKb', 512, target);
   await config.update('output.openAfterScan', false, target);
   await config.update('exports.safeWriteMode', 'ask', target);

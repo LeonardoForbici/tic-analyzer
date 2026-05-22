@@ -65,7 +65,7 @@ export function getTicCoderLiteConfig(): TicCoderLiteConfig {
 
   return {
     scan: {
-      maxFiles: readPositiveNumber(config, 'scan.maxFiles', 30000),
+      maxFiles: readPositiveNumber(config, 'scan.maxFiles', 80000),
       maxFileSizeKb: readPositiveNumber(config, 'scan.maxFileSizeKb', 512),
       include: readStringArray(config, 'scan.include', ['**/*']),
       exclude: readStringArray(config, 'scan.exclude', DEFAULT_EXCLUDE)

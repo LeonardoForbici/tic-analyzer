@@ -178,7 +178,7 @@
         },
         "ticCoderLite.scan.maxFiles": {
           "type": "number",
-          "default": 30000,
+          "default": 80000,
           "minimum": 1,
           "description": "Número máximo de arquivos suportados analisados pelo Modo Lite antes de ignorar os demais."
         },
