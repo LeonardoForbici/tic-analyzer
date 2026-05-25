@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import mermaid from 'mermaid';
 
 mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
@@ -54,19 +54,32 @@ const S = {
 };
 
 // ── MermaidDiagram component ──────────────────────────────────────────────────
+let mermaidCounter = 0;
+
 function MermaidDiagram({ code, id }: { code: string; id: string }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const [svg, setSvg] = useState('');
+  const renderKey = useRef(0);
+  const uniqueId = useMemo(() => `mg-${id}-${++mermaidCounter}`, [id]);
 
   useEffect(() => {
-    if (!ref.current || !code.trim()) return;
-    mermaid.render(`mermaid-${id}`, code).then(({ svg }) => {
-      if (ref.current) ref.current.innerHTML = svg;
-    }).catch(() => {
-      if (ref.current) ref.current.innerHTML = `<pre style="color:#888;font-size:11px;overflow:auto">${code}</pre>`;
-    });
-  }, [code, id]);
+    if (!code.trim()) { setSvg(''); return; }
+    const key = ++renderKey.current;
+    mermaid.render(uniqueId, code)
+      .then(({ svg: rendered }) => {
+        if (key === renderKey.current) setSvg(rendered);
+      })
+      .catch(() => {
+        if (key === renderKey.current)
+          setSvg(`<pre style="color:#888;font-size:11px;overflow:auto;white-space:pre-wrap">${code}</pre>`);
+      });
+  }, [code, uniqueId]);
 
-  return <div ref={ref} style={{ overflow: 'auto', background: '#0d1117', borderRadius: '8px', padding: '16px', minHeight: '80px' }} />;
+  return (
+    <div
+      dangerouslySetInnerHTML={{ __html: svg }}
+      style={{ overflow: 'auto', background: '#0d1117', borderRadius: '8px', padding: '16px', minHeight: '80px' }}
+    />
+  );
 }
 
 // ── Extracts first mermaid block from markdown ──────────────────────────────
