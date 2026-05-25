@@ -26,5 +26,8 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
 
   onAnalysisDone: (callback: (result: unknown) => void) => {
     ipcRenderer.once('analysis-done', (_event, result) => callback(result));
-  }
+  },
+
+  readFile: (filePath: string): Promise<string | null> =>
+    ipcRenderer.invoke('read-file', filePath)
 });
