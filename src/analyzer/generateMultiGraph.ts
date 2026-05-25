@@ -1,22 +1,32 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { CallGraph } from './buildCallGraph';
+import type { CallGraph, CallGraphNode } from './buildCallGraph';
 
-const MAX_NODES_PER_LAYER = 30;
+const MAX_PER_LAYER = 12;
 
 export function generateMultiGraph(outputDir: string, graph: CallGraph): void {
   if (graph.nodes.length === 0) return;
 
+  // Conta grau de saída para priorizar nós mais conectados quando há excesso
+  const outDegree = new Map<string, number>();
+  for (const e of graph.edges) {
+    outDegree.set(e.from, (outDegree.get(e.from) ?? 0) + 1);
+  }
+
+  const topNodes = (layer: 'frontend' | 'backend' | 'database'): CallGraphNode[] =>
+    graph.nodes
+      .filter((n) => n.layer === layer)
+      .sort((a, b) => (outDegree.get(b.id) ?? 0) - (outDegree.get(a.id) ?? 0))
+      .slice(0, MAX_PER_LAYER);
+
   const byLayer = {
-    frontend: graph.nodes.filter((n) => n.layer === 'frontend').slice(0, MAX_NODES_PER_LAYER),
-    endpoint: graph.nodes.filter((n) => n.layer === 'endpoint').slice(0, MAX_NODES_PER_LAYER),
-    backend: graph.nodes.filter((n) => n.layer === 'backend').slice(0, MAX_NODES_PER_LAYER),
-    database: graph.nodes.filter((n) => n.layer === 'database').slice(0, MAX_NODES_PER_LAYER)
+    frontend: topNodes('frontend'),
+    backend: topNodes('backend'),
+    database: topNodes('database')
   };
 
-  const visibleIds = new Set([
+  const visible = new Set([
     ...byLayer.frontend.map((n) => n.id),
-    ...byLayer.endpoint.map((n) => n.id),
     ...byLayer.backend.map((n) => n.id),
     ...byLayer.database.map((n) => n.id)
   ]);
@@ -24,116 +34,93 @@ export function generateMultiGraph(outputDir: string, graph: CallGraph): void {
   const lines: string[] = [
     '# Multi-Grafo de Chamadas — TIC Analyzer',
     '',
-    '> Mapa completo: Frontend → Endpoint REST → Backend → PL/SQL',
-    '> 🟢 = detectado diretamente no código | 🟡 = inferido por padrão',
+    '> 🟢 = detectado diretamente no código &nbsp;|&nbsp; 🟡 = inferido',
     '',
     '```mermaid',
     'graph LR'
   ];
 
-  // Subgraphs por camada
   if (byLayer.frontend.length > 0) {
     lines.push('  subgraph Frontend');
-    for (const n of byLayer.frontend) {
-      lines.push(`    ${n.id}["${escMermaid(n.label)}"]`);
-    }
-    lines.push('  end');
-  }
-
-  if (byLayer.endpoint.length > 0) {
-    lines.push('  subgraph Endpoints_REST["Endpoints REST"]');
-    for (const n of byLayer.endpoint) {
-      lines.push(`    ${n.id}["${escMermaid(n.label)}"]`);
-    }
+    for (const n of byLayer.frontend) lines.push(`    ${n.id}["${esc(n.label)}"]`);
     lines.push('  end');
   }
 
   if (byLayer.backend.length > 0) {
     lines.push('  subgraph Backend');
-    for (const n of byLayer.backend) {
-      lines.push(`    ${n.id}["${escMermaid(n.label)}"]`);
-    }
+    for (const n of byLayer.backend) lines.push(`    ${n.id}["${esc(n.label)}"]`);
     lines.push('  end');
   }
 
   if (byLayer.database.length > 0) {
-    lines.push('  subgraph Database_PL_SQL["Database PL/SQL"]');
-    for (const n of byLayer.database) {
-      lines.push(`    ${n.id}["${escMermaid(n.label)}"]`);
-    }
+    lines.push('  subgraph PL_SQL["PL/SQL"]');
+    for (const n of byLayer.database) lines.push(`    ${n.id}["${esc(n.label)}"]`);
     lines.push('  end');
   }
 
   lines.push('');
 
-  // Arestas — somente entre nós visíveis
   for (const edge of graph.edges) {
-    if (!visibleIds.has(edge.from) || !visibleIds.has(edge.to)) continue;
-    const label = edge.label ? `"${edge.confidence} ${escMermaid(edge.label.slice(0, 30))}"` : `"${edge.confidence}"`;
-    lines.push(`  ${edge.from} -->|${label}| ${edge.to}`);
+    if (!visible.has(edge.from) || !visible.has(edge.to)) continue;
+    const conf = edge.confidence;
+    lines.push(`  ${edge.from} -->|"${conf}"| ${edge.to}`);
   }
 
   lines.push('```', '');
 
-  // Tabelas por camada
-  const totalFrontend = graph.nodes.filter((n) => n.layer === 'frontend').length;
-  const totalEndpoints = graph.nodes.filter((n) => n.layer === 'endpoint').length;
-  const totalBackend = graph.nodes.filter((n) => n.layer === 'backend').length;
-  const totalDb = graph.nodes.filter((n) => n.layer === 'database').length;
-
-  lines.push('## Resumo');
-  lines.push('');
-  lines.push('| Camada | Nós | Conexões |');
-  lines.push('| --- | --- | --- |');
-  lines.push(`| Frontend (HTTP calls) | ${totalFrontend} | ${graph.edges.filter((e) => e.type === 'HTTP_CALL').length} |`);
-  lines.push(`| Endpoints REST | ${totalEndpoints} | ${graph.edges.filter((e) => e.type === 'HANDLES').length} |`);
-  lines.push(`| Backend (services/controllers) | ${totalBackend} | ${graph.edges.filter((e) => e.type === 'DB_CALL').length} |`);
-  lines.push(`| Database PL/SQL (procedures/funcs) | ${totalDb} | ${graph.edges.filter((e) => e.type === 'PLSQL_CALL').length} |`);
-  lines.push('');
-
-  if (totalFrontend > MAX_NODES_PER_LAYER || totalEndpoints > MAX_NODES_PER_LAYER || totalDb > MAX_NODES_PER_LAYER) {
-    lines.push(`> ⚠️ Diagrama limitado a ${MAX_NODES_PER_LAYER} nós por camada para legibilidade. Total real: ${graph.nodes.length} nós.`);
-    lines.push('');
-  }
-
-  // Tabela de endpoints conectados ao frontend
+  // Resumo numérico
+  const totalFE = graph.nodes.filter((n) => n.layer === 'frontend').length;
+  const totalBE = graph.nodes.filter((n) => n.layer === 'backend').length;
+  const totalDB = graph.nodes.filter((n) => n.layer === 'database').length;
   const httpEdges = graph.edges.filter((e) => e.type === 'HTTP_CALL');
-  if (httpEdges.length > 0) {
-    lines.push('## Frontend → Endpoints detectados');
-    lines.push('');
-    lines.push('| Arquivo Frontend | Chamada | Endpoint Backend |');
-    lines.push('| --- | --- | --- |');
-    for (const edge of httpEdges.slice(0, 50)) {
-      const fromNode = graph.nodes.find((n) => n.id === edge.from);
-      const toNode = graph.nodes.find((n) => n.id === edge.to);
-      lines.push(`| \`${fromNode?.file ?? edge.from}\` | ${edge.confidence} \`${edge.label ?? ''}\` | \`${toNode?.label ?? edge.to}\` |`);
-    }
-    lines.push('');
-  }
-
-  // Tabela de chamadas backend→PL/SQL
   const dbEdges = graph.edges.filter((e) => e.type === 'DB_CALL');
-  if (dbEdges.length > 0) {
-    lines.push('## Backend → PL/SQL detectados');
-    lines.push('');
-    lines.push('| Arquivo Backend | Confiança | Procedure/Function |');
+  const plEdges = graph.edges.filter((e) => e.type === 'PLSQL_CALL');
+
+  lines.push('## Resumo', '');
+  lines.push('| Camada | Total | Conexões |');
+  lines.push('| --- | --- | --- |');
+  lines.push(`| Frontend (serviços/componentes) | ${totalFE} | ${httpEdges.length} chamadas HTTP |`);
+  lines.push(`| Backend (controllers/services) | ${totalBE} | ${dbEdges.length} chamadas PL/SQL |`);
+  lines.push(`| Database (packages PL/SQL) | ${totalDB} | ${plEdges.length} chamadas internas |`);
+  lines.push('');
+
+  if (totalFE > MAX_PER_LAYER || totalBE > MAX_PER_LAYER || totalDB > MAX_PER_LAYER) {
+    lines.push(`> ⚠️ Diagrama mostra top ${MAX_PER_LAYER} por camada (mais conectados). Total: ${graph.nodes.length} nós.`, '');
+  }
+
+  // Detalhes: Frontend → Backend
+  if (httpEdges.length > 0) {
+    lines.push('## Frontend → Backend', '');
+    lines.push('| Frontend | Confiança | Backend |');
     lines.push('| --- | --- | --- |');
-    for (const edge of dbEdges.slice(0, 50)) {
-      const fromNode = graph.nodes.find((n) => n.id === edge.from);
-      lines.push(`| \`${fromNode?.file ?? edge.from}\` | ${edge.confidence} | \`${edge.label ?? edge.to}\` |`);
+    for (const e of httpEdges.slice(0, 40)) {
+      const from = graph.nodes.find((n) => n.id === e.from);
+      const to = graph.nodes.find((n) => n.id === e.to);
+      lines.push(`| \`${from?.label ?? e.from}\` | ${e.confidence} | \`${to?.label ?? e.to}\` |`);
     }
     lines.push('');
   }
 
-  // Tabela PL/SQL → PL/SQL
-  const plsqlEdges = graph.edges.filter((e) => e.type === 'PLSQL_CALL');
-  if (plsqlEdges.length > 0) {
-    lines.push('## PL/SQL → PL/SQL (chamadas internas)');
+  // Detalhes: Backend → PL/SQL
+  if (dbEdges.length > 0) {
+    lines.push('## Backend → PL/SQL', '');
+    lines.push('| Backend | Confiança | Procedure/Package |');
+    lines.push('| --- | --- | --- |');
+    for (const e of dbEdges.slice(0, 40)) {
+      const from = graph.nodes.find((n) => n.id === e.from);
+      lines.push(`| \`${from?.label ?? e.from}\` | ${e.confidence} | \`${e.label ?? e.to}\` |`);
+    }
     lines.push('');
+  }
+
+  // Detalhes: PL/SQL → PL/SQL
+  if (plEdges.length > 0) {
+    lines.push('## PL/SQL → PL/SQL', '');
     lines.push('| Caller | Confiança | Callee |');
     lines.push('| --- | --- | --- |');
-    for (const edge of plsqlEdges.slice(0, 50)) {
-      lines.push(`| \`${edge.from.replace('db:', '')}\` | ${edge.confidence} | \`${edge.label ?? edge.to}\` |`);
+    for (const e of plEdges.slice(0, 40)) {
+      const from = graph.nodes.find((n) => n.id === e.from);
+      lines.push(`| \`${from?.label ?? e.from}\` | ${e.confidence} | \`${e.label ?? e.to}\` |`);
     }
     lines.push('');
   }
@@ -145,6 +132,6 @@ export function generateMultiGraph(outputDir: string, graph: CallGraph): void {
   fs.writeFileSync(path.join(outputDir, 'multigraph.md'), lines.join('\n'), 'utf8');
 }
 
-function escMermaid(s: string): string {
+function esc(s: string): string {
   return s.replace(/"/g, "'").replace(/[<>]/g, '').replace(/\[/g, '(').replace(/\]/g, ')');
 }

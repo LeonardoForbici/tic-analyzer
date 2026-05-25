@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, MouseEvent as RMouseEvent } from 'react';
 import mermaid from 'mermaid';
 
 mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
@@ -53,11 +53,14 @@ const S = {
   miniBar: (pct: number, color = C.accent) => ({ height: '4px', borderRadius: '2px', background: C.border, overflow: 'hidden' as const, marginTop: '4px', position: 'relative' as const }),
 };
 
-// ── MermaidDiagram component ──────────────────────────────────────────────────
+// ── MermaidDiagram component (com pan/zoom) ───────────────────────────────────
 let mermaidCounter = 0;
 
 function MermaidDiagram({ code, id }: { code: string; id: string }) {
   const [svg, setSvg] = useState('');
+  const [scale, setScale] = useState(1);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const drag = useRef({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 });
   const renderKey = useRef(0);
   const uniqueId = useMemo(() => `mg-${id}-${++mermaidCounter}`, [id]);
 
@@ -74,11 +77,51 @@ function MermaidDiagram({ code, id }: { code: string; id: string }) {
       });
   }, [code, uniqueId]);
 
+  // Reset when new diagram loads
+  useEffect(() => { setScale(1); setPos({ x: 0, y: 0 }); }, [svg]);
+
+  const onWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    setScale((s) => Math.min(4, Math.max(0.3, s - e.deltaY * 0.001)));
+  }, []);
+
+  const onMouseDown = useCallback((e: RMouseEvent) => {
+    drag.current = { active: true, startX: e.clientX, startY: e.clientY, originX: pos.x, originY: pos.y };
+  }, [pos]);
+
+  const onMouseMove = useCallback((e: RMouseEvent) => {
+    if (!drag.current.active) return;
+    setPos({ x: drag.current.originX + e.clientX - drag.current.startX, y: drag.current.originY + e.clientY - drag.current.startY });
+  }, []);
+
+  const stopDrag = useCallback(() => { drag.current.active = false; }, []);
+
+  const reset = useCallback(() => { setScale(1); setPos({ x: 0, y: 0 }); }, []);
+
   return (
-    <div
-      dangerouslySetInnerHTML={{ __html: svg }}
-      style={{ overflow: 'auto', background: '#0d1117', borderRadius: '8px', padding: '16px', minHeight: '80px' }}
-    />
+    <div>
+      {/* Zoom controls */}
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', alignItems: 'center' }}>
+        <button style={{ padding: '4px 10px', background: '#1a1a3a', border: '1px solid #2a2a4e', borderRadius: '6px', color: '#aaa', cursor: 'pointer', fontSize: '16px' }} onClick={() => setScale((s) => Math.min(4, s + 0.2))}>+</button>
+        <button style={{ padding: '4px 10px', background: '#1a1a3a', border: '1px solid #2a2a4e', borderRadius: '6px', color: '#aaa', cursor: 'pointer', fontSize: '16px' }} onClick={() => setScale((s) => Math.max(0.3, s - 0.2))}>−</button>
+        <button style={{ padding: '4px 10px', background: '#1a1a3a', border: '1px solid #2a2a4e', borderRadius: '6px', color: '#aaa', cursor: 'pointer', fontSize: '12px' }} onClick={reset}>⟳ Reset</button>
+        <span style={{ fontSize: '11px', color: '#666', marginLeft: '4px' }}>{Math.round(scale * 100)}% &nbsp;|&nbsp; scroll = zoom &nbsp;|&nbsp; drag = mover</span>
+      </div>
+      {/* Canvas */}
+      <div
+        style={{ overflow: 'hidden', background: '#0d1117', borderRadius: '8px', height: '440px', cursor: drag.current.active ? 'grabbing' : 'grab', userSelect: 'none' }}
+        onWheel={onWheel}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={stopDrag}
+        onMouseLeave={stopDrag}
+      >
+        <div
+          dangerouslySetInnerHTML={{ __html: svg }}
+          style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`, transformOrigin: '0 0', padding: '16px', display: 'inline-block', minWidth: '100%' }}
+        />
+      </div>
+    </div>
   );
 }
 
