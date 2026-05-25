@@ -3,7 +3,7 @@ import * as path from 'path';
 import { runPipeline, type PipelineProgress, type PipelineResult } from '../src/analyzer/pipeline';
 import { TicAnalyzerMcpServer } from '../src/mcp/server';
 
-const isDev = process.env.NODE_ENV === 'development';
+const isDev = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
 let mcpServer: TicAnalyzerMcpServer | null = null;
@@ -30,7 +30,7 @@ function createWindow(): void {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'renderer', 'index.html'));
+    mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   }
 
   mainWindow.on('closed', () => { mainWindow = null; });
