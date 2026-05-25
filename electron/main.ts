@@ -89,6 +89,14 @@ ipcMain.handle('open-folder', async (_event, folderPath: string) => {
   await shell.openPath(folderPath);
 });
 
+ipcMain.handle('read-file', async (_event, filePath: string): Promise<string | null> => {
+  try {
+    const fs = await import('fs');
+    if (!fs.existsSync(filePath)) return null;
+    return fs.readFileSync(filePath, 'utf8');
+  } catch { return null; }
+});
+
 // ── App lifecycle ────────────────────────────────────────────────────────────────
 
 app.whenReady().then(createWindow);
