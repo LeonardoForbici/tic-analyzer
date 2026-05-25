@@ -4,7 +4,7 @@
   "description": "TIC Analyzer — Motor local de análise para projetos grandes",
   "main": "dist/electron/main.js",
   "scripts": {
-    "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:electron\"",
+    "dev": "npx concurrently \"npm run dev:renderer\" \"npm run dev:electron\"",
     "dev:renderer": "vite",
     "dev:electron": "tsc -p tsconfig.electron.json && electron dist/electron/main.js",
     "build": "npm run build:renderer && npm run build:electron",
