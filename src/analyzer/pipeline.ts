@@ -14,6 +14,11 @@ import { detectPermissions } from './detectPermissions';
 import { generateMermaidDiagram } from './generateMermaidDiagram';
 import { generateGapsReport } from './generateGapsReport';
 import { generateOpenApi } from './generateOpenApi';
+import { detectFrontendCalls } from './detectFrontendCalls';
+import { detectPlsqlObjects } from './detectPlsqlObjects';
+import { detectBackendDbCalls } from './detectBackendDbCalls';
+import { buildCallGraph } from './buildCallGraph';
+import { generateMultiGraph } from './generateMultiGraph';
 
 export type PhaseStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -38,6 +43,9 @@ export interface PipelineResult {
   totalLines: number;
   modulesGenerated: number;
   quickContextTokens: number;
+  plsqlObjects: number;
+  frontendCalls: number;
+  dbCalls: number;
   error?: string;
 }
 
@@ -48,7 +56,10 @@ const PHASES: PipelinePhase[] = [
   { id: 'stack', label: 'Detectando stack', status: 'pending' },
   { id: 'graph', label: 'Mapeando dependências', status: 'pending' },
   { id: 'risks', label: 'Detectando riscos', status: 'pending' },
-  { id: 'endpoints', label: 'Detectando endpoints', status: 'pending' },
+  { id: 'endpoints', label: 'Detectando endpoints REST', status: 'pending' },
+  { id: 'frontend-calls', label: 'Detectando chamadas HTTP (frontend)', status: 'pending' },
+  { id: 'plsql', label: 'Analisando procedures PL/SQL', status: 'pending' },
+  { id: 'db-calls', label: 'Mapeando chamadas backend→banco', status: 'pending' },
   { id: 'modules', label: 'Detectando módulos', status: 'pending' },
   { id: 'context', label: 'Gerando quick-context.md', status: 'pending' },
   { id: 'module-context', label: 'Gerando contextos por módulo', status: 'pending' },
@@ -58,6 +69,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'diagram', label: 'Gerando diagrama Mermaid', status: 'pending' },
   { id: 'openapi', label: 'Gerando openapi.yaml', status: 'pending' },
   { id: 'gaps', label: 'Gerando relatório de gaps', status: 'pending' },
+  { id: 'multigraph', label: 'Gerando multi-grafo (frontend→endpoint→backend→PL/SQL)', status: 'pending' },
   { id: 'ai-files', label: 'Gerando arquivos para IA', status: 'pending' }
 ];
 
@@ -71,6 +83,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       totalLines: 0,
       modulesGenerated: 0,
       quickContextTokens: 0,
+      plsqlObjects: 0,
+      frontendCalls: 0,
+      dbCalls: 0,
       error: `Pasta inválida: "${projectPath}"\n\nSelecione a pasta RAIZ do projeto, não a pasta .tic-code.\nExemplo correto: C:\\Git\\meu-projeto`
     };
   }
@@ -139,8 +154,26 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('endpoints');
     report('endpoints', 100, `${endpoints.length} endpoints detectados`);
 
+    // ── 5b. FRONTEND CALLS ───────────────────────────────────────────────────────
+    report('frontend-calls', 51, 'Detectando fetch/axios/HttpClient...');
+    const frontendCallsData = detectFrontendCalls(files);
+    markDone('frontend-calls');
+    report('frontend-calls', 100, `${frontendCallsData.length} chamadas HTTP detectadas`);
+
+    // ── 5c. PL/SQL ───────────────────────────────────────────────────────────────
+    report('plsql', 53, 'Extraindo procedures, functions e packages PL/SQL...');
+    const { objects: plsqlObjects, calls: plsqlCalls } = detectPlsqlObjects(files);
+    markDone('plsql');
+    report('plsql', 100, `${plsqlObjects.length} objetos PL/SQL, ${plsqlCalls.length} chamadas`);
+
+    // ── 5d. BACKEND DB CALLS ─────────────────────────────────────────────────────
+    report('db-calls', 55, 'Mapeando chamadas JDBC/oracledb/StoredProcedure...');
+    const dbCallsData = detectBackendDbCalls(files);
+    markDone('db-calls');
+    report('db-calls', 100, `${dbCallsData.length} ligações backend→PL/SQL`);
+
     // ── 6. MÓDULOS ───────────────────────────────────────────────────────────────
-    report('modules', 55, 'Detectando módulos por estrutura de diretório...');
+    report('modules', 57, 'Detectando módulos por estrutura de diretório...');
     const modules = detectModules(files);
     markDone('modules');
     report('modules', 100, `${modules.length} módulos detectados`);
@@ -241,7 +274,14 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('gaps');
     report('gaps', 100, `gaps.md gerado`);
 
-    // ── 15. ARQUIVOS PARA IA ─────────────────────────────────────────────────────
+    // ── 15. MULTI-GRAFO ──────────────────────────────────────────────────────────
+    report('multigraph', 96, 'Construindo grafo Frontend→Endpoint→Backend→PL/SQL...');
+    const callGraph = buildCallGraph(frontendCallsData, endpoints, plsqlObjects, plsqlCalls, dbCallsData);
+    generateMultiGraph(ticCodeDir, callGraph);
+    markDone('multigraph');
+    report('multigraph', 100, `${callGraph.nodes.length} nós, ${callGraph.edges.length} arestas`);
+
+    // ── 16. ARQUIVOS PARA IA ─────────────────────────────────────────────────────
     report('ai-files', 97, 'Gerando copilot-instructions.md e CLAUDE.md...');
     writeCopilotInstructions(projectPath, projectName, files.length, modules);
     writeClaudeMd(projectPath, projectName, files.length, modules);
@@ -255,12 +295,15 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       totalFiles: files.length,
       totalLines,
       modulesGenerated: modules.length,
-      quickContextTokens
+      quickContextTokens,
+      plsqlObjects: plsqlObjects.length,
+      frontendCalls: frontendCallsData.length,
+      dbCalls: dbCallsData.length
     };
 
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    return { success: false, outputPath: ticCodeDir, totalFiles: 0, totalLines: 0, modulesGenerated: 0, quickContextTokens: 0, error };
+    return { success: false, outputPath: ticCodeDir, totalFiles: 0, totalLines: 0, modulesGenerated: 0, quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0, error };
   }
 }
 

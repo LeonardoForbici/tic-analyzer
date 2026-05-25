@@ -36,6 +36,9 @@ interface AnalysisResult {
   totalLines: number;
   modulesGenerated: number;
   quickContextTokens: number;
+  plsqlObjects: number;
+  frontendCalls: number;
+  dbCalls: number;
   error?: string;
 }
 
@@ -197,12 +200,15 @@ export function App() {
               <div style={{ marginBottom: '16px', fontWeight: 600, fontSize: '14px', color: '#56cfad' }}>
                 ✅ Análise concluída
               </div>
-              <div style={{ display: 'flex', gap: '16px' }}>
+              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' as const }}>
                 {[
                   { num: result.totalFiles.toLocaleString(), label: 'Arquivos' },
                   { num: result.totalLines.toLocaleString(), label: 'Linhas' },
                   { num: result.modulesGenerated.toString(), label: 'Módulos' },
-                  { num: `~${result.quickContextTokens.toLocaleString()}`, label: 'Tokens (quick-context)' }
+                  { num: `~${result.quickContextTokens.toLocaleString()}`, label: 'Tokens (quick-context)' },
+                  ...(result.plsqlObjects > 0 ? [{ num: result.plsqlObjects.toString(), label: 'Objetos PL/SQL' }] : []),
+                  ...(result.frontendCalls > 0 ? [{ num: result.frontendCalls.toString(), label: 'Chamadas HTTP (frontend)' }] : []),
+                  ...(result.dbCalls > 0 ? [{ num: result.dbCalls.toString(), label: 'Ligações backend→DB' }] : [])
                 ].map((s) => (
                   <div key={s.label} style={S.stat}>
                     <div style={S.statNum}>{s.num}</div>
@@ -217,8 +223,9 @@ export function App() {
               <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#aaa', lineHeight: '1.8' }}>
                 <div>📁 {result.outputPath}/</div>
                 <div>&nbsp;&nbsp;📄 quick-context.md &nbsp;<span style={{ color: '#56cfad' }}>← Copilot lê isso (~{result.quickContextTokens.toLocaleString()} tokens)</span></div>
+                <div>&nbsp;&nbsp;📄 multigraph.md &nbsp;<span style={{ color: '#56cfad' }}>← Multi-grafo Frontend→Endpoint→Backend→PL/SQL</span></div>
                 <div>&nbsp;&nbsp;📄 index.md &nbsp;<span style={{ color: '#888' }}>← Mapa de módulos</span></div>
-                <div>&nbsp;&nbsp;📄 diagram.md &nbsp;<span style={{ color: '#888' }}>← Diagrama Mermaid</span></div>
+                <div>&nbsp;&nbsp;📄 diagram.md &nbsp;<span style={{ color: '#888' }}>← Diagrama de módulos</span></div>
                 <div>&nbsp;&nbsp;📄 openapi.yaml &nbsp;<span style={{ color: '#888' }}>← Endpoints OpenAPI 3.0</span></div>
                 <div>&nbsp;&nbsp;📄 gaps.md &nbsp;<span style={{ color: '#ff6b6b' }}>← Lacunas 🔴</span></div>
                 <div>&nbsp;&nbsp;📄 permissions.md &nbsp;<span style={{ color: '#888' }}>← Matriz roles × rotas</span></div>

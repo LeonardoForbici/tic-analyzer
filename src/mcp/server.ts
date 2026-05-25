@@ -87,6 +87,11 @@ export class TicAnalyzerMcpServer {
           inputSchema: { type: 'object', properties: {} }
         },
         {
+          name: 'get_multigraph',
+          description: 'Retorna o multi-grafo completo: Frontend → Endpoint REST → Backend → PL/SQL. Use para entender o impacto de modificações em qualquer camada.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
           name: 'get_business_rules',
           description: 'Retorna as regras de negócio de um módulo específico (validações, enums, guards, constantes).',
           inputSchema: {
@@ -142,6 +147,8 @@ export class TicAnalyzerMcpServer {
           const content = fs.existsSync(contextPath) ? fs.readFileSync(contextPath, 'utf8') : `Contexto do módulo "${best.name}" não encontrado.`;
           return { content: [{ type: 'text', text: `# Módulo encontrado: ${best.name}\n\n${content}` }] };
         }
+
+        case 'get_multigraph': return { content: [{ type: 'text', text: this.readFile('multigraph.md') }] };
 
         case 'get_diagram': return { content: [{ type: 'text', text: this.readFile('diagram.md') }] };
 
