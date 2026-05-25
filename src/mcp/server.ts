@@ -1,12 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
-import { Server } from '@modelcontextprotocol/sdk/server/index';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse';
+import { Server } from '@modelcontextprotocol/sdk/server';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema
-} from '@modelcontextprotocol/sdk/types';
+} from '@modelcontextprotocol/sdk/types.js';
 
 export interface McpServerOptions {
   projectPath: string;
