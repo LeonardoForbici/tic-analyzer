@@ -106,6 +106,9 @@ export function App() {
     }
   }, [mcpRunning, projectPath, result, mcpPort]);
 
+  const isTicCodePath = projectPath.replace(/[\\/]$/, '').endsWith('.tic-code');
+  const parentPath = isTicCodePath ? projectPath.replace(/[\\/]?\.tic-code[\\/]?$/, '') : '';
+
   const overallPct = progress
     ? Math.round(progress.phases.filter((p) => p.status === 'done').length / progress.phases.length * 100)
     : 0;
@@ -143,6 +146,23 @@ export function App() {
             </button>
           </div>
         </div>
+
+        {/* Warning: .tic-code selecionado */}
+        {isTicCodePath && (
+          <div style={{ ...S.card, border: '1px solid #7a6000', background: '#1a1500', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '18px' }}>⚠️</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: '#f0c000', fontWeight: 600, fontSize: '13px' }}>Pasta de saída selecionada</div>
+              <div style={{ color: '#aaa', fontSize: '12px', marginTop: '2px' }}>
+                Esta pasta é gerada pelo TIC Analyzer. Selecione a pasta raiz do projeto:
+                <code style={{ marginLeft: '6px', color: '#f0c000' }}>{parentPath}</code>
+              </div>
+            </div>
+            <button style={S.btn('#7a6000')} onClick={() => setProjectPath(parentPath)}>
+              Usar pasta pai
+            </button>
+          </div>
+        )}
 
         {/* Progresso */}
         {state === 'analyzing' && progress && (

@@ -42,9 +42,11 @@ ipcMain.handle('select-folder', async () => {
   if (!mainWindow) return null;
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory'],
-    title: 'Selecione a pasta do projeto para analisar'
+    title: 'Selecione a pasta RAIZ do projeto (não a pasta .tic-code)'
   });
-  return result.canceled ? null : result.filePaths[0] ?? null;
+  if (result.canceled || !result.filePaths[0]) return null;
+  const selected = result.filePaths[0].replace(/[\\/]$/, '');
+  return selected.endsWith('.tic-code') ? path.dirname(selected) : selected;
 });
 
 ipcMain.handle('run-analysis', async (_event, projectPath: string) => {

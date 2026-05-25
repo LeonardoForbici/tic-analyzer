@@ -52,6 +52,19 @@ const PHASES: PipelinePhase[] = [
 ];
 
 export async function runPipeline(projectPath: string, onProgress: ProgressCallback): Promise<PipelineResult> {
+  const normalized = projectPath.replace(/[\\/]$/, '');
+  if (normalized.endsWith('.tic-code')) {
+    return {
+      success: false,
+      outputPath: '',
+      totalFiles: 0,
+      totalLines: 0,
+      modulesGenerated: 0,
+      quickContextTokens: 0,
+      error: `Pasta inválida: "${projectPath}"\n\nSelecione a pasta RAIZ do projeto, não a pasta .tic-code.\nExemplo correto: C:\\Git\\meu-projeto`
+    };
+  }
+
   const phases = PHASES.map((p) => ({ ...p }));
   const ticCodeDir = path.join(projectPath, '.tic-code');
   const modulesDir = path.join(ticCodeDir, 'modules');
