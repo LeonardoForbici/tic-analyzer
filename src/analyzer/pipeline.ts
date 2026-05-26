@@ -272,7 +272,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     fs.writeFileSync(path.join(ticCodeDir, 'index.md'), indexContent, 'utf8');
     markDone('index');
 
-    // ── 12. DIAGRAMA MERMAID ────────────────────────────────────────────────────
+    // ── 12. DIAGRAMA MERMAID (base — será atualizado com HTTP edges na fase 15b) ──
     report('diagram', 64, 'Gerando diagrama de módulos...');
     generateMermaidDiagram(ticCodeDir, modules, graph);
     markDone('diagram');
@@ -298,6 +298,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     fs.writeFileSync(path.join(ticCodeDir, 'call-graph.json'), JSON.stringify(callGraph), 'utf8');
     markDone('multigraph');
     report('multigraph', 100, `${callGraph.nodes.length} nós, ${callGraph.edges.length} arestas`);
+
+    // ── 15b. DIAGRAMA MERMAID (com arestas HTTP) ─────────────────────────────────
+    generateMermaidDiagram(ticCodeDir, modules, graph, callGraph);
 
     // ── 16. IMPACTO ───────────────────────────────────────────────────────────────
     report('impact', 74, 'Construindo índice de impacto de mudanças...');

@@ -2,11 +2,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { ProjectModule } from './detectModules';
 import type { DependencyGraph } from './buildDependencyGraph';
+import type { CallGraph } from './buildCallGraph';
 
 export function generateMermaidDiagram(
   outputDir: string,
   modules: ProjectModule[],
-  graph: DependencyGraph
+  graph: DependencyGraph,
+  callGraph?: CallGraph
 ): void {
   if (modules.length === 0) return;
 
@@ -42,6 +44,28 @@ export function generateMermaidDiagram(
     if (!edgesSeen.has(key)) {
       edgesSeen.add(key);
       lines.push(`  ${sanitize(fromMod)} --> ${sanitize(toMod)}`);
+    }
+  }
+
+  // Arestas HTTP entre módulos (infer from call graph)
+  if (callGraph) {
+    const nodeFileMap = new Map<string, string>();
+    for (const node of callGraph.nodes) nodeFileMap.set(node.id, node.file);
+
+    for (const edge of callGraph.edges) {
+      if (edge.type !== 'HTTP_CALL') continue;
+      const fromFile = nodeFileMap.get(edge.from);
+      const toFile = nodeFileMap.get(edge.to);
+      if (!fromFile || !toFile) continue;
+      const fromMod = findModuleForFile(fromFile, modules);
+      const toMod = findModuleForFile(toFile, modules);
+      if (!fromMod || !toMod || fromMod === toMod) continue;
+      if (!moduleNames.has(fromMod) || !moduleNames.has(toMod)) continue;
+      const key = `${fromMod}→${toMod}`;
+      if (!edgesSeen.has(key)) {
+        edgesSeen.add(key);
+        lines.push(`  ${sanitize(fromMod)} -->|HTTP| ${sanitize(toMod)}`);
+      }
     }
   }
 
