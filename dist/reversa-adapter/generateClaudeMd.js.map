@@ -1,1 +1,0 @@
-{"version":3,"file":"generateClaudeMd.js","sourceRoot":"","sources":["../../src/reversa-adapter/generateClaudeMd.ts"],"names":[],"mappings":";;AAKA,4CAOC;AATD,mGAAwF;AAExF,SAAgB,gBAAgB,CAAC,OAAuB,EAAE,OAAsB,EAAE,YAAyB;IACzG,OAAO,IAAA,qDAAqB,EAAC,OAAO,EAAE;QACpC,MAAM,EAAE,aAAa;QACrB,UAAU,EAAE,WAAW;QACvB,iBAAiB,EAAE,gGAAgG;QACnH,OAAO,EAAE,KAAK;KACf,EAAE,YAAY,CAAC,CAAC;AACnB,CAAC"}

@@ -1,39 +1,21 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
     "target": "ES2022",
-    "lib": [
-      "ES2022",
-      "DOM"
-    ],
-    "types": [
-      "node",
-      "vscode"
-    ],
-    "outDir": "dist",
-    "rootDir": "src",
-    "sourceMap": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "declaration": true,
-    "declarationMap": true,
-    "resolveJsonModule": true,
-    "moduleResolution": "node",
-    "ignoreDeprecations": "5.0",
-    "allowSyntheticDefaultImports": true,
-    "noImplicitAny": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "ignoreDeprecations": "6.0",
+    "outDir": "dist/renderer",
+    "rootDir": "src/ui",
+    "baseUrl": ".",
+    "paths": {
+      "@analyzer/*": ["src/analyzer/*"],
+      "@mcp/*": ["src/mcp/*"]
+    }
   },
-  "include": [
-    "src"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist"
-  ]
+  "include": ["src/ui/**/*"],
+  "exclude": ["node_modules", "dist", "src/analyzer/**/*", "src/mcp/**/*", "src/cli.ts", "electron/**/*"]
 }

@@ -1,325 +1,64 @@
 {
-  "name": "tic-coder-lite",
-  "displayName": "TIC Coder Lite",
-  "description": "VS Code interface for Reversa Engine — transform legacy systems into executable specifications using reverse engineering.",
-  "version": "0.0.1",
-  "publisher": "tic",
-  "license": "MIT",
-  "author": "TIC / Leonardo Forbici",
-  "engines": {
-    "vscode": "^1.92.0"
-  },
-  "categories": [
-    "Other"
-  ],
-  "activationEvents": [
-    "onStartupFinished"
-  ],
-  "main": "./dist/extension.js",
-  "contributes": {
-    "commands": [
-      {
-        "command": "ticCoderLite.analyzeProject",
-        "title": "TIC Coder Lite: Analisar Workspace (Modo Lite)"
-      },
-      {
-        "command": "ticCoderLite.openOverview",
-        "title": "TIC Coder Lite: Abrir Visão Geral"
-      },
-      {
-        "command": "ticCoderLite.generateAgentContext",
-        "title": "TIC Coder Lite: Gerar Contexto para IA (Modo Lite)"
-      },
-      {
-        "command": "ticCoderLite.exportAgentsMd",
-        "title": "TIC Coder Lite: Exportar AGENTS.md (IA Padrão)"
-      },
-      {
-        "command": "ticCoderLite.detectAiEngines",
-        "title": "TIC Coder Lite: Detectar Ferramentas de IA (IA Padrão)"
-      },
-      {
-        "command": "ticCoderLite.exportForCodex",
-        "title": "TIC Coder Lite: Exportar para Codex (IA Padrão)"
-      },
-      {
-        "command": "ticCoderLite.exportForClaude",
-        "title": "TIC Coder Lite: Exportar para Claude (IA Padrão)"
-      },
-      {
-        "command": "ticCoderLite.exportForCopilot",
-        "title": "TIC Coder Lite: Exportar para Copilot (IA Padrão)"
-      },
-      {
-        "command": "ticCoderLite.exportForCursor",
-        "title": "TIC Coder Lite: Exportar para Cursor (IA Padrão)"
-      },
-      {
-        "command": "ticCoderLite.exportForGemini",
-        "title": "TIC Coder Lite: Exportar para Gemini (IA Padrão)"
-      },
-      {
-        "command": "ticCoderLite.enhanceWithLocalAi",
-        "title": "TIC Coder Lite: Melhorar com IA Local (Modo IA Local)"
-      },
-      {
-        "command": "ticCoderLite.importTracerInputs",
-        "title": "TIC Coder Lite: Importar Logs/Traces para Tracer"
-      },
-      {
-        "command": "ticCoderLite.importVisorScreenshots",
-        "title": "TIC Coder Lite: Importar Screenshots para Visor"
-      },
-      {
-        "command": "ticCoderLite.analyzeImpactByImage",
-        "title": "TIC Coder Lite: Analisar Impacto por Imagem/Tela"
-      },
-      {
-        "command": "ticCoderLite.importImpactScreenshot",
-        "title": "TIC Coder Lite: Importar Screenshot para Impacto"
-      },
-      {
-        "command": "ticCoderLite.estimateChangeCostWithLocalAi",
-        "title": "TIC Coder Lite: Estimar Esforço com IA Local"
-      },
-      {
-        "command": "ticCoderLite.exportChangePackageForPaidAi",
-        "title": "TIC Coder Lite: Exportar Pacote para IA Paga"
-      },
-      {
-        "command": "ticCoderLite.runChangeTwin",
-        "title": "TIC Coder Lite: Simular Mudança com Change Twin"
-      },
-      {
-        "command": "ticCoderLite.generateLegacyAntibodies",
-        "title": "TIC Coder Lite: Gerar Legacy Antibodies"
-      },
-      {
-        "command": "ticCoderLite.runChangeFirewallOnGitDiff",
-        "title": "TIC Coder Lite: Validar Diff Atual com AI Change Firewall"
-      },
-      {
-        "command": "ticCoderLite.analyzeWhatIf",
-        "title": "TIC Coder Lite: What-If – Analisar Impacto de Mudança Hipotética"
-      },
-      {
-        "command": "ticCoderLite.openChangeFirewallReport",
-        "title": "TIC Coder Lite: Abrir Relatório do AI Change Firewall"
-      },
-      {
-        "command": "ticCoderLite.openLegacyAntibodies",
-        "title": "TIC Coder Lite: Abrir Legacy Antibodies"
-      },
-      {
-        "command": "ticCoderLite.exportAiReviewPrompt",
-        "title": "TIC Coder Lite: Exportar Prompt de Revisão para IA"
-      },
-      {
-        "command": "ticCoderLite.generateChangeApprovalPack",
-        "title": "TIC Coder Lite: Gerar Pacote de Aprovação da Mudança"
-      },
-      {
-        "command": "ticCoderLite.openChangeApprovalPack",
-        "title": "TIC Coder Lite: Abrir Pacote de Aprovação"
-      }
-    ],
-    "configuration": {
-      "title": "TIC Coder Lite",
-      "properties": {
-        "ticCoderLite.localAi.enabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Ativa melhorias opcionais com IA Local via Ollama. O Modo Lite funciona sem isso."
-        },
-        "ticCoderLite.localAi.ollamaUrl": {
-          "type": "string",
-          "default": "http://localhost:11434",
-          "description": "URL base do Ollama usada apenas para melhoria opcional com IA Local."
-        },
-        "ticCoderLite.localAi.model": {
-          "type": "string",
-          "default": "qwen2.5-coder:3b",
-          "description": "Modelo do Ollama para IA Local. Sobrescreve fastModel/qualityModel se definido explicitamente."
-        },
-        "ticCoderLite.localAi.fastModel": {
-          "type": "string",
-          "default": "qwen2.5-coder:3b",
-          "description": "Modelo usado para tarefas simples (resumo de módulos, explicação de riscos, perguntas, contexto). Deve ser pequeno e rápido."
-        },
-        "ticCoderLite.localAi.qualityModel": {
-          "type": "string",
-          "default": "qwen2.5-coder:7b",
-          "description": "Modelo usado para tarefas complexas (PL/SQL, regras de negócio, domínio, state machines, permissões, arquivos críticos). Pode ser maior."
-        },
-        "ticCoderLite.localAi.visionEnabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Ativa reconhecimento opcional de screenshots com modelo local vision do Ollama quando a IA Local estiver ligada."
-        },
-        "ticCoderLite.localAi.visionModel": {
-          "type": "string",
-          "default": "llava:7b",
-          "description": "Modelo vision do Ollama usado para extrair texto e elementos de screenshots. Ex: llava:7b, llava:latest ou moondream:latest."
-        },
-        "ticCoderLite.localAi.mode": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "fast",
-            "quality"
-          ],
-          "enumDescriptions": [
-            "Seleção automática: fastModel para tarefas simples, qualityModel para tarefas complexas.",
-            "Usa sempre fastModel independentemente da tarefa.",
-            "Usa sempre qualityModel independentemente da tarefa."
-          ],
-          "default": "fast",
-          "description": "Estratégia de seleção de modelo da IA Local. 'auto' escolhe o modelo certo para cada tarefa automaticamente."
-        },
-        "ticCoderLite.scan.maxFiles": {
-          "type": "number",
-          "default": 30000,
-          "minimum": 1,
-          "description": "Número máximo de arquivos suportados analisados pelo Modo Lite antes de ignorar os demais."
-        },
-        "ticCoderLite.scan.maxFileSizeKb": {
-          "type": "number",
-          "default": 512,
-          "minimum": 1,
-          "description": "Tamanho máximo por arquivo analisado em KB. Arquivos maiores são ignorados para manter o VS Code responsivo."
-        },
-        "ticCoderLite.scan.include": {
-          "type": "array",
-          "default": [
-            "**/*"
-          ],
-          "items": {
-            "type": "string"
-          },
-          "description": "Padrões de inclusão aplicados aos arquivos suportados pelo scan."
-        },
-        "ticCoderLite.scan.exclude": {
-          "type": "array",
-          "default": [
-            "**/node_modules/**",
-            "**/.git/**",
-            "**/dist/**",
-            "**/build/**",
-            "**/target/**",
-            "**/coverage/**",
-            "**/.next/**",
-            "**/.idea/**",
-            "**/.vscode/**",
-            "**/.tic-code/**"
-          ],
-          "items": {
-            "type": "string"
-          },
-          "description": "Padrões de exclusão para o scan do Modo Lite."
-        },
-        "ticCoderLite.output.openAfterScan": {
-          "type": "boolean",
-          "default": false,
-          "description": "Abre o canal de saída do TIC Coder Lite após um scan concluído."
-        },
-        "ticCoderLite.exports.safeWriteMode": {
-          "type": "string",
-          "enum": [
-            "ask",
-            "append",
-            "ignore"
-          ],
-          "default": "ask",
-          "description": "Como as exportações de IA Padrão tratam arquivos existentes. Sobrescrever só fica disponível com confirmação explícita."
-        },
-        "ticCoderLite.database.largeMode": {
-          "type": "boolean",
-          "default": true,
-          "description": "Ativa o PLSQL Enterprise Mode para projetos com bases muito grandes (> 1000 tabelas). Indexa tudo, mas só renderiza objetos críticos no grafo."
-        },
-        "ticCoderLite.database.maxVisualNodes": {
-          "type": "number",
-          "default": 300,
-          "minimum": 10,
-          "description": "Número máximo de nós exibidos no grafo visual do banco de dados. Evita travamento com bases enormes."
-        },
-        "ticCoderLite.database.maxTablesInGraph": {
-          "type": "number",
-          "default": 100,
-          "minimum": 10,
-          "description": "Número máximo de tabelas exibidas no grafo visual. Somente as tabelas mais críticas são mostradas."
-        },
-        "ticCoderLite.database.maxCriticalTables": {
-          "type": "number",
-          "default": 200,
-          "minimum": 10,
-          "description": "Número máximo de tabelas críticas incluídas no critical-objects.json e nos relatórios de programação reversa."
-        },
-        "ticCoderLite.database.enableTableIndex": {
-          "type": "boolean",
-          "default": true,
-          "description": "Habilita a geração do índice de tabelas, packages, procedures, functions e triggers em .tic-code/projects/database/index/."
-        },
-        "ticCoderLite.database.criticalNamePatterns": {
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "description": "Padrões de nome (strings) que aumentam a pontuação de criticidade de tabelas e packages. Ex: ['fatura','pedido','estoque']. Se vazio, usa padrões embutidos."
-        },
-        "ticCoderLite.database.maxSqlFiles": {
-          "type": "number",
-          "default": 100000,
-          "minimum": 1,
-          "description": "Número máximo de arquivos SQL/PL/SQL analisados pelo scanner. Aumentar para projetos com dezenas de milhares de arquivos."
-        }
-      }
-    },
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "ticCoderLite",
-          "title": "TIC Coder Lite",
-          "icon": "resources/icon.svg"
-        }
-      ]
-    },
-    "views": {
-      "ticCoderLite": [
-        {
-          "id": "ticCoderLite.sidebar",
-          "name": "TIC Coder Lite"
-        }
-      ]
-    },
-    "menus": {
-      "view/title": [
-        {
-          "command": "ticCoderLite.analyzeProject",
-          "when": "view == ticCoderLite.sidebar",
-          "group": "navigation"
-        },
-        {
-          "command": "ticCoderLite.openOverview",
-          "when": "view == ticCoderLite.sidebar",
-          "group": "navigation"
-        }
-      ]
-    }
-  },
+  "name": "tic-analyzer",
+  "version": "1.0.0",
+  "description": "TIC Analyzer — Motor local de análise para projetos grandes",
+  "main": "dist/electron/main.js",
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "lint": "tsc -p ./ --noEmit",
-    "verify:package": "node scripts/verify-package-files.js",
-    "package": "vsce package --no-dependencies --allow-missing-repository",
-    "vscode:prepublish": "npm run compile && npm run verify:package"
+    "dev": "npx concurrently \"npm run dev:renderer\" \"npm run dev:electron\"",
+    "dev:renderer": "vite",
+    "dev:electron": "tsc -p tsconfig.electron.json && electron dist/electron/main.js",
+    "build": "npm run build:renderer && npm run build:electron",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:win:portable": "npm run build && electron-builder --win zip",
+    "dist:win:dir": "npm run build && electron-builder --win dir",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:linux": "npm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "express": "^4.18.2",
+    "mermaid": "^11.15.0",
+    "vis-network": "^10.1.0"
   },
   "devDependencies": {
-    "@types/node": "^20.14.10",
-    "@types/vscode": "^1.92.0",
-    "@vscode/vsce": "^3.9.1",
-    "typescript": "^5.5.4"
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "typescript": "^5.3.2",
+    "vite": "^5.0.0"
+  },
+  "build": {
+    "appId": "com.tic.analyzer",
+    "productName": "TIC Analyzer",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico",
+      "sign": false
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    }
   }
 }

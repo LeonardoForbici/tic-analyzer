@@ -1,1 +1,0 @@
-{"version":3,"file":"generateAgentsMd.js","sourceRoot":"","sources":["../../src/reversa-adapter/generateAgentsMd.ts"],"names":[],"mappings":";;AAKA,4CAOC;AATD,mGAAwF;AAExF,SAAgB,gBAAgB,CAAC,OAAuB,EAAE,OAAsB,EAAE,YAAyB;IACzG,OAAO,IAAA,qDAAqB,EAAC,OAAO,EAAE;QACpC,MAAM,EAAE,OAAO;QACf,UAAU,EAAE,WAAW;QACvB,iBAAiB,EAAE,gDAAgD;QACnE,OAAO,EAAE,KAAK;KACf,EAAE,YAAY,CAAC,CAAC;AACnB,CAAC"}

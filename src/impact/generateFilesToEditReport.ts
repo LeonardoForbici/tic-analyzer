@@ -1,5 +1,0 @@
-import { ScreenImpactResult } from './impactTypes';
-
-export function generateFilesToEditReport(result: ScreenImpactResult): string {
-  return `# Arquivos Prováveis para Edição\n\n## Mudança solicitada\n${result.input.changeDescription}\n\n## Arquivos prováveis para editar\n${result.fileCandidates.filter((f)=>f.category==='edit').map((f)=>`- ${f.file} | ${f.reason} | ${f.confidence} | ${f.changeType} | P${f.priority}`).join('\n') || '- 🔴 LACUNA'}\n\n## Arquivos para revisar antes de editar\n${result.fileCandidates.filter((f)=>f.category==='review-before-edit').map((f)=>`- ${f.file}`).join('\n') || '- Nenhum'}\n\n## Arquivos possivelmente impactados\n${result.fileCandidates.filter((f)=>f.category==='possibly-impacted').map((f)=>`- ${f.file}`).join('\n') || '- Nenhum'}\n\n## Testes prováveis\n${result.fileCandidates.filter((f)=>f.category==='test').map((f)=>`- ${f.file}`).join('\n') || '- Validar fluxos principais'}\n\n## Riscos\n${result.impactEstimate.risks.map((r)=>`- ${r}`).join('\n') || '- Nenhum'}\n\n## Perguntas\n${result.questions.map((q)=>`- ${q}`).join('\n') || '- Nenhuma'}\n`;
-}
