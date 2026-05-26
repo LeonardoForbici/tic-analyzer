@@ -12,6 +12,8 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
+    "dist:win:portable": "npm run build && electron-builder --win zip",
+    "dist:win:dir": "npm run build && electron-builder --win dir",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux"
   },
@@ -46,7 +48,8 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "sign": false
     },
     "mac": {
       "target": "dmg",
