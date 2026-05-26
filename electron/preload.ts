@@ -29,5 +29,8 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   },
 
   readFile: (filePath: string): Promise<string | null> =>
-    ipcRenderer.invoke('read-file', filePath)
+    ipcRenderer.invoke('read-file', filePath),
+
+  getGitDiff: (projectPath: string): Promise<{ files: string[]; error?: string }> =>
+    ipcRenderer.invoke('get-git-diff', projectPath)
 });

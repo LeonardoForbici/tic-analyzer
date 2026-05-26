@@ -14,6 +14,7 @@ declare global {
       getMcpStatus: () => Promise<{ running: boolean; port: number; projectPath: string }>;
       openFolder: (path: string) => Promise<void>;
       readFile: (path: string) => Promise<string | null>;
+      getGitDiff: (projectPath: string) => Promise<{ files: string[]; error?: string }>;
       onProgress: (cb: (p: Progress) => void) => () => void;
       onAnalysisDone: (cb: (r: AnalysisResult) => void) => void;
     };
@@ -103,12 +104,26 @@ function extractMermaid(md: string): string {
   return match ? match[1].trim() : '';
 }
 
+type ImpactEntry = { directCount: number; transitiveCount: number; direct: string[]; transitive: string[] };
+
+function buildImpactText(file: string, entry: ImpactEntry | undefined): string {
+  if (!entry) return `  ${file}\n  └─ sem dependentes (não importado por outros)\n`;
+  return [
+    `  ${file}`,
+    `  └─ direto: ${entry.directCount}  |  transitivo: ${entry.transitiveCount}`,
+    ...entry.direct.slice(0, 6).map((f) => `     • ${f}`),
+    entry.directCount > 6 ? `     ... +${entry.directCount - 6} diretos` : '',
+  ].filter(Boolean).join('\n') + '\n';
+}
+
 // ── ImpactTab ──────────────────────────────────────────────────────────────────
-function ImpactTab({ ticCodeDir }: { ticCodeDir: string }) {
+function ImpactTab({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPath: string }) {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
-  const [index, setIndex] = useState<Record<string, { directCount: number; transitiveCount: number; direct: string[]; transitive: string[] }> | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [index, setIndex] = useState<Record<string, ImpactEntry> | null>(null);
+  const [activeMode, setActiveMode] = useState<'manual' | 'git'>('manual');
 
   useEffect(() => {
     window.ticAnalyzer.readFile(`${ticCodeDir}/impact-index.json`).then((content) => {
@@ -116,20 +131,26 @@ function ImpactTab({ ticCodeDir }: { ticCodeDir: string }) {
     });
   }, [ticCodeDir]);
 
-  const search = useCallback(() => {
-    if (!index || !query.trim()) { setResult(''); return; }
-    setLoading(true);
-    const q = query.trim();
+  const lookupEntry = useCallback((q: string): ImpactEntry | undefined => {
+    if (!index) return undefined;
     let entry = index[q];
     if (!entry) {
       const fuzzy = Object.keys(index).find((k) => k.includes(q) || k.endsWith('/' + q) || q.endsWith(k.split('/').pop() ?? ''));
       if (fuzzy) entry = index[fuzzy];
     }
-    if (!entry) { setResult(`Nenhum dependente encontrado para "${q}".\nEste arquivo não é importado por outros arquivos do projeto.`); setLoading(false); return; }
+    return entry;
+  }, [index]);
+
+  const search = useCallback(() => {
+    if (!index || !query.trim()) { setResult(''); return; }
+    setLoading(true);
+    const q = query.trim();
+    const entry = lookupEntry(q);
+    if (!entry) { setResult(`Nenhum dependente encontrado para "${q}".\nEste arquivo nao e importado por outros arquivos.`); setLoading(false); return; }
     const lines = [
       `Arquivo: ${q}`, '',
-      `Dependentes diretos: ${entry.directCount}`,
-      `Impacto transitivo: ${entry.transitiveCount} arquivos`,
+      `Dependentes diretos:   ${entry.directCount}`,
+      `Impacto transitivo:    ${entry.transitiveCount} arquivos`,
       '',
       '── Dependentes Diretos ──',
       ...entry.direct.map((f) => `  • ${f}`),
@@ -139,7 +160,55 @@ function ImpactTab({ ticCodeDir }: { ticCodeDir: string }) {
     ].filter(Boolean);
     setResult(lines.join('\n'));
     setLoading(false);
-  }, [index, query]);
+  }, [index, query, lookupEntry]);
+
+  const analyzeGitDiff = useCallback(async () => {
+    if (!index) return;
+    setDiffLoading(true);
+    setResult('');
+
+    const { files, error } = await window.ticAnalyzer.getGitDiff(projectPath);
+
+    if (error || files.length === 0) {
+      setResult(error ? `Erro ao ler git diff: ${error}` : 'Nenhuma mudanca detectada no git (working tree limpa).');
+      setDiffLoading(false);
+      return;
+    }
+
+    const directImpact = new Set<string>();
+    const transitiveImpact = new Set<string>();
+
+    const lines: string[] = [
+      `Git Diff — ${files.length} arquivo(s) modificado(s)`,
+      '═'.repeat(50),
+      ''
+    ];
+
+    for (const file of files) {
+      const entry = lookupEntry(file);
+      lines.push(buildImpactText(file, entry));
+      entry?.direct.forEach((f) => directImpact.add(f));
+      entry?.transitive.forEach((f) => transitiveImpact.add(f));
+    }
+
+    // Remove os próprios arquivos modificados do conjunto de afetados
+    files.forEach((f) => { directImpact.delete(f); transitiveImpact.delete(f); });
+
+    lines.push('═'.repeat(50));
+    lines.push(`Impacto consolidado desta mudanca:`);
+    lines.push(`  Arquivos diretamente afetados: ${directImpact.size}`);
+    lines.push(`  Arquivos transitivamente afetados: ${transitiveImpact.size}`);
+
+    if (transitiveImpact.size > 0) {
+      lines.push('');
+      lines.push('Top afetados transitivos:');
+      [...transitiveImpact].slice(0, 10).forEach((f) => lines.push(`  ○ ${f}`));
+      if (transitiveImpact.size > 10) lines.push(`  ... e mais ${transitiveImpact.size - 10}`);
+    }
+
+    setResult(lines.join('\n'));
+    setDiffLoading(false);
+  }, [index, projectPath, lookupEntry]);
 
   const total = index ? Object.keys(index).length : 0;
   const topImpact = index
@@ -148,32 +217,51 @@ function ImpactTab({ ticCodeDir }: { ticCodeDir: string }) {
 
   return (
     <div>
-      <div style={{ marginBottom: '16px' }}>
-        <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>💥 Análise de Impacto de Mudança</div>
-        <div style={{ fontSize: '12px', color: C.muted }}>Descubra quais arquivos são afetados quando você altera um arquivo específico</div>
+      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>Analise de Impacto de Mudanca</div>
+          <div style={{ fontSize: '12px', color: C.muted }}>Descubra quais arquivos sao afetados antes de fazer uma mudanca</div>
+        </div>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button style={S.tab(activeMode === 'manual')} onClick={() => setActiveMode('manual')}>Manual</button>
+          <button style={S.tab(activeMode === 'git')} onClick={() => setActiveMode('git')}>Git Diff</button>
+        </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search()}
-          placeholder="src/api/user.ts ou user.service"
-          style={{ flex: 1, background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '10px 14px', color: C.text, fontSize: '13px', fontFamily: 'monospace' }} />
-        <button style={S.btn(C.accent)} onClick={search} disabled={loading}>
-          {loading ? '...' : 'Analisar Impacto'}
-        </button>
-      </div>
+      {activeMode === 'manual' && (
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search()}
+            placeholder="src/api/user.ts ou user.service"
+            style={{ flex: 1, background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '10px 14px', color: C.text, fontSize: '13px', fontFamily: 'monospace' }} />
+          <button style={S.btn(C.accent)} onClick={search} disabled={loading}>
+            {loading ? '...' : 'Analisar'}
+          </button>
+        </div>
+      )}
+
+      {activeMode === 'git' && (
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ fontSize: '12px', color: C.muted, marginBottom: '10px', padding: '10px', background: '#0d1b2a', borderRadius: '8px', border: `1px solid ${C.border}` }}>
+            Le <code style={{ color: C.accent }}>git diff HEAD</code> + <code style={{ color: C.accent }}>git diff --cached</code> no projeto analisado e calcula o impacto de todos os arquivos modificados de uma vez.
+          </div>
+          <button style={S.btn(C.green)} onClick={analyzeGitDiff} disabled={diffLoading}>
+            {diffLoading ? 'Lendo git diff...' : 'Analisar Mudancas Atuais (git diff)'}
+          </button>
+        </div>
+      )}
 
       {result && (
-        <div style={{ background: '#0d1117', borderRadius: '8px', padding: '16px', marginBottom: '16px', fontFamily: 'monospace', fontSize: '12px', color: '#ccc', whiteSpace: 'pre-wrap', maxHeight: '300px', overflowY: 'auto' }}>
+        <div style={{ background: '#0d1117', borderRadius: '8px', padding: '16px', marginBottom: '16px', fontFamily: 'monospace', fontSize: '12px', color: '#ccc', whiteSpace: 'pre-wrap', maxHeight: '380px', overflowY: 'auto', lineHeight: 1.7 }}>
           {result}
         </div>
       )}
 
-      {total > 0 && (
+      {activeMode === 'manual' && total > 0 && (
         <div>
           <div style={{ fontSize: '12px', color: C.muted, marginBottom: '10px' }}>{total} arquivos com dependentes mapeados</div>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: C.muted, marginBottom: '8px' }}>Arquivos com Maior Impacto Transitivo</div>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: C.muted, marginBottom: '8px' }}>Maior Impacto Transitivo</div>
           {topImpact.map(([file, entry]) => (
-            <div key={file} onClick={() => setQuery(file)}
+            <div key={file} onClick={() => { setQuery(file); setActiveMode('manual'); }}
               style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}>
               <div style={{ flex: 1, fontFamily: 'monospace', fontSize: '12px', color: C.accent }}>{file}</div>
               <div style={{ fontSize: '12px', color: C.muted }}>
@@ -406,7 +494,7 @@ export function App() {
             )}
 
             {activeTab === 'impact' && (
-              <div style={S.card}><ImpactTab ticCodeDir={result.outputPath} /></div>
+              <div style={S.card}><ImpactTab ticCodeDir={result.outputPath} projectPath={projectPath} /></div>
             )}
 
             {activeTab === 'metrics' && (

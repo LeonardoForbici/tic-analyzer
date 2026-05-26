@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
+import { execSync } from 'child_process';
 import { runPipeline, type PipelineProgress, type PipelineResult } from '../src/analyzer/pipeline';
 import { TicAnalyzerMcpServer } from '../src/mcp/server';
 
@@ -95,6 +96,29 @@ ipcMain.handle('read-file', async (_event, filePath: string): Promise<string | n
     if (!fs.existsSync(filePath)) return null;
     return fs.readFileSync(filePath, 'utf8');
   } catch { return null; }
+});
+
+ipcMain.handle('get-git-diff', async (_event, projectPath: string): Promise<{ files: string[]; error?: string }> => {
+  try {
+    const run = (cmd: string) => {
+      try { return execSync(cmd, { cwd: projectPath, encoding: 'utf8', timeout: 5000 }).trim(); }
+      catch { return ''; }
+    };
+
+    const staged   = run('git diff --name-only --cached HEAD');
+    const unstaged = run('git diff --name-only HEAD');
+    const untracked = run('git ls-files --others --exclude-standard');
+
+    const files = [...new Set([
+      ...staged.split('\n'),
+      ...unstaged.split('\n'),
+      ...untracked.split('\n')
+    ])].filter(Boolean);
+
+    return { files };
+  } catch (err) {
+    return { files: [], error: String(err) };
+  }
 });
 
 // ── App lifecycle ────────────────────────────────────────────────────────────────

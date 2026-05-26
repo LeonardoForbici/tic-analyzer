@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
+import { execSync } from 'child_process';
 import { Server } from '@modelcontextprotocol/sdk/server';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import {
@@ -127,6 +128,11 @@ export class TicAnalyzerMcpServer {
         {
           name: 'get_inheritance',
           description: 'Retorna a hierarquia de herança de classes do projeto.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_diff_impact',
+          description: 'Lê o git diff do projeto (HEAD + staged + untracked) e retorna o impacto consolidado de TODAS as mudanças pendentes. Use antes de fazer commit para saber o que será afetado.',
           inputSchema: { type: 'object', properties: {} }
         }
       ]
@@ -263,6 +269,67 @@ export class TicAnalyzerMcpServer {
             return { content: [{ type: 'text', text: `Nenhum padrão detectado para o módulo "${modArg}".` }] };
           }
           return { content: [{ type: 'text', text: this.readFile('patterns.md') }] };
+        }
+
+        case 'get_diff_impact': {
+          const indexPath = path.join(this.ticCodePath, 'impact-index.json');
+          if (!fs.existsSync(indexPath)) {
+            return { content: [{ type: 'text', text: 'impact-index.json não encontrado. Execute a análise primeiro.' }] };
+          }
+
+          const run = (cmd: string) => {
+            try { return execSync(cmd, { cwd: this.projectPath, encoding: 'utf8', timeout: 5000 }).trim(); }
+            catch { return ''; }
+          };
+
+          const staged    = run('git diff --name-only --cached HEAD');
+          const unstaged  = run('git diff --name-only HEAD');
+          const untracked = run('git ls-files --others --exclude-standard');
+
+          const changedFiles = [...new Set([
+            ...staged.split('\n'),
+            ...unstaged.split('\n'),
+            ...untracked.split('\n')
+          ])].filter(Boolean);
+
+          if (changedFiles.length === 0) {
+            return { content: [{ type: 'text', text: '✅ Nenhuma mudança detectada no git (working tree limpa).' }] };
+          }
+
+          const index: ImpactIndex = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+          const directAll = new Set<string>();
+          const transitiveAll = new Set<string>();
+          const lines: string[] = [
+            `# Impacto das Mudanças Atuais (git diff)`,
+            '',
+            `${changedFiles.length} arquivo(s) modificado(s):`,
+            ''
+          ];
+
+          for (const file of changedFiles) {
+            let entry = index[file];
+            if (!entry) {
+              const fuzzy = Object.keys(index).find((k) => k.includes(file) || file.endsWith(k.split('/').pop() ?? '__'));
+              if (fuzzy) entry = index[fuzzy];
+            }
+            if (entry) {
+              lines.push(`**\`${file}\`** — direto: ${entry.directCount} | transitivo: ${entry.transitiveCount}`);
+              entry.direct.slice(0, 5).forEach((f) => { lines.push(`  • ${f}`); directAll.add(f); });
+              entry.transitive.forEach((f) => transitiveAll.add(f));
+            } else {
+              lines.push(`**\`${file}\`** — sem dependentes`);
+            }
+          }
+
+          changedFiles.forEach((f) => { directAll.delete(f); transitiveAll.delete(f); });
+
+          lines.push('');
+          lines.push('---');
+          lines.push(`**Impacto consolidado desta mudança:**`);
+          lines.push(`- Arquivos diretamente afetados: **${directAll.size}**`);
+          lines.push(`- Arquivos transitivamente afetados: **${transitiveAll.size}**`);
+
+          return { content: [{ type: 'text', text: lines.join('\n') }] };
         }
 
         case 'get_violations': {
