@@ -29,5 +29,20 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   },
 
   readFile: (filePath: string): Promise<string | null> =>
-    ipcRenderer.invoke('read-file', filePath)
+    ipcRenderer.invoke('read-file', filePath),
+
+  getGitDiff: (projectPath: string): Promise<{ files: string[]; error?: string }> =>
+    ipcRenderer.invoke('get-git-diff', projectPath),
+
+  getTokenStats: (): Promise<unknown> =>
+    ipcRenderer.invoke('get-token-stats'),
+
+  clearTokenStats: (): Promise<void> =>
+    ipcRenderer.invoke('clear-token-stats'),
+
+  onTokenUpdate: (callback: (entry: unknown) => void) => {
+    const handler = (_event: unknown, entry: unknown) => callback(entry);
+    ipcRenderer.on('mcp-token-update', handler);
+    return () => ipcRenderer.removeListener('mcp-token-update', handler);
+  }
 });
