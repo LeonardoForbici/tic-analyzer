@@ -10,9 +10,32 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { ImpactIndex } from '../analyzer/buildImpactIndex';
 
+export interface TokenEntry {
+  timestamp: number;
+  tool: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+export interface TokenStats {
+  totalCalls: number;
+  totalTokens: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  byTool: Record<string, { calls: number; tokens: number; inputTokens: number; outputTokens: number }>;
+  log: TokenEntry[];
+  sessionStart: number;
+}
+
 export interface McpServerOptions {
   projectPath: string;
   port?: number;
+  onToolCall?: (entry: TokenEntry) => void;
+}
+
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
 }
 
 export class TicAnalyzerMcpServer {
@@ -20,15 +43,44 @@ export class TicAnalyzerMcpServer {
   private httpServer?: http.Server;
   private projectPath: string;
   private ticCodePath: string;
+  private tokenLog: TokenEntry[] = [];
+  private sessionStart = Date.now();
+  private onToolCall?: (entry: TokenEntry) => void;
 
   constructor(options: McpServerOptions) {
     this.projectPath = options.projectPath;
     this.ticCodePath = path.join(options.projectPath, '.tic-code');
+    this.onToolCall = options.onToolCall;
     this.server = new Server(
       { name: 'tic-analyzer', version: '2.0.0' },
       { capabilities: { tools: {} } }
     );
     this.registerTools();
+  }
+
+  getTokenStats(): TokenStats {
+    const byTool: TokenStats['byTool'] = {};
+    for (const entry of this.tokenLog) {
+      if (!byTool[entry.tool]) byTool[entry.tool] = { calls: 0, tokens: 0, inputTokens: 0, outputTokens: 0 };
+      byTool[entry.tool].calls++;
+      byTool[entry.tool].tokens += entry.totalTokens;
+      byTool[entry.tool].inputTokens += entry.inputTokens;
+      byTool[entry.tool].outputTokens += entry.outputTokens;
+    }
+    return {
+      totalCalls: this.tokenLog.length,
+      totalTokens: this.tokenLog.reduce((s, e) => s + e.totalTokens, 0),
+      totalInputTokens: this.tokenLog.reduce((s, e) => s + e.inputTokens, 0),
+      totalOutputTokens: this.tokenLog.reduce((s, e) => s + e.outputTokens, 0),
+      byTool,
+      log: this.tokenLog.slice(-100),
+      sessionStart: this.sessionStart
+    };
+  }
+
+  clearTokenLog(): void {
+    this.tokenLog = [];
+    this.sessionStart = Date.now();
   }
 
   private registerTools(): void {
@@ -155,23 +207,32 @@ export class TicAnalyzerMcpServer {
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
+      const inputTokens = estimateTokens(JSON.stringify(args ?? {}));
+
+      const respond = (result: { content: Array<{ type: string; text: string }> }) => {
+        const outputTokens = result.content.reduce((s, c) => s + estimateTokens(c.type === 'text' ? c.text : ''), 0);
+        const entry: TokenEntry = { timestamp: Date.now(), tool: name, inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+        this.tokenLog.push(entry);
+        this.onToolCall?.(entry);
+        return result;
+      };
 
       switch (name) {
         case 'list_modules':
-          return { content: [{ type: 'text', text: this.readFile('index.md') }] };
+          return respond({ content: [{ type: 'text', text: this.readFile('index.md') }] });
 
         case 'get_quick_context':
-          return { content: [{ type: 'text', text: this.readFile('quick-context.md') }] };
+          return respond({ content: [{ type: 'text', text: this.readFile('quick-context.md') }] });
 
         case 'get_module': {
           const moduleName = (args as { name: string }).name;
           const contextPath = path.join(this.ticCodePath, 'modules', moduleName, 'context.md');
           if (!fs.existsSync(contextPath)) {
             const found = this.findModuleFuzzy(moduleName);
-            if (found) return { content: [{ type: 'text', text: fs.readFileSync(found, 'utf8') }] };
-            return { content: [{ type: 'text', text: `Módulo "${moduleName}" não encontrado. Disponíveis: ${this.listModuleNames().join(', ')}` }] };
+            if (found) return respond({ content: [{ type: 'text', text: fs.readFileSync(found, 'utf8') }] });
+            return respond({ content: [{ type: 'text', text: `Módulo "${moduleName}" não encontrado. Disponíveis: ${this.listModuleNames().join(', ')}` }] });
           }
-          return { content: [{ type: 'text', text: fs.readFileSync(contextPath, 'utf8') }] };
+          return respond({ content: [{ type: 'text', text: fs.readFileSync(contextPath, 'utf8') }] });
         }
 
         case 'search_module': {
@@ -181,19 +242,19 @@ export class TicAnalyzerMcpServer {
             .sort((a, b) => b.score - a.score);
           const best = scored[0];
           if (!best || best.score === 0) {
-            return { content: [{ type: 'text', text: `Nenhum módulo encontrado para "${query}". Disponíveis: ${modules.join(', ')}` }] };
+            return respond({ content: [{ type: 'text', text: `Nenhum módulo encontrado para "${query}". Disponíveis: ${modules.join(', ')}` }] });
           }
           const contextPath = path.join(this.ticCodePath, 'modules', best.name, 'context.md');
           const content = fs.existsSync(contextPath) ? fs.readFileSync(contextPath, 'utf8') : `Contexto não encontrado.`;
-          return { content: [{ type: 'text', text: `# Módulo: ${best.name}\n\n${content}` }] };
+          return respond({ content: [{ type: 'text', text: `# Módulo: ${best.name}\n\n${content}` }] });
         }
 
-        case 'get_multigraph': return { content: [{ type: 'text', text: this.readFile('multigraph.md') }] };
-        case 'get_diagram': return { content: [{ type: 'text', text: this.readFile('diagram.md') }] };
-        case 'get_openapi': return { content: [{ type: 'text', text: this.readFile('openapi.yaml') }] };
-        case 'get_gaps': return { content: [{ type: 'text', text: this.readFile('gaps.md') }] };
-        case 'get_permissions': return { content: [{ type: 'text', text: this.readFile('permissions.md') }] };
-        case 'get_inheritance': return { content: [{ type: 'text', text: this.readFile('inheritance.md') }] };
+        case 'get_multigraph': return respond({ content: [{ type: 'text', text: this.readFile('multigraph.md') }] });
+        case 'get_diagram': return respond({ content: [{ type: 'text', text: this.readFile('diagram.md') }] });
+        case 'get_openapi': return respond({ content: [{ type: 'text', text: this.readFile('openapi.yaml') }] });
+        case 'get_gaps': return respond({ content: [{ type: 'text', text: this.readFile('gaps.md') }] });
+        case 'get_permissions': return respond({ content: [{ type: 'text', text: this.readFile('permissions.md') }] });
+        case 'get_inheritance': return respond({ content: [{ type: 'text', text: this.readFile('inheritance.md') }] });
 
         case 'get_business_rules': {
           const modName = (args as { name: string }).name;
@@ -202,18 +263,18 @@ export class TicAnalyzerMcpServer {
             const found = this.findModuleFuzzy(modName);
             if (found) {
               const foundRules = found.replace('context.md', 'business-rules.md');
-              if (fs.existsSync(foundRules)) return { content: [{ type: 'text', text: fs.readFileSync(foundRules, 'utf8') }] };
+              if (fs.existsSync(foundRules)) return respond({ content: [{ type: 'text', text: fs.readFileSync(foundRules, 'utf8') }] });
             }
-            return { content: [{ type: 'text', text: `Nenhuma regra de negócio detectada para "${modName}".` }] };
+            return respond({ content: [{ type: 'text', text: `Nenhuma regra de negócio detectada para "${modName}".` }] });
           }
-          return { content: [{ type: 'text', text: fs.readFileSync(rulesPath, 'utf8') }] };
+          return respond({ content: [{ type: 'text', text: fs.readFileSync(rulesPath, 'utf8') }] });
         }
 
         case 'get_impact': {
           const fileArg = (args as { file: string }).file;
           const indexPath = path.join(this.ticCodePath, 'impact-index.json');
           if (!fs.existsSync(indexPath)) {
-            return { content: [{ type: 'text', text: 'impact-index.json não encontrado. Execute a análise novamente.' }] };
+            return respond({ content: [{ type: 'text', text: 'impact-index.json não encontrado. Execute a análise novamente.' }] });
           }
           const index: ImpactIndex = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
 
@@ -226,7 +287,7 @@ export class TicAnalyzerMcpServer {
           }
 
           if (!entry) {
-            return { content: [{ type: 'text', text: `Nenhum dependente encontrado para "${fileArg}". Este arquivo não é importado por outros.` }] };
+            return respond({ content: [{ type: 'text', text: `Nenhum dependente encontrado para "${fileArg}". Este arquivo não é importado por outros.` }] });
           }
 
           const lines = [
@@ -245,51 +306,51 @@ export class TicAnalyzerMcpServer {
             entry.transitiveCount > 20 ? `- ... e mais ${entry.transitiveCount - 20} arquivos afetados` : ''
           ].filter((l) => l !== undefined);
 
-          return { content: [{ type: 'text', text: lines.join('\n') }] };
+          return respond({ content: [{ type: 'text', text: lines.join('\n') }] });
         }
 
         case 'get_metrics': {
           const modName = (args as { name?: string }).name;
           if (!modName) {
-            return { content: [{ type: 'text', text: this.readFile('metrics-summary.md') }] };
+            return respond({ content: [{ type: 'text', text: this.readFile('metrics-summary.md') }] });
           }
           const metricsPath = path.join(this.ticCodePath, 'modules', modName, 'metrics.md');
           if (!fs.existsSync(metricsPath)) {
             const found = this.findModuleFuzzy(modName);
             if (found) {
               const mPath = found.replace('context.md', 'metrics.md');
-              if (fs.existsSync(mPath)) return { content: [{ type: 'text', text: fs.readFileSync(mPath, 'utf8') }] };
+              if (fs.existsSync(mPath)) return respond({ content: [{ type: 'text', text: fs.readFileSync(mPath, 'utf8') }] });
             }
-            return { content: [{ type: 'text', text: `Métricas não encontradas para "${modName}". Use get_metrics() sem parâmetro para o resumo geral.` }] };
+            return respond({ content: [{ type: 'text', text: `Métricas não encontradas para "${modName}". Use get_metrics() sem parâmetro para o resumo geral.` }] });
           }
-          return { content: [{ type: 'text', text: fs.readFileSync(metricsPath, 'utf8') }] };
+          return respond({ content: [{ type: 'text', text: fs.readFileSync(metricsPath, 'utf8') }] });
         }
 
         case 'get_hotspots': {
           const summaryPath = path.join(this.ticCodePath, 'metrics-summary.md');
           if (!fs.existsSync(summaryPath)) {
-            return { content: [{ type: 'text', text: 'metrics-summary.md não encontrado. Execute a análise novamente.' }] };
+            return respond({ content: [{ type: 'text', text: 'metrics-summary.md não encontrado. Execute a análise novamente.' }] });
           }
           const content = fs.readFileSync(summaryPath, 'utf8');
           // Extrai apenas a seção de hotspots (compacto)
           const hotspotsSection = content.split('## 📊')[0];
-          return { content: [{ type: 'text', text: hotspotsSection || content.slice(0, 2000) }] };
+          return respond({ content: [{ type: 'text', text: hotspotsSection || content.slice(0, 2000) }] });
         }
 
         case 'get_patterns': {
           const modArg = (args as { module?: string }).module;
           if (modArg) {
             const pPath = path.join(this.ticCodePath, 'modules', modArg, 'patterns.md');
-            if (fs.existsSync(pPath)) return { content: [{ type: 'text', text: fs.readFileSync(pPath, 'utf8') }] };
-            return { content: [{ type: 'text', text: `Nenhum padrão detectado para o módulo "${modArg}".` }] };
+            if (fs.existsSync(pPath)) return respond({ content: [{ type: 'text', text: fs.readFileSync(pPath, 'utf8') }] });
+            return respond({ content: [{ type: 'text', text: `Nenhum padrão detectado para o módulo "${modArg}".` }] });
           }
-          return { content: [{ type: 'text', text: this.readFile('patterns.md') }] };
+          return respond({ content: [{ type: 'text', text: this.readFile('patterns.md') }] });
         }
 
         case 'get_diff_impact': {
           const indexPath = path.join(this.ticCodePath, 'impact-index.json');
           if (!fs.existsSync(indexPath)) {
-            return { content: [{ type: 'text', text: 'impact-index.json não encontrado. Execute a análise primeiro.' }] };
+            return respond({ content: [{ type: 'text', text: 'impact-index.json não encontrado. Execute a análise primeiro.' }] });
           }
 
           const run = (cmd: string) => {
@@ -308,7 +369,7 @@ export class TicAnalyzerMcpServer {
           ])].filter(Boolean);
 
           if (changedFiles.length === 0) {
-            return { content: [{ type: 'text', text: '✅ Nenhuma mudança detectada no git (working tree limpa).' }] };
+            return respond({ content: [{ type: 'text', text: '✅ Nenhuma mudança detectada no git (working tree limpa).' }] });
           }
 
           const index: ImpactIndex = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
@@ -344,7 +405,7 @@ export class TicAnalyzerMcpServer {
           lines.push(`- Arquivos diretamente afetados: **${directAll.size}**`);
           lines.push(`- Arquivos transitivamente afetados: **${transitiveAll.size}**`);
 
-          return { content: [{ type: 'text', text: lines.join('\n') }] };
+          return respond({ content: [{ type: 'text', text: lines.join('\n') }] });
         }
 
         case 'get_db_schema': {
@@ -352,10 +413,10 @@ export class TicAnalyzerMcpServer {
           const summaryPath = path.join(this.ticCodePath, 'db-schema-summary.md');
           const fullPath = path.join(this.ticCodePath, 'db-schema.md');
           if (!fs.existsSync(summaryPath)) {
-            return { content: [{ type: 'text', text: 'Schema de banco não detectado. Verifique se o projeto possui migrations SQL, schema.prisma, TypeORM entities, JPA entities, ou Django models.' }] };
+            return respond({ content: [{ type: 'text', text: 'Schema de banco não detectado. Verifique se o projeto possui migrations SQL, schema.prisma, TypeORM entities, JPA entities, ou Django models.' }] });
           }
           if (!tableArg) {
-            return { content: [{ type: 'text', text: fs.readFileSync(summaryPath, 'utf8') }] };
+            return respond({ content: [{ type: 'text', text: fs.readFileSync(summaryPath, 'utf8') }] });
           }
           // Return single table section from full report
           const full = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf8') : '';
@@ -366,17 +427,17 @@ export class TicAnalyzerMcpServer {
             if (fs.existsSync(jsonPath)) {
               const schema = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
               const found = schema.tables?.find((t: { name: string }) => t.name.toLowerCase().includes(tableArg.toLowerCase()));
-              if (found) return { content: [{ type: 'text', text: `# Tabela: ${found.name}\nFonte: ${found.sourceFile} (${found.sourceType})\nColunas: ${found.columns.map((c: { name: string; type: string }) => c.name).join(', ')}` }] };
+              if (found) return respond({ content: [{ type: 'text', text: `# Tabela: ${found.name}\nFonte: ${found.sourceFile} (${found.sourceType})\nColunas: ${found.columns.map((c: { name: string; type: string }) => c.name).join(', ')}` }] });
             }
-            return { content: [{ type: 'text', text: `Tabela "${tableArg}" não encontrada. Use get_db_schema() para ver todas.` }] };
+            return respond({ content: [{ type: 'text', text: `Tabela "${tableArg}" não encontrada. Use get_db_schema() para ver todas.` }] });
           }
-          return { content: [{ type: 'text', text: section.trim() }] };
+          return respond({ content: [{ type: 'text', text: section.trim() }] });
         }
 
         case 'get_analysis_json': {
           const analysisPath = path.join(this.ticCodePath, 'analysis.json');
           if (!fs.existsSync(analysisPath)) {
-            return { content: [{ type: 'text', text: 'analysis.json não encontrado. Execute a análise novamente.' }] };
+            return respond({ content: [{ type: 'text', text: 'analysis.json não encontrado. Execute a análise novamente.' }] });
           }
           const analysis = JSON.parse(fs.readFileSync(analysisPath, 'utf8'));
           // Return compact summary without verbose arrays
@@ -386,21 +447,21 @@ export class TicAnalyzerMcpServer {
             endpoints: analysis.endpoints?.length,
             impact: { indexedFiles: analysis.impact?.indexedFiles, topImpact: analysis.impact?.topImpact?.slice(0, 5) }
           };
-          return { content: [{ type: 'text', text: JSON.stringify(compact, null, 2) }] };
+          return respond({ content: [{ type: 'text', text: JSON.stringify(compact, null, 2) }] });
         }
 
         case 'get_violations': {
           const summaryPath = path.join(this.ticCodePath, 'metrics-summary.md');
           if (!fs.existsSync(summaryPath)) {
-            return { content: [{ type: 'text', text: 'Execute a análise novamente para detectar violações.' }] };
+            return respond({ content: [{ type: 'text', text: 'Execute a análise novamente para detectar violações.' }] });
           }
           const content = fs.readFileSync(summaryPath, 'utf8');
           const violationsSection = content.split('## ⚠️ Violações Arquiteturais')[1] ?? 'Nenhuma violação detectada.';
-          return { content: [{ type: 'text', text: `# Violações Arquiteturais\n\n${violationsSection.split('---')[0]}` }] };
+          return respond({ content: [{ type: 'text', text: `# Violações Arquiteturais\n\n${violationsSection.split('---')[0]}` }] });
         }
 
         default:
-          return { content: [{ type: 'text', text: `Ferramenta desconhecida: ${name}` }] };
+          return respond({ content: [{ type: 'text', text: `Ferramenta desconhecida: ${name}` }] });
       }
     });
   }

@@ -68,7 +68,13 @@ ipcMain.handle('start-mcp', async (_event, projectPath: string, port: number) =>
 
   mcpPort = port || 7432;
   mcpProjectPath = projectPath;
-  mcpServer = new TicAnalyzerMcpServer({ projectPath, port: mcpPort });
+  mcpServer = new TicAnalyzerMcpServer({
+    projectPath,
+    port: mcpPort,
+    onToolCall: (entry) => {
+      mainWindow?.webContents.send('mcp-token-update', entry);
+    }
+  });
 
   await mcpServer.startHttp(mcpPort);
 });
@@ -85,6 +91,10 @@ ipcMain.handle('get-mcp-status', () => ({
   port: mcpPort,
   projectPath: mcpProjectPath
 }));
+
+ipcMain.handle('get-token-stats', () => mcpServer?.getTokenStats() ?? null);
+
+ipcMain.handle('clear-token-stats', () => { mcpServer?.clearTokenLog(); });
 
 ipcMain.handle('open-folder', async (_event, folderPath: string) => {
   await shell.openPath(folderPath);

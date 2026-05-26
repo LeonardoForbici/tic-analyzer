@@ -15,12 +15,22 @@ declare global {
       openFolder: (path: string) => Promise<void>;
       readFile: (path: string) => Promise<string | null>;
       getGitDiff: (projectPath: string) => Promise<{ files: string[]; error?: string }>;
+      getTokenStats: () => Promise<TokenStats | null>;
+      clearTokenStats: () => Promise<void>;
+      onTokenUpdate: (cb: (entry: TokenEntry) => void) => () => void;
       onProgress: (cb: (p: Progress) => void) => () => void;
       onAnalysisDone: (cb: (r: AnalysisResult) => void) => void;
     };
   }
 }
 
+interface TokenEntry { timestamp: number; tool: string; inputTokens: number; outputTokens: number; totalTokens: number; }
+interface TokenStats {
+  totalCalls: number; totalTokens: number; totalInputTokens: number; totalOutputTokens: number;
+  byTool: Record<string, { calls: number; tokens: number; inputTokens: number; outputTokens: number }>;
+  log: TokenEntry[];
+  sessionStart: number;
+}
 interface Phase { id: string; label: string; status: 'pending' | 'running' | 'done' | 'error'; detail?: string; }
 interface Progress { phase: string; percent: number; detail: string; phases: Phase[]; }
 interface AnalysisResult {
@@ -115,6 +125,98 @@ function buildImpactText(file: string, entry: ImpactEntry | undefined): string {
     ...entry.direct.slice(0, 6).map((f) => `     • ${f}`),
     entry.directCount > 6 ? `     ... +${entry.directCount - 6} diretos` : '',
   ].filter(Boolean).join('\n') + '\n';
+}
+
+// ── TokenMonitor ─────────────────────────────────────────────────────────────
+function TokenMonitor({ stats, onClear }: { stats: TokenStats | null; onClear: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!stats || stats.totalCalls === 0) {
+    return (
+      <div style={{ padding: '10px 0', fontSize: '12px', color: C.muted, display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#555', display: 'inline-block' }} />
+        Aguardando chamadas do Claude Code...
+      </div>
+    );
+  }
+
+  const sessionMinutes = Math.floor((Date.now() - stats.sessionStart) / 60000);
+  const sortedTools = Object.entries(stats.byTool).sort((a, b) => b[1].tokens - a[1].tokens);
+  const maxTokens = sortedTools[0]?.[1].tokens ?? 1;
+
+  return (
+    <div>
+      {/* Summary row */}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' as const }}>
+        <div style={{ display: 'flex', gap: '20px', flex: 1 }}>
+          <div style={{ textAlign: 'center' as const }}>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: C.accent, lineHeight: 1 }}>{stats.totalTokens.toLocaleString()}</div>
+            <div style={{ fontSize: '10px', color: C.muted, marginTop: '2px' }}>tokens totais</div>
+          </div>
+          <div style={{ textAlign: 'center' as const }}>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: C.green, lineHeight: 1 }}>{stats.totalCalls}</div>
+            <div style={{ fontSize: '10px', color: C.muted, marginTop: '2px' }}>chamadas MCP</div>
+          </div>
+          <div style={{ textAlign: 'center' as const }}>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: C.orange, lineHeight: 1 }}>{stats.totalCalls > 0 ? Math.round(stats.totalTokens / stats.totalCalls).toLocaleString() : 0}</div>
+            <div style={{ fontSize: '10px', color: C.muted, marginTop: '2px' }}>média/chamada</div>
+          </div>
+          <div style={{ textAlign: 'center' as const }}>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: '#a0a0ff', lineHeight: 1 }}>{sessionMinutes}m</div>
+            <div style={{ fontSize: '10px', color: C.muted, marginTop: '2px' }}>sessão ativa</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button style={S.tab(expanded)} onClick={() => setExpanded((e) => !e)}>{expanded ? 'Fechar' : 'Detalhes'}</button>
+          <button style={{ ...S.btn('#333'), fontSize: '11px', padding: '5px 10px' }} onClick={onClear}>Resetar</button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: '14px' }}>
+          {/* Per-tool breakdown */}
+          <div style={{ marginBottom: '14px' }}>
+            <div style={{ fontSize: '11px', color: C.muted, marginBottom: '8px', fontWeight: 600 }}>GASTO POR FERRAMENTA</div>
+            {sortedTools.map(([tool, data]) => (
+              <div key={tool} style={{ marginBottom: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
+                  <span style={{ fontFamily: 'monospace', fontSize: '11px', color: C.accent }}>{tool}</span>
+                  <span style={{ fontSize: '11px', color: C.muted }}>
+                    <strong style={{ color: C.text }}>{data.tokens.toLocaleString()}</strong>t · {data.calls}x
+                    <span style={{ color: '#666', marginLeft: '6px' }}>({Math.round((data.tokens / stats.totalTokens) * 100)}%)</span>
+                  </span>
+                </div>
+                <div style={{ height: '5px', background: C.border, borderRadius: '3px', overflow: 'hidden' as const }}>
+                  <div style={{ width: `${(data.tokens / maxTokens) * 100}%`, height: '100%', background: C.accent, borderRadius: '3px', transition: 'width 0.3s' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Input vs output breakdown */}
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '14px', padding: '10px', background: '#0d1117', borderRadius: '8px', fontSize: '12px' }}>
+            <div><span style={{ color: C.muted }}>Entrada (args): </span><strong style={{ color: C.green }}>{stats.totalInputTokens.toLocaleString()}</strong></div>
+            <div><span style={{ color: C.muted }}>Saída (respostas): </span><strong style={{ color: C.orange }}>{stats.totalOutputTokens.toLocaleString()}</strong></div>
+          </div>
+
+          {/* Recent calls log */}
+          {stats.log.length > 0 && (
+            <div>
+              <div style={{ fontSize: '11px', color: C.muted, marginBottom: '6px', fontWeight: 600 }}>ÚLTIMAS CHAMADAS</div>
+              {[...stats.log].reverse().slice(0, 8).map((entry, i) => (
+                <div key={i} style={{ display: 'flex', gap: '8px', padding: '4px 0', borderBottom: `1px solid ${C.border}`, fontSize: '11px' }}>
+                  <span style={{ color: '#555', width: '56px', flexShrink: 0 }}>{new Date(entry.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                  <span style={{ color: C.accent, fontFamily: 'monospace', flex: 1 }}>{entry.tool}</span>
+                  <span style={{ color: C.text, width: '80px', textAlign: 'right' as const }}>{entry.totalTokens.toLocaleString()}t</span>
+                  <span style={{ color: '#666', width: '90px', textAlign: 'right' as const }}>{entry.inputTokens}↑ · {entry.outputTokens}↓</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── ImpactTab ──────────────────────────────────────────────────────────────────
@@ -688,8 +790,26 @@ export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [multigraphCode, setMultigraphCode] = useState('');
   const [diagramCode, setDiagramCode] = useState('');
+  const [tokenStats, setTokenStats] = useState<TokenStats | null>(null);
 
   useEffect(() => { window.ticAnalyzer?.getMcpStatus().then((s) => setMcpRunning(s.running)); }, []);
+
+  useEffect(() => {
+    if (!mcpRunning) return;
+    // Load existing stats and subscribe to live updates
+    window.ticAnalyzer?.getTokenStats().then((s) => setTokenStats(s as TokenStats | null));
+    const cleanup = window.ticAnalyzer?.onTokenUpdate((entry) => {
+      setTokenStats((prev) => {
+        const e = entry as TokenEntry;
+        if (!prev) return { totalCalls: 1, totalTokens: e.totalTokens, totalInputTokens: e.inputTokens, totalOutputTokens: e.outputTokens, byTool: { [e.tool]: { calls: 1, tokens: e.totalTokens, inputTokens: e.inputTokens, outputTokens: e.outputTokens } }, log: [e], sessionStart: Date.now() };
+        const byTool = { ...prev.byTool };
+        if (!byTool[e.tool]) byTool[e.tool] = { calls: 0, tokens: 0, inputTokens: 0, outputTokens: 0 };
+        byTool[e.tool] = { calls: byTool[e.tool].calls + 1, tokens: byTool[e.tool].tokens + e.totalTokens, inputTokens: byTool[e.tool].inputTokens + e.inputTokens, outputTokens: byTool[e.tool].outputTokens + e.outputTokens };
+        return { ...prev, totalCalls: prev.totalCalls + 1, totalTokens: prev.totalTokens + e.totalTokens, totalInputTokens: prev.totalInputTokens + e.inputTokens, totalOutputTokens: prev.totalOutputTokens + e.outputTokens, byTool, log: [...prev.log.slice(-99), e] };
+      });
+    });
+    return () => { cleanup?.(); };
+  }, [mcpRunning]);
 
   useEffect(() => {
     if (state !== 'done' || !result) return;
@@ -857,6 +977,13 @@ export function App() {
                         {['list_modules','get_module','get_quick_context','search_module','get_impact','get_diff_impact','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules'].map((tool) => (
                           <span key={tool} style={{ padding: '2px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '4px', fontSize: '11px', color: C.accent, fontFamily: 'monospace' }}>{tool}</span>
                         ))}
+                      </div>
+                      <div style={{ marginTop: '14px', borderTop: `1px solid ${C.border}`, paddingTop: '14px' }}>
+                        <div style={{ fontSize: '11px', color: C.muted, fontWeight: 600, marginBottom: '8px', letterSpacing: '0.05em' }}>MONITOR DE TOKENS EM TEMPO REAL</div>
+                        <TokenMonitor
+                          stats={tokenStats}
+                          onClear={() => { window.ticAnalyzer.clearTokenStats(); setTokenStats(null); }}
+                        />
                       </div>
                     </>
                   )}
