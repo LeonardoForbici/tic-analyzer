@@ -17,7 +17,9 @@ const DB_KEYWORDS = [
   'jdbcTemplate', 'namedParameterJdbcTemplate', '{call ', 'BEGIN ', 'oracledb',
   'cx_Oracle', 'OracleCommand', 'SqlCommand', 'ExecuteNonQuery', 'executeQuery',
   'EXECUTE IMMEDIATE', 'callProc', 'callProcedure', 'executeProcedure',
-  'StoredProcedureQuery', 'createStoredProcedureQuery'
+  'StoredProcedureQuery', 'createStoredProcedureQuery',
+  '@Procedure', 'procedureName', '@NamedStoredProcedureQuery',
+  'withProcedureName', 'withCatalogName', 'SimpleJdbcCall'
 ];
 
 export function detectBackendDbCalls(files: ScannedFile[]): DbCall[] {
@@ -45,10 +47,38 @@ export function detectBackendDbCalls(files: ScannedFile[]): DbCall[] {
       const line = lines[i];
       const lineNum = i + 1;
 
+      // Spring Data JPA: @Procedure(procedureName = "PKG.PROC") or @Procedure("PKG.PROC")
+      const springProcedure =
+        line.match(/@Procedure\s*\(\s*procedureName\s*=\s*["']([^"']+)["']/) ||
+        line.match(/@Procedure\s*\(\s*value\s*=\s*["']([^"']+)["']/) ||
+        line.match(/@Procedure\s*\(\s*["']([^"']+)["']/);
+      if (springProcedure) {
+        const { name, pkg } = parseProcName(springProcedure[1]);
+        push(calls, seen, { fromFile: file.relativePath, fromLine: lineNum, procedureName: name, packageName: pkg, confidence: '🟢' });
+      }
+
+      // Spring: @NamedStoredProcedureQuery(name="x", procedureName="PKG.PROC")
+      const namedProcMatch = line.match(/@NamedStoredProcedureQuery[^"']*procedureName\s*=\s*["']([^"']+)["']/);
+      if (namedProcMatch) {
+        const { name, pkg } = parseProcName(namedProcMatch[1]);
+        push(calls, seen, { fromFile: file.relativePath, fromLine: lineNum, procedureName: name, packageName: pkg, confidence: '🟢' });
+      }
+
+      // Java: SimpleJdbcCall.withCatalogName("PKG").withProcedureName("PROC")
+      // Look ahead up to 3 lines for the chain
+      const catalogMatch = line.match(/withCatalogName\s*\(\s*["']([^"']+)["']\s*\)/i);
+      if (catalogMatch) {
+        const context = lines.slice(i, Math.min(lines.length, i + 4)).join(' ');
+        const procMatch = context.match(/withProcedureName\s*\(\s*["']([^"']+)["']\s*\)/i);
+        if (procMatch) {
+          push(calls, seen, { fromFile: file.relativePath, fromLine: lineNum, procedureName: procMatch[1].toUpperCase(), packageName: catalogMatch[1].toUpperCase(), confidence: '🟢' });
+        }
+      }
+
       // Java: new SimpleJdbcCall(jdbcTemplate).withProcedureName("sp_name")
       const simpleJdbcCall = line.match(/withProcedureName\s*\(\s*["']([^"']+)["']\s*\)/i) ||
                              line.match(/new\s+SimpleJdbcCall[^.]+\.setProcedureName\s*\(\s*["']([^"']+)["']\s*\)/i);
-      if (simpleJdbcCall) {
+      if (simpleJdbcCall && !catalogMatch) {
         const raw = simpleJdbcCall[1];
         const { name, pkg } = parseProcName(raw);
         push(calls, seen, { fromFile: file.relativePath, fromLine: lineNum, procedureName: name, packageName: pkg, confidence: '🟢' });

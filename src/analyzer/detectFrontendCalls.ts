@@ -71,9 +71,24 @@ export function detectFrontendCalls(files: ScannedFile[]): FrontendCall[] {
         push(calls, seen, { method: httpClientMatch[1].toUpperCase(), urlPattern: httpClientMatch[2], file: file.relativePath, line: lineNum, confidence: '🟢' });
       }
 
-      // this.http.get(this.apiUrl + '/path') — 🟡
+      // Angular: this.http.get(this.apiUrl + '/path') or this.http.get(environment.apiUrl + '/path') — 🟡
+      const httpClientConcat = line.match(/(?:this\.)?http\.(get|post|put|delete|patch)\s*\(\s*(?:this\.\w+|environment\.\w+)\s*\+\s*['"`]([^'"`\s]+)['"`]/i);
+      if (httpClientConcat && !httpClientMatch) {
+        push(calls, seen, { method: httpClientConcat[1].toUpperCase(), urlPattern: httpClientConcat[2], file: file.relativePath, line: lineNum, confidence: '🟡' });
+      }
+
+      // Angular: this.http.get(`${this.apiUrl}/path`) — template literal with trailing literal segment — 🟡
+      const httpClientTemplate = line.match(/(?:this\.)?http\.(get|post|put|delete|patch)\s*\(\s*`[^`]*\$\{[^}]+\}([^`]*)`/i);
+      if (httpClientTemplate && !httpClientMatch && !httpClientConcat) {
+        const suffix = httpClientTemplate[2].split('?')[0];
+        if (suffix.startsWith('/') && suffix.length > 1) {
+          push(calls, seen, { method: httpClientTemplate[1].toUpperCase(), urlPattern: suffix, file: file.relativePath, line: lineNum, confidence: '🟡' });
+        }
+      }
+
+      // Angular: this.http.get(this.buildUrl('/path')) or this.http.get(this.someConstant) — infer path from constant definition — 🟡
       const httpClientDyn = line.match(/(?:this\.)?http\.(get|post|put|delete|patch)\s*\(\s*(?:this\.\w+\s*\+\s*)?['"`]([/][^'"`\s]+)['"`]/i);
-      if (httpClientDyn && !httpClientMatch) {
+      if (httpClientDyn && !httpClientMatch && !httpClientConcat) {
         push(calls, seen, { method: httpClientDyn[1].toUpperCase(), urlPattern: httpClientDyn[2], file: file.relativePath, line: lineNum, confidence: '🟡' });
       }
 

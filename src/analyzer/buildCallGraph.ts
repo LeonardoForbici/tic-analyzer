@@ -168,13 +168,18 @@ function matchByName(frontendFile: string, endpoints: EndpointFound[]): Endpoint
 }
 
 function normPath(p: string): string {
-  return p.replace(/\/+$/, '').toLowerCase().split('?')[0];
+  return p
+    .replace(/\/+$/, '')
+    .toLowerCase()
+    .split('?')[0]
+    .replace(/^\/api\/v\d+/, '')
+    .replace(/^\/api/, '');
 }
 
 function pathsMatch(callPath: string, epPath: string): boolean {
   const epNorm = epPath.replace(/\{[^}]+\}|:[^/]+/g, '*');
-  const a = callPath.split('/');
-  const b = epNorm.split('/');
+  const a = callPath.split('/').filter(Boolean);
+  const b = epNorm.split('/').filter(Boolean);
   if (a.length !== b.length) return false;
   return a.every((part, i) => b[i] === '*' || b[i] === part);
 }
