@@ -231,6 +231,38 @@ export class TicAnalyzerMcpServer {
           name: 'get_dead_plsql',
           description: 'Retorna procedures e functions PL/SQL que não são chamadas por nenhum outro código (Java, TS ou PL/SQL). Útil para identificar código morto antes de uma refatoração.',
           inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_transactions',
+          description: 'Retorna todos os @Transactional boundaries detectados no código Java/Spring: propagation, readOnly, rollbackFor, escopo de classe ou método.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_batch_jobs',
+          description: 'Retorna jobs e processos assíncronos detectados: @Scheduled (com cron/fixedRate), @Async, Quartz Jobs, Spring Batch. Estes não aparecem no multi-grafo HTTP.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_angular_modules',
+          description: 'Retorna módulos Angular (@NgModule com declarations/imports/lazy routes) e itens NgRx/Redux (actions, reducers, effects, selectors).',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_dead_components',
+          description: 'Retorna componentes React (.tsx) e Angular (.component.ts/.directive.ts) com inDegree=0 no grafo de dependências — nenhum arquivo os importa.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'find_path',
+          description: 'Encontra o caminho mais curto (BFS) entre dois arquivos ou objetos PL/SQL no grafo de dependências. Use para descobrir como A se conecta a B. ~200 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              from: { type: 'string', description: 'Arquivo ou nó de origem (ex: "src/components/Login.tsx")' },
+              to: { type: 'string', description: 'Arquivo ou nó de destino (ex: "src/api/auth.ts")' }
+            },
+            required: ['from', 'to']
+          }
         }
       ]
     }));
@@ -632,6 +664,124 @@ export class TicAnalyzerMcpServer {
           if (dead.length > 50) lines.push(`\n*... e mais ${dead.length - 50} objetos*`);
 
           return respond({ content: [{ type: 'text', text: lines.join('\n') }] });
+        }
+
+        case 'get_transactions':
+          return respond({ content: [{ type: 'text', text: this.readFile('transactions.md') }] });
+
+        case 'get_batch_jobs':
+          return respond({ content: [{ type: 'text', text: this.readFile('batch-jobs.md') }] });
+
+        case 'get_angular_modules':
+          return respond({ content: [{ type: 'text', text: this.readFile('angular-modules.md') }] });
+
+        case 'get_dead_components': {
+          const dcPath = path.join(this.ticCodePath, 'dead-components.json');
+          if (!fs.existsSync(dcPath)) {
+            return respond({ content: [{ type: 'text', text: 'dead-components.json não encontrado. Execute a análise novamente.' }] });
+          }
+          type DC = { file: string; type: 'react' | 'angular' };
+          const dc: DC[] = JSON.parse(fs.readFileSync(dcPath, 'utf8'));
+          if (dc.length === 0) {
+            return respond({ content: [{ type: 'text', text: '✅ Nenhum componente sem importadores detectado.' }] });
+          }
+          const react = dc.filter((d) => d.type === 'react');
+          const angular = dc.filter((d) => d.type === 'angular');
+          const dcLines = [
+            `# Componentes Sem Uso — ${dc.length} detectados`,
+            '',
+            '> Nenhum outro arquivo importa estes componentes. Podem ser pages acessadas por router (não por import direto).',
+            '',
+          ];
+          if (react.length > 0) {
+            dcLines.push(`## React (.tsx) — ${react.length}`);
+            react.slice(0, 30).forEach((d) => dcLines.push(`- \`${d.file}\``));
+            if (react.length > 30) dcLines.push(`*... e mais ${react.length - 30}*`);
+            dcLines.push('');
+          }
+          if (angular.length > 0) {
+            dcLines.push(`## Angular (.component/.directive/.pipe) — ${angular.length}`);
+            angular.slice(0, 30).forEach((d) => dcLines.push(`- \`${d.file}\``));
+            if (angular.length > 30) dcLines.push(`*... e mais ${angular.length - 30}*`);
+          }
+          return respond({ content: [{ type: 'text', text: dcLines.join('\n') }] });
+        }
+
+        case 'find_path': {
+          const fromArg = ((args as { from: string }).from ?? '').trim();
+          const toArg = ((args as { to: string }).to ?? '').trim();
+          const graphPath = path.join(this.ticCodePath, 'dep-graph.json');
+          if (!fs.existsSync(graphPath)) {
+            return respond({ content: [{ type: 'text', text: 'dep-graph.json não encontrado. Execute a análise novamente.' }] });
+          }
+
+          type GNode = { id: string; path: string };
+          type GEdge = { from: string; to: string };
+          const depGraph: { nodes: GNode[]; edges: GEdge[] } = JSON.parse(fs.readFileSync(graphPath, 'utf8'));
+
+          // Fuzzy-find start and end nodes
+          const findNode = (query: string): string | null => {
+            const q = query.toLowerCase();
+            const exact = depGraph.nodes.find((n) => n.path === query || n.id === query);
+            if (exact) return exact.id;
+            const partial = depGraph.nodes.find((n) => n.path.toLowerCase().includes(q) || n.path.toLowerCase().endsWith(q));
+            return partial?.id ?? null;
+          };
+
+          const fromId = findNode(fromArg);
+          const toId = findNode(toArg);
+
+          if (!fromId) return respond({ content: [{ type: 'text', text: `Arquivo de origem não encontrado: "${fromArg}". Verifique o caminho relativo.` }] });
+          if (!toId) return respond({ content: [{ type: 'text', text: `Arquivo de destino não encontrado: "${toArg}". Verifique o caminho relativo.` }] });
+          if (fromId === toId) return respond({ content: [{ type: 'text', text: '✅ Origem e destino são o mesmo arquivo.' }] });
+
+          // Build adjacency list
+          const adj = new Map<string, string[]>();
+          for (const edge of depGraph.edges) {
+            if (!adj.has(edge.from)) adj.set(edge.from, []);
+            adj.get(edge.from)!.push(edge.to);
+          }
+
+          // BFS
+          const visited = new Set<string>([fromId]);
+          const parent = new Map<string, string>();
+          const queue = [fromId];
+          let found = false;
+
+          while (queue.length > 0 && !found) {
+            const current = queue.shift()!;
+            for (const next of adj.get(current) ?? []) {
+              if (visited.has(next)) continue;
+              visited.add(next);
+              parent.set(next, current);
+              if (next === toId) { found = true; break; }
+              queue.push(next);
+            }
+          }
+
+          if (!found) {
+            return respond({ content: [{ type: 'text', text: `Nenhum caminho encontrado entre "${fromArg}" e "${toArg}".\nEsses arquivos podem não se conectar por dependências de import.` }] });
+          }
+
+          // Reconstruct path
+          const pathNodes: string[] = [];
+          let cur = toId;
+          while (cur !== fromId) {
+            const nodeInfo = depGraph.nodes.find((n) => n.id === cur);
+            pathNodes.unshift(nodeInfo?.path ?? cur);
+            cur = parent.get(cur)!;
+          }
+          pathNodes.unshift(depGraph.nodes.find((n) => n.id === fromId)?.path ?? fromId);
+
+          const pathLines = [
+            `# Caminho: \`${fromArg}\` → \`${toArg}\``,
+            '',
+            `**${pathNodes.length - 1} salto(s)**`,
+            '',
+            ...pathNodes.map((p, i) => `${i + 1}. \`${p}\``),
+          ];
+
+          return respond({ content: [{ type: 'text', text: pathLines.join('\n') }] });
         }
 
         default:
