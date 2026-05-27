@@ -1,11 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { scanFiles } from './scanFiles';
+import { scanFiles, type ScannedFile } from './scanFiles';
 import { detectStack } from './detectStack';
 import { detectModules } from './detectModules';
 import { detectRisks } from './detectRisks';
 import { detectEndpoints } from './detectEndpoints';
-import { buildDependencyGraph } from './buildDependencyGraph';
+import { buildDependencyGraph, type DependencyGraph } from './buildDependencyGraph';
 import { generateQuickContext } from './generateQuickContext';
 import { generateModuleContext } from './generateModuleContext';
 import { generateMasterIndex } from './generateMasterIndex';
@@ -15,8 +15,11 @@ import { generateMermaidDiagram } from './generateMermaidDiagram';
 import { generateGapsReport } from './generateGapsReport';
 import { generateOpenApi } from './generateOpenApi';
 import { detectFrontendCalls } from './detectFrontendCalls';
-import { detectPlsqlObjects } from './detectPlsqlObjects';
-import { detectBackendDbCalls } from './detectBackendDbCalls';
+import { detectPlsqlObjects, type PlsqlObject, type PlsqlCall } from './detectPlsqlObjects';
+import { detectBackendDbCalls, type DbCall } from './detectBackendDbCalls';
+import { detectTransactions, formatTransactionsReport } from './detectTransactions';
+import { detectBatchJobs, formatBatchJobsReport } from './detectBatchJobs';
+import { detectAngularModules, formatAngularModulesReport } from './detectAngularModules';
 import { buildCallGraph } from './buildCallGraph';
 import { generateMultiGraph } from './generateMultiGraph';
 import { buildImpactIndex } from './buildImpactIndex';
@@ -62,6 +65,10 @@ export interface PipelineResult {
   inheritanceClasses: number;
   dbTables: number;
   cacheHits: number;
+  transactions: number;
+  batchJobs: number;
+  angularModules: number;
+  deadComponents: number;
   error?: string;
 }
 
@@ -91,6 +98,10 @@ const PHASES: PipelinePhase[] = [
   { id: 'inheritance', label: 'Detectando hierarquia de classes', status: 'pending' },
   { id: 'patterns', label: 'Identificando padrões arquiteturais', status: 'pending' },
   { id: 'db-schema', label: 'Detectando schema de banco de dados', status: 'pending' },
+  { id: 'transactions', label: 'Detectando @Transactional boundaries', status: 'pending' },
+  { id: 'batch-jobs', label: 'Detectando @Scheduled, @Async e batch jobs', status: 'pending' },
+  { id: 'angular-modules', label: 'Detectando módulos Angular e NgRx', status: 'pending' },
+  { id: 'dead-components', label: 'Detectando componentes sem uso (dead code)', status: 'pending' },
   { id: 'export-json', label: 'Exportando analysis.json', status: 'pending' },
   { id: 'ai-files', label: 'Gerando arquivos para IA', status: 'pending' }
 ];
@@ -179,6 +190,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     // ── 5c. PL/SQL ───────────────────────────────────────────────────────────────
     report('plsql', 38, 'Extraindo procedures, functions e packages PL/SQL...');
     const { objects: plsqlObjects, calls: plsqlCalls } = detectPlsqlObjects(files);
+    fs.writeFileSync(path.join(ticCodeDir, 'plsql-objects.json'), JSON.stringify(plsqlObjects), 'utf8');
     markDone('plsql');
     report('plsql', 100, `${plsqlObjects.length} objetos PL/SQL, ${plsqlCalls.length} chamadas`);
 
@@ -296,6 +308,11 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     generateMultiGraph(ticCodeDir, callGraph);
     // Salva JSON do call-graph para o visualizador interativo
     fs.writeFileSync(path.join(ticCodeDir, 'call-graph.json'), JSON.stringify(callGraph), 'utf8');
+
+    // Computa dead PL/SQL (procedures/functions não referenciadas por ninguém)
+    const deadPlsql = computeDeadPlsql(plsqlObjects, plsqlCalls, dbCallsData);
+    fs.writeFileSync(path.join(ticCodeDir, 'dead-plsql.json'), JSON.stringify(deadPlsql), 'utf8');
+
     markDone('multigraph');
     report('multigraph', 100, `${callGraph.nodes.length} nós, ${callGraph.edges.length} arestas`);
 
@@ -357,7 +374,47 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('db-schema');
     report('db-schema', 100, `${dbSchema.totalTables} tabelas/models detectadas (${dbSchema.detectedVia.join(', ') || 'nenhuma'})`);
 
-    // ── 21. EXPORT JSON ───────────────────────────────────────────────────────────
+    // ── 21. @TRANSACTIONAL ───────────────────────────────────────────────────────
+    report('transactions', 91, 'Detectando @Transactional boundaries...');
+    const transactionBoundaries = detectTransactions(files);
+    if (transactionBoundaries.length > 0) {
+      const txReport = formatTransactionsReport(transactionBoundaries);
+      fs.writeFileSync(path.join(ticCodeDir, 'transactions.md'), txReport, 'utf8');
+      fs.writeFileSync(path.join(ticCodeDir, 'transactions.json'), JSON.stringify(transactionBoundaries), 'utf8');
+    }
+    markDone('transactions');
+    report('transactions', 100, `${transactionBoundaries.length} @Transactional encontradas`);
+
+    // ── 22. BATCH JOBS ───────────────────────────────────────────────────────────
+    report('batch-jobs', 92, 'Detectando @Scheduled, @Async, Quartz...');
+    const batchJobs = detectBatchJobs(files);
+    if (batchJobs.length > 0) {
+      const batchReport = formatBatchJobsReport(batchJobs);
+      fs.writeFileSync(path.join(ticCodeDir, 'batch-jobs.md'), batchReport, 'utf8');
+      fs.writeFileSync(path.join(ticCodeDir, 'batch-jobs.json'), JSON.stringify(batchJobs), 'utf8');
+    }
+    markDone('batch-jobs');
+    report('batch-jobs', 100, `${batchJobs.length} batch/async jobs detectados`);
+
+    // ── 23. ANGULAR MODULES ──────────────────────────────────────────────────────
+    report('angular-modules', 93, 'Detectando @NgModule, lazy routes, NgRx...');
+    const { modules: angularModules, ngrx: ngrxItems } = detectAngularModules(files);
+    if (angularModules.length > 0 || ngrxItems.length > 0) {
+      const angularReport = formatAngularModulesReport(angularModules, ngrxItems);
+      fs.writeFileSync(path.join(ticCodeDir, 'angular-modules.md'), angularReport, 'utf8');
+      fs.writeFileSync(path.join(ticCodeDir, 'angular-modules.json'), JSON.stringify({ modules: angularModules, ngrx: ngrxItems }), 'utf8');
+    }
+    markDone('angular-modules');
+    report('angular-modules', 100, `${angularModules.length} módulos Angular, ${ngrxItems.length} NgRx items`);
+
+    // ── 24. DEAD COMPONENTS ──────────────────────────────────────────────────────
+    report('dead-components', 94, 'Detectando componentes React/Angular sem uso...');
+    const deadComponents = computeDeadComponents(files, graph);
+    fs.writeFileSync(path.join(ticCodeDir, 'dead-components.json'), JSON.stringify(deadComponents), 'utf8');
+    markDone('dead-components');
+    report('dead-components', 100, `${deadComponents.length} componentes sem importadores detectados`);
+
+    // ── 25. EXPORT JSON ───────────────────────────────────────────────────────────
     report('export-json', 92, 'Exportando analysis.json estruturado...');
     exportAnalysis(ticCodeDir, {
       projectName, projectPath, files, totalLines, stack, modules, endpoints, graph, risks,
@@ -393,7 +450,11 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       impactedFiles,
       inheritanceClasses: inheritanceTree.classes.length,
       dbTables: dbSchema.totalTables,
-      cacheHits: moduleCacheHits
+      cacheHits: moduleCacheHits,
+      transactions: transactionBoundaries.length,
+      batchJobs: batchJobs.length,
+      angularModules: angularModules.length,
+      deadComponents: deadComponents.length
     };
 
   } catch (err) {
@@ -401,9 +462,67 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     return {
       success: false, outputPath: ticCodeDir, totalFiles: 0, totalLines: 0, modulesGenerated: 0,
       quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0,
-      hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0, error
+      hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0,
+      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, error
     };
   }
+}
+
+function computeDeadComponents(files: ScannedFile[], graph: DependencyGraph): Array<{ file: string; type: 'react' | 'angular' }> {
+  // Entry points that are never "imported" but are still valid roots
+  const ENTRY_NAMES = new Set(['main.tsx', 'main.ts', 'App.tsx', 'App.ts', 'index.tsx', 'index.ts', 'index.js']);
+
+  const inDegreeMap = new Map<string, number>();
+  for (const node of graph.nodes) inDegreeMap.set(node.path, node.inDegree);
+
+  const dead: Array<{ file: string; type: 'react' | 'angular' }> = [];
+
+  for (const file of files) {
+    const fname = file.relativePath.split('/').pop() ?? '';
+    if (ENTRY_NAMES.has(fname)) continue;
+    if ((inDegreeMap.get(file.relativePath) ?? 0) > 0) continue;
+
+    // React components: .tsx files (exclude pure type/utility files)
+    if (file.extension === '.tsx') {
+      dead.push({ file: file.relativePath, type: 'react' });
+      continue;
+    }
+
+    // Angular components/directives/pipes
+    if (
+      file.relativePath.endsWith('.component.ts') ||
+      file.relativePath.endsWith('.directive.ts') ||
+      file.relativePath.endsWith('.pipe.ts')
+    ) {
+      dead.push({ file: file.relativePath, type: 'angular' });
+    }
+  }
+
+  return dead;
+}
+
+function computeDeadPlsql(plsqlObjects: PlsqlObject[], plsqlCalls: PlsqlCall[], dbCalls: DbCall[]) {
+  // Build set of all called/referenced object names and package names
+  const called = new Set<string>();
+  for (const c of plsqlCalls) {
+    called.add(c.calledObject.toUpperCase());
+    if (c.calledPackage) called.add(c.calledPackage.toUpperCase());
+  }
+  for (const c of dbCalls) {
+    called.add(c.procedureName.toUpperCase());
+    if (c.packageName) called.add(c.packageName.toUpperCase());
+  }
+
+  // A procedure/function is dead if:
+  // - It's not called directly by name
+  // - AND its package (if any) is not called
+  // (if the package is called, we can't be sure the proc is unused — Oracle resolves at runtime)
+  return plsqlObjects.filter((obj) => {
+    if (obj.type !== 'PROCEDURE' && obj.type !== 'FUNCTION') return false;
+    const directlyCalled = called.has(obj.name.toUpperCase());
+    const packageCalled = obj.packageName ? called.has(obj.packageName.toUpperCase()) : false;
+    return !directlyCalled && !packageCalled;
+  });
 }
 
 function writeCopilotInstructions(projectPath: string, projectName: string, totalFiles: number, modules: ReturnType<typeof detectModules>): void {

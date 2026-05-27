@@ -204,6 +204,65 @@ export class TicAnalyzerMcpServer {
           name: 'get_analysis_json',
           description: 'Retorna metadados estruturados da análise (contagens, top hotspots, violations, patterns) em JSON compacto. Útil para ferramentas externas. ~500 tokens.',
           inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_plsql_object',
+          description: 'Retorna detalhes de uma procedure, function, trigger ou view PL/SQL: parâmetros, tabelas lidas/escritas, chamadores e chamados. ~200 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Nome da procedure, function, trigger ou view (ex: "PROC_CALCULA_SALDO" ou "PKG_FINANCEIRO.PROC_CALCULA")' }
+            },
+            required: ['name']
+          }
+        },
+        {
+          name: 'get_table_access',
+          description: 'Retorna quais procedures/functions leem ou escrevem uma tabela Oracle. Útil para análise de impacto de alterações no schema. ~200 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              table: { type: 'string', description: 'Nome da tabela Oracle (ex: "TB_CLIENTE" ou "PEDIDOS")' }
+            },
+            required: ['table']
+          }
+        },
+        {
+          name: 'get_dead_plsql',
+          description: 'Retorna procedures e functions PL/SQL que não são chamadas por nenhum outro código (Java, TS ou PL/SQL). Útil para identificar código morto antes de uma refatoração.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_transactions',
+          description: 'Retorna todos os @Transactional boundaries detectados no código Java/Spring: propagation, readOnly, rollbackFor, escopo de classe ou método.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_batch_jobs',
+          description: 'Retorna jobs e processos assíncronos detectados: @Scheduled (com cron/fixedRate), @Async, Quartz Jobs, Spring Batch. Estes não aparecem no multi-grafo HTTP.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_angular_modules',
+          description: 'Retorna módulos Angular (@NgModule com declarations/imports/lazy routes) e itens NgRx/Redux (actions, reducers, effects, selectors).',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_dead_components',
+          description: 'Retorna componentes React (.tsx) e Angular (.component.ts/.directive.ts) com inDegree=0 no grafo de dependências — nenhum arquivo os importa.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'find_path',
+          description: 'Encontra o caminho mais curto (BFS) entre dois arquivos ou objetos PL/SQL no grafo de dependências. Use para descobrir como A se conecta a B. ~200 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              from: { type: 'string', description: 'Arquivo ou nó de origem (ex: "src/components/Login.tsx")' },
+              to: { type: 'string', description: 'Arquivo ou nó de destino (ex: "src/api/auth.ts")' }
+            },
+            required: ['from', 'to']
+          }
         }
       ]
     }));
@@ -461,6 +520,268 @@ export class TicAnalyzerMcpServer {
           const content = fs.readFileSync(summaryPath, 'utf8');
           const violationsSection = content.split('## ⚠️ Violações Arquiteturais')[1] ?? 'Nenhuma violação detectada.';
           return respond({ content: [{ type: 'text', text: `# Violações Arquiteturais\n\n${violationsSection.split('---')[0]}` }] });
+        }
+
+        case 'get_plsql_object': {
+          const objName = ((args as { name: string }).name ?? '').toUpperCase().trim();
+          const objsPath = path.join(this.ticCodePath, 'plsql-objects.json');
+          const callsPath = path.join(this.ticCodePath, 'call-graph.json');
+          if (!fs.existsSync(objsPath)) {
+            return respond({ content: [{ type: 'text', text: 'plsql-objects.json não encontrado. Execute a análise novamente.' }] });
+          }
+          type Obj = { type: string; name: string; packageName?: string; params?: string; returnType?: string; file: string; line: number; tablesRead: string[]; tablesWritten: string[] };
+          const allObjs: Obj[] = JSON.parse(fs.readFileSync(objsPath, 'utf8'));
+
+          // Fuzzy match: exact name or pkg.name
+          const [pkgPart, namePart] = objName.includes('.') ? objName.split('.').slice(-2) : [undefined, objName];
+          const found = allObjs.find((o) =>
+            o.name === namePart &&
+            (!pkgPart || o.packageName === pkgPart)
+          ) ?? allObjs.find((o) => o.name.includes(namePart));
+
+          if (!found) {
+            const available = [...new Set(allObjs.filter((o) => o.type === 'PROCEDURE' || o.type === 'FUNCTION').map((o) => o.packageName ? `${o.packageName}.${o.name}` : o.name))].slice(0, 20).join(', ');
+            return respond({ content: [{ type: 'text', text: `Objeto PL/SQL "${objName}" não encontrado.\nDisponíveis: ${available}` }] });
+          }
+
+          // Find callers and callees from call-graph
+          type Edge = { from: string; to: string; type: string; label?: string };
+          const callersOf: string[] = [];
+          const calleesOf: string[] = [];
+          if (fs.existsSync(callsPath)) {
+            const cg = JSON.parse(fs.readFileSync(callsPath, 'utf8'));
+            const dbNodeId = `db_${found.name}`;
+            for (const edge of (cg.edges as Edge[])) {
+              if (edge.type === 'PLSQL_CALL' || edge.type === 'DB_CALL') {
+                if (edge.to.includes(found.name)) callersOf.push(edge.from);
+                if (edge.from.includes(found.name)) calleesOf.push(edge.label ?? edge.to);
+              }
+              void dbNodeId;
+            }
+          }
+
+          const lines = [
+            `# PL/SQL: ${found.packageName ? `${found.packageName}.${found.name}` : found.name}`,
+            '',
+            `| Campo | Valor |`,
+            `| --- | --- |`,
+            `| Tipo | ${found.type} |`,
+            `| Package | ${found.packageName ?? '—'} |`,
+            `| Arquivo | \`${found.file}:${found.line}\` |`,
+            found.params ? `| Parâmetros | \`${found.params}\` |` : '',
+            found.returnType ? `| Retorno | ${found.returnType} |` : '',
+            '',
+          ];
+
+          if (found.tablesRead.length > 0) {
+            lines.push('## Tabelas Lidas (SELECT/FROM/CURSOR)');
+            found.tablesRead.forEach((t) => lines.push(`- \`${t}\``));
+            lines.push('');
+          }
+          if (found.tablesWritten.length > 0) {
+            lines.push('## Tabelas Escritas (INSERT/UPDATE/DELETE/MERGE)');
+            found.tablesWritten.forEach((t) => lines.push(`- \`${t}\``));
+            lines.push('');
+          }
+          if (callersOf.length > 0) {
+            lines.push('## Chamado Por');
+            callersOf.slice(0, 10).forEach((c) => lines.push(`- \`${c}\``));
+            lines.push('');
+          }
+          if (calleesOf.length > 0) {
+            lines.push('## Chama');
+            calleesOf.slice(0, 10).forEach((c) => lines.push(`- \`${c}\``));
+            lines.push('');
+          }
+          if (found.tablesRead.length === 0 && found.tablesWritten.length === 0) {
+            lines.push('> Nenhuma tabela detectada. Pode usar SQL dinâmico (EXECUTE IMMEDIATE) ou não acessar tabelas diretamente.');
+          }
+
+          return respond({ content: [{ type: 'text', text: lines.filter((l) => l !== '').join('\n') }] });
+        }
+
+        case 'get_table_access': {
+          const tableName = ((args as { table: string }).table ?? '').toUpperCase().trim();
+          const objsPath = path.join(this.ticCodePath, 'plsql-objects.json');
+          if (!fs.existsSync(objsPath)) {
+            return respond({ content: [{ type: 'text', text: 'plsql-objects.json não encontrado. Execute a análise novamente.' }] });
+          }
+          type ObjTA = { type: string; name: string; packageName?: string; file: string; line: number; tablesRead: string[]; tablesWritten: string[] };
+          const allObjs: ObjTA[] = JSON.parse(fs.readFileSync(objsPath, 'utf8'));
+
+          const readers = allObjs.filter((o) => o.tablesRead.some((t) => t.includes(tableName)));
+          const writers = allObjs.filter((o) => o.tablesWritten.some((t) => t.includes(tableName)));
+
+          if (readers.length === 0 && writers.length === 0) {
+            // Try partial match
+            const allTables = new Set([
+              ...allObjs.flatMap((o) => o.tablesRead),
+              ...allObjs.flatMap((o) => o.tablesWritten),
+            ]);
+            const similar = [...allTables].filter((t) => t.includes(tableName.slice(0, 4))).slice(0, 10).join(', ');
+            return respond({ content: [{ type: 'text', text: `Nenhuma procedure/function acessa a tabela "${tableName}". Tabelas similares: ${similar || 'nenhuma'}` }] });
+          }
+
+          const fmt = (o: ObjTA) => `\`${o.packageName ? `${o.packageName}.${o.name}` : o.name}\` (\`${o.file}:${o.line}\`)`;
+          const lines = [`# Acesso à Tabela: \`${tableName}\``, ''];
+
+          if (readers.length > 0) {
+            lines.push(`## Lê (SELECT / CURSOR) — ${readers.length}`);
+            readers.slice(0, 20).forEach((o) => lines.push(`- ${fmt(o)}`));
+            lines.push('');
+          }
+          if (writers.length > 0) {
+            lines.push(`## Escreve (INSERT / UPDATE / DELETE / MERGE) — ${writers.length}`);
+            writers.slice(0, 20).forEach((o) => lines.push(`- ${fmt(o)}`));
+            lines.push('');
+          }
+
+          return respond({ content: [{ type: 'text', text: lines.join('\n') }] });
+        }
+
+        case 'get_dead_plsql': {
+          const deadPath = path.join(this.ticCodePath, 'dead-plsql.json');
+          if (!fs.existsSync(deadPath)) {
+            return respond({ content: [{ type: 'text', text: 'dead-plsql.json não encontrado. Execute a análise novamente.' }] });
+          }
+          type DeadObj = { type: string; name: string; packageName?: string; file: string; line: number };
+          const dead: DeadObj[] = JSON.parse(fs.readFileSync(deadPath, 'utf8'));
+
+          if (dead.length === 0) {
+            return respond({ content: [{ type: 'text', text: '✅ Nenhuma procedure ou function órfã detectada. Todo o código PL/SQL é referenciado.' }] });
+          }
+
+          const lines = [
+            `# Código PL/SQL Morto — ${dead.length} objetos não referenciados`,
+            '',
+            '> ⚠️ Estas procedures/functions não são chamadas por nenhum código Java, TypeScript ou outro PL/SQL detectado.',
+            '> Podem ser entry points externos (DBLinks, jobs, chamadas diretas) — confirme antes de remover.',
+            '',
+            '| Tipo | Nome | Arquivo |',
+            '| --- | --- | --- |',
+            ...dead.slice(0, 50).map((o) => `| ${o.type} | \`${o.packageName ? `${o.packageName}.${o.name}` : o.name}\` | \`${o.file}:${o.line}\` |`),
+          ];
+          if (dead.length > 50) lines.push(`\n*... e mais ${dead.length - 50} objetos*`);
+
+          return respond({ content: [{ type: 'text', text: lines.join('\n') }] });
+        }
+
+        case 'get_transactions':
+          return respond({ content: [{ type: 'text', text: this.readFile('transactions.md') }] });
+
+        case 'get_batch_jobs':
+          return respond({ content: [{ type: 'text', text: this.readFile('batch-jobs.md') }] });
+
+        case 'get_angular_modules':
+          return respond({ content: [{ type: 'text', text: this.readFile('angular-modules.md') }] });
+
+        case 'get_dead_components': {
+          const dcPath = path.join(this.ticCodePath, 'dead-components.json');
+          if (!fs.existsSync(dcPath)) {
+            return respond({ content: [{ type: 'text', text: 'dead-components.json não encontrado. Execute a análise novamente.' }] });
+          }
+          type DC = { file: string; type: 'react' | 'angular' };
+          const dc: DC[] = JSON.parse(fs.readFileSync(dcPath, 'utf8'));
+          if (dc.length === 0) {
+            return respond({ content: [{ type: 'text', text: '✅ Nenhum componente sem importadores detectado.' }] });
+          }
+          const react = dc.filter((d) => d.type === 'react');
+          const angular = dc.filter((d) => d.type === 'angular');
+          const dcLines = [
+            `# Componentes Sem Uso — ${dc.length} detectados`,
+            '',
+            '> Nenhum outro arquivo importa estes componentes. Podem ser pages acessadas por router (não por import direto).',
+            '',
+          ];
+          if (react.length > 0) {
+            dcLines.push(`## React (.tsx) — ${react.length}`);
+            react.slice(0, 30).forEach((d) => dcLines.push(`- \`${d.file}\``));
+            if (react.length > 30) dcLines.push(`*... e mais ${react.length - 30}*`);
+            dcLines.push('');
+          }
+          if (angular.length > 0) {
+            dcLines.push(`## Angular (.component/.directive/.pipe) — ${angular.length}`);
+            angular.slice(0, 30).forEach((d) => dcLines.push(`- \`${d.file}\``));
+            if (angular.length > 30) dcLines.push(`*... e mais ${angular.length - 30}*`);
+          }
+          return respond({ content: [{ type: 'text', text: dcLines.join('\n') }] });
+        }
+
+        case 'find_path': {
+          const fromArg = ((args as { from: string }).from ?? '').trim();
+          const toArg = ((args as { to: string }).to ?? '').trim();
+          const graphPath = path.join(this.ticCodePath, 'dep-graph.json');
+          if (!fs.existsSync(graphPath)) {
+            return respond({ content: [{ type: 'text', text: 'dep-graph.json não encontrado. Execute a análise novamente.' }] });
+          }
+
+          type GNode = { id: string; path: string };
+          type GEdge = { from: string; to: string };
+          const depGraph: { nodes: GNode[]; edges: GEdge[] } = JSON.parse(fs.readFileSync(graphPath, 'utf8'));
+
+          // Fuzzy-find start and end nodes
+          const findNode = (query: string): string | null => {
+            const q = query.toLowerCase();
+            const exact = depGraph.nodes.find((n) => n.path === query || n.id === query);
+            if (exact) return exact.id;
+            const partial = depGraph.nodes.find((n) => n.path.toLowerCase().includes(q) || n.path.toLowerCase().endsWith(q));
+            return partial?.id ?? null;
+          };
+
+          const fromId = findNode(fromArg);
+          const toId = findNode(toArg);
+
+          if (!fromId) return respond({ content: [{ type: 'text', text: `Arquivo de origem não encontrado: "${fromArg}". Verifique o caminho relativo.` }] });
+          if (!toId) return respond({ content: [{ type: 'text', text: `Arquivo de destino não encontrado: "${toArg}". Verifique o caminho relativo.` }] });
+          if (fromId === toId) return respond({ content: [{ type: 'text', text: '✅ Origem e destino são o mesmo arquivo.' }] });
+
+          // Build adjacency list
+          const adj = new Map<string, string[]>();
+          for (const edge of depGraph.edges) {
+            if (!adj.has(edge.from)) adj.set(edge.from, []);
+            adj.get(edge.from)!.push(edge.to);
+          }
+
+          // BFS
+          const visited = new Set<string>([fromId]);
+          const parent = new Map<string, string>();
+          const queue = [fromId];
+          let found = false;
+
+          while (queue.length > 0 && !found) {
+            const current = queue.shift()!;
+            for (const next of adj.get(current) ?? []) {
+              if (visited.has(next)) continue;
+              visited.add(next);
+              parent.set(next, current);
+              if (next === toId) { found = true; break; }
+              queue.push(next);
+            }
+          }
+
+          if (!found) {
+            return respond({ content: [{ type: 'text', text: `Nenhum caminho encontrado entre "${fromArg}" e "${toArg}".\nEsses arquivos podem não se conectar por dependências de import.` }] });
+          }
+
+          // Reconstruct path
+          const pathNodes: string[] = [];
+          let cur = toId;
+          while (cur !== fromId) {
+            const nodeInfo = depGraph.nodes.find((n) => n.id === cur);
+            pathNodes.unshift(nodeInfo?.path ?? cur);
+            cur = parent.get(cur)!;
+          }
+          pathNodes.unshift(depGraph.nodes.find((n) => n.id === fromId)?.path ?? fromId);
+
+          const pathLines = [
+            `# Caminho: \`${fromArg}\` → \`${toArg}\``,
+            '',
+            `**${pathNodes.length - 1} salto(s)**`,
+            '',
+            ...pathNodes.map((p, i) => `${i + 1}. \`${p}\``),
+          ];
+
+          return respond({ content: [{ type: 'text', text: pathLines.join('\n') }] });
         }
 
         default:

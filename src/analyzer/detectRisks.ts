@@ -45,14 +45,52 @@ export function detectRisks(files: ScannedFile[]): RiskFinding[] {
         risks.push({ level: 'low', title: 'Marcador TODO/FIXME encontrado', file: file.relativePath, line: lineNum });
       }
 
-      // SQL concatenado em string (risco de injeção)
+      // A03 — SQL concatenado em string (injection)
       if (/['"`]\s*(select|insert|update|delete|drop|alter)\b/i.test(line) && line.includes('+')) {
-        risks.push({ level: 'critical', title: 'SQL concatenado em string (risco de injeção)', file: file.relativePath, line: lineNum });
+        risks.push({ level: 'critical', title: 'A03 SQL Injection: SQL concatenado em string', file: file.relativePath, line: lineNum });
+      }
+
+      // A03 — Runtime.exec / ProcessBuilder com concatenação (command injection)
+      if (/Runtime\.getRuntime\(\)\.exec\s*\(/.test(line) || /new\s+ProcessBuilder\s*\(/.test(line)) {
+        if (line.includes('+') || /\$\{/.test(line)) {
+          risks.push({ level: 'critical', title: 'A03 Command Injection: Runtime.exec/ProcessBuilder com variável', file: file.relativePath, line: lineNum });
+        }
+      }
+
+      // A03 — eval() com variáveis (JS/TS)
+      if (/\beval\s*\([^'")\s]/.test(line) && !line.trim().startsWith('//')) {
+        risks.push({ level: 'critical', title: 'A03 Code Injection: eval() com variável dinâmica', file: file.relativePath, line: lineNum });
       }
 
       // Empty catch
       if (/catch\s*\([^)]*\)\s*\{\s*\}/.test(line) || /catch\s*\([^)]*\)\s*$/.test(line)) {
         risks.push({ level: 'medium', title: 'Bloco catch vazio', file: file.relativePath, line: lineNum });
+      }
+
+      // A02 — Algoritmos criptográficos fracos
+      if (/\b(MD5|SHA1|SHA-1|DES|RC4|RC2)\b/.test(line) && !/\/\//.test(line.slice(0, line.search(/\b(MD5|SHA1)/))) ) {
+        risks.push({ level: 'high', title: 'A02 Cryptographic Failure: algoritmo fraco (MD5/SHA1/DES)', file: file.relativePath, line: lineNum });
+      }
+
+      // A02 — Math.random() usado em contexto de segurança (token, password, secret, key, nonce, salt)
+      if (/Math\.random\s*\(\)/.test(line) && /(?:token|password|secret|key|nonce|salt|seed|rand)/i.test(line)) {
+        risks.push({ level: 'high', title: 'A02 Insecure Randomness: Math.random() em contexto de segurança', file: file.relativePath, line: lineNum });
+      }
+
+      // A05 — CORS permissivo
+      if (/cors\s*\(\s*\{[^}]*origin\s*:\s*['"`]\*['"`]/.test(line) || /allowedOrigins.*\*/.test(line) || /setHeader.*Access-Control-Allow-Origin.*\*/.test(line)) {
+        risks.push({ level: 'high', title: 'A05 Security Misconfiguration: CORS origin: * (permissão total)', file: file.relativePath, line: lineNum });
+      }
+
+      // A05 — SSL/TLS desabilitado explicitamente
+      if (/ssl\s*:\s*false/i.test(line) || /verify\s*=\s*False/.test(line) || /rejectUnauthorized\s*:\s*false/.test(line) || /DISABLE_SSL/i.test(line)) {
+        risks.push({ level: 'critical', title: 'A05 Security Misconfiguration: SSL/TLS desabilitado', file: file.relativePath, line: lineNum });
+      }
+
+      // A09 — Logging de dados sensíveis
+      if (/(?:console\.log|System\.out\.print|logger\.\w+)\s*\(/.test(line) &&
+          /(?:password|senha|token|secret|apikey|api_key|cpf|cnpj|credit.card|card.number)/i.test(line)) {
+        risks.push({ level: 'high', title: 'A09 Security Logging: log de dado sensível (senha/token/CPF)', file: file.relativePath, line: lineNum });
       }
 
       // Hardcoded credentials patterns
