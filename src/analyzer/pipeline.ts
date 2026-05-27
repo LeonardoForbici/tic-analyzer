@@ -30,6 +30,7 @@ import { detectInheritance, formatInheritanceReport } from './detectInheritance'
 import { detectPatterns, formatPatternsReport } from './detectPatterns';
 import { detectDbSchema, formatDbSchemaReport, formatDbSchemaSummary } from './detectDbSchema';
 import { exportAnalysis } from './exportAnalysis';
+import { buildSearchIndex } from './buildSearchIndex';
 import { loadFileCache, computeChangedFiles, saveFileCache } from './buildFileCache';
 
 export type PhaseStatus = 'pending' | 'running' | 'done' | 'error';
@@ -102,6 +103,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'batch-jobs', label: 'Detectando @Scheduled, @Async e batch jobs', status: 'pending' },
   { id: 'angular-modules', label: 'Detectando módulos Angular e NgRx', status: 'pending' },
   { id: 'dead-components', label: 'Detectando componentes sem uso (dead code)', status: 'pending' },
+  { id: 'search-index', label: 'Construindo índice de busca por código', status: 'pending' },
   { id: 'export-json', label: 'Exportando analysis.json', status: 'pending' },
   { id: 'ai-files', label: 'Gerando arquivos para IA', status: 'pending' }
 ];
@@ -413,6 +415,13 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     fs.writeFileSync(path.join(ticCodeDir, 'dead-components.json'), JSON.stringify(deadComponents), 'utf8');
     markDone('dead-components');
     report('dead-components', 100, `${deadComponents.length} componentes sem importadores detectados`);
+
+    // ── 24b. SEARCH INDEX ─────────────────────────────────────────────────────────
+    report('search-index', 95, 'Indexando termos de código para busca semântica...');
+    buildSearchIndex(files, ticCodeDir);
+    markDone('search-index');
+    const codeFileCount = files.filter((f) => ['.ts', '.tsx', '.js', '.jsx', '.java', '.py', '.cs', '.go', '.rs', '.php', '.rb', '.sql'].includes(f.extension)).length;
+    report('search-index', 100, `${codeFileCount} arquivos indexados`);
 
     // ── 25. EXPORT JSON ───────────────────────────────────────────────────────────
     report('export-json', 92, 'Exportando analysis.json estruturado...');

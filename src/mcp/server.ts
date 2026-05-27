@@ -10,6 +10,12 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { ImpactIndex } from '../analyzer/buildImpactIndex';
 
+interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
+interface CallGraphEdge { from: string; to: string; type: string; confidence: string; label?: string; }
+interface PlsqlObj { type: string; name: string; packageName?: string; file: string; line: number; tablesRead: string[]; tablesWritten: string[]; }
+interface TxBoundary { file: string; line: number; className: string; methodName?: string; propagation: string; readOnly: boolean; rollbackFor?: string; }
+interface SearchIndexEntry { file: string; terms: string[]; snippet: string; }
+
 export interface TokenEntry {
   timestamp: number;
   tool: string;
@@ -45,6 +51,9 @@ export class TicAnalyzerMcpServer {
   private tokenLog: TokenEntry[] = [];
   private sessionStart = Date.now();
   private onToolCall?: (entry: TokenEntry) => void;
+  private callGraphCache: { nodes: CallGraphNode[]; edges: CallGraphEdge[] } | null = null;
+  private searchIndexCache: SearchIndexEntry[] | null = null;
+  private invertedIndexCache: Map<string, string[]> | null = null;
 
   constructor(options: McpServerOptions) {
     this.projectPath = options.projectPath;
@@ -262,6 +271,39 @@ export class TicAnalyzerMcpServer {
               to: { type: 'string', description: 'Arquivo ou nó de destino (ex: "src/api/auth.ts")' }
             },
             required: ['from', 'to']
+          }
+        },
+        {
+          name: 'trace_flow',
+          description: 'Rastreia o fluxo vertical completo a partir de qualquer ponto de entrada: endpoint URL, arquivo, label de nó ou procedure PL/SQL. Retorna upstream (quem chama) e downstream (o que chama), tabelas acessadas e contexto @Transactional. ~1.5k tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entry: { type: 'string', description: 'Ponto de entrada: URL (/api/pagamentos), nome de arquivo (PedidoService.java), label de nó ou nome de procedure PL/SQL.' }
+            },
+            required: ['entry']
+          }
+        },
+        {
+          name: 'search_code',
+          description: 'Busca semântica em todo o código-fonte por palavras-chave, nomes de classes, termos de negócio ou comentários. Retorna os 10 arquivos mais relevantes com score e snippet. ~400 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Termos de busca (ex: "validação pagamento", "SP_PROCESSAR", "checkout")' }
+            },
+            required: ['query']
+          }
+        },
+        {
+          name: 'get_concept_map',
+          description: 'Mapa cruzado de um conceito de negócio em todos os artefatos: módulos, endpoints REST, procedures PL/SQL, tabelas, @Transactional e arquivos relacionados. ~800 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              concept: { type: 'string', description: 'Conceito de negócio (ex: "pagamento", "pedido", "usuario")' }
+            },
+            required: ['concept']
           }
         }
       ]
@@ -784,6 +826,21 @@ export class TicAnalyzerMcpServer {
           return respond({ content: [{ type: 'text', text: pathLines.join('\n') }] });
         }
 
+        case 'trace_flow': {
+          const entry = ((args as { entry: string }).entry ?? '').trim();
+          return respond({ content: [{ type: 'text', text: this.traceFlowTool(entry) }] });
+        }
+
+        case 'search_code': {
+          const query = ((args as { query: string }).query ?? '').trim();
+          return respond({ content: [{ type: 'text', text: this.searchCodeTool(query) }] });
+        }
+
+        case 'get_concept_map': {
+          const concept = ((args as { concept: string }).concept ?? '').trim();
+          return respond({ content: [{ type: 'text', text: this.getConceptMapTool(concept) }] });
+        }
+
         default:
           return respond({ content: [{ type: 'text', text: `Ferramenta desconhecida: ${name}` }] });
       }
@@ -818,6 +875,397 @@ export class TicAnalyzerMcpServer {
       }
     }
     return null;
+  }
+
+  // ── trace_flow ──────────────────────────────────────────────────────────────
+
+  private loadCallGraph(): { nodes: CallGraphNode[]; edges: CallGraphEdge[] } | null {
+    if (this.callGraphCache) return this.callGraphCache;
+    const p = path.join(this.ticCodePath, 'call-graph.json');
+    if (!fs.existsSync(p)) return null;
+    this.callGraphCache = JSON.parse(fs.readFileSync(p, 'utf8')) as { nodes: CallGraphNode[]; edges: CallGraphEdge[] };
+    return this.callGraphCache;
+  }
+
+  private traceFlowTool(entry: string): string {
+    const cg = this.loadCallGraph();
+    if (!cg) return 'call-graph.json não encontrado. Execute a análise novamente.';
+
+    const lower = entry.toLowerCase();
+    const isUrl = entry.startsWith('/');
+
+    const matchedNodeIds = new Set<string>();
+    for (const node of cg.nodes) {
+      if (
+        node.label.toLowerCase().includes(lower) ||
+        node.file.toLowerCase().includes(lower) ||
+        node.id.toLowerCase().includes(lower)
+      ) {
+        matchedNodeIds.add(node.id);
+      }
+    }
+    if (isUrl) {
+      for (const edge of cg.edges) {
+        if (edge.type === 'HTTP_CALL' && edge.label?.toLowerCase().includes(lower)) {
+          matchedNodeIds.add(edge.from);
+          matchedNodeIds.add(edge.to);
+        }
+      }
+    }
+
+    if (matchedNodeIds.size === 0) {
+      return `Nenhum nó encontrado para "${entry}" no call-graph.\n\nNós disponíveis (amostra): ${cg.nodes.slice(0, 15).map((n) => n.label).join(', ')}`;
+    }
+
+    // BFS forward (downstream)
+    const downstream = new Set<string>();
+    const downQueue = [...matchedNodeIds];
+    while (downQueue.length > 0) {
+      const cur = downQueue.shift()!;
+      for (const edge of cg.edges) {
+        if (edge.from === cur && !downstream.has(edge.to) && !matchedNodeIds.has(edge.to)) {
+          downstream.add(edge.to);
+          downQueue.push(edge.to);
+        }
+      }
+    }
+
+    // BFS backward (upstream)
+    const upstream = new Set<string>();
+    const upQueue = [...matchedNodeIds];
+    while (upQueue.length > 0) {
+      const cur = upQueue.shift()!;
+      for (const edge of cg.edges) {
+        if (edge.to === cur && !upstream.has(edge.from) && !matchedNodeIds.has(edge.from)) {
+          upstream.add(edge.from);
+          upQueue.push(edge.from);
+        }
+      }
+    }
+
+    const nodeMap = new Map<string, CallGraphNode>(cg.nodes.map((n) => [n.id, n]));
+
+    // Load PL/SQL data
+    const plsqlPath = path.join(this.ticCodePath, 'plsql-objects.json');
+    const plsqlMap = new Map<string, PlsqlObj>();
+    if (fs.existsSync(plsqlPath)) {
+      const objs: PlsqlObj[] = JSON.parse(fs.readFileSync(plsqlPath, 'utf8'));
+      for (const obj of objs) plsqlMap.set(obj.name.toUpperCase(), obj);
+    }
+
+    // Load transactions
+    const txPath = path.join(this.ticCodePath, 'transactions.json');
+    const transactions: TxBoundary[] = fs.existsSync(txPath)
+      ? JSON.parse(fs.readFileSync(txPath, 'utf8'))
+      : [];
+
+    const seedNode = nodeMap.get([...matchedNodeIds][0]);
+    const lines: string[] = [];
+    lines.push(`## Trace: ${seedNode?.label ?? entry} (${seedNode?.layer ?? 'unknown'})`);
+    if (seedNode?.file) lines.push(`Arquivo: \`${seedNode.file}${seedNode.line ? ':' + seedNode.line : ''}\``);
+    lines.push('');
+
+    // Upstream
+    const upstreamNodes = [...upstream].map((id) => nodeMap.get(id)).filter(Boolean) as CallGraphNode[];
+    if (upstreamNodes.length > 0) {
+      lines.push('### ← Chamado por (upstream)');
+      for (const n of upstreamNodes.slice(0, 10)) {
+        const edge = cg.edges.find((e) => e.to === n.id && (matchedNodeIds.has(e.from) || upstream.has(e.from)));
+        lines.push(`- \`${n.file || n.label}\`${edge ? ` — ${edge.type} ${edge.confidence}` : ''}`);
+      }
+      lines.push('');
+    }
+
+    // Downstream
+    const downNodes = [...downstream].map((id) => nodeMap.get(id)).filter(Boolean) as CallGraphNode[];
+    const downFrontend = downNodes.filter((n) => n.layer === 'frontend');
+    const downBackend = downNodes.filter((n) => n.layer === 'backend');
+    const downDb = downNodes.filter((n) => n.layer === 'database');
+
+    if (downNodes.length > 0) {
+      lines.push('### → Chama (downstream)');
+      if (downFrontend.length > 0) {
+        lines.push('**Frontend:**');
+        downFrontend.slice(0, 5).forEach((n) => lines.push(`- \`${n.file || n.label}\``));
+      }
+      if (downBackend.length > 0) {
+        lines.push('**Backend:**');
+        downBackend.slice(0, 8).forEach((n) => lines.push(`- \`${n.file || n.label}\``));
+      }
+      if (downDb.length > 0) {
+        lines.push('**Backend → Banco:**');
+        for (const n of downDb.slice(0, 10)) {
+          const plsql = plsqlMap.get(n.label.toUpperCase());
+          const edge = cg.edges.find((e) => e.to === n.id);
+          lines.push(`- \`${n.label}\` — ${plsql?.type ?? 'PROCEDURE'} (${edge?.type ?? 'DB_CALL'} ${edge?.confidence ?? '🟡'})`);
+          if (plsql?.tablesRead?.length) lines.push(`  - Lê: ${plsql.tablesRead.slice(0, 6).join(', ')}`);
+          if (plsql?.tablesWritten?.length) lines.push(`  - Escreve: ${plsql.tablesWritten.slice(0, 6).join(', ')}`);
+        }
+      }
+      lines.push('');
+    }
+
+    // Consolidated table access
+    const allDbIds = new Set([...matchedNodeIds, ...downstream].filter((id) => nodeMap.get(id)?.layer === 'database'));
+    const allReads = new Set<string>();
+    const allWrites = new Set<string>();
+    for (const id of allDbIds) {
+      const node = nodeMap.get(id);
+      if (!node) continue;
+      const plsql = plsqlMap.get(node.label.toUpperCase());
+      if (plsql) {
+        plsql.tablesRead.forEach((t) => allReads.add(t));
+        plsql.tablesWritten.forEach((t) => allWrites.add(t));
+      }
+    }
+    if (allReads.size > 0 || allWrites.size > 0) {
+      const allTables = new Set([...allReads, ...allWrites]);
+      lines.push('### Tabelas Acessadas');
+      lines.push('| Tabela | Leitura | Escrita |');
+      lines.push('|--------|---------|---------|');
+      for (const table of allTables) {
+        lines.push(`| ${table} | ${allReads.has(table) ? '✓' : '-'} | ${allWrites.has(table) ? '✓' : '-'} |`);
+      }
+      lines.push('');
+    }
+
+    // @Transactional for matched backend files
+    const backendFiles = new Set([
+      ...[...matchedNodeIds].map((id) => nodeMap.get(id)).filter((n) => n?.layer === 'backend').map((n) => n!.file),
+      ...downBackend.map((n) => n.file),
+    ].filter(Boolean) as string[]);
+    const relevantTx = transactions.filter((tx) => backendFiles.has(tx.file));
+    if (relevantTx.length > 0) {
+      lines.push('### @Transactional');
+      for (const tx of relevantTx.slice(0, 5)) {
+        const method = tx.methodName ? `.${tx.methodName}` : '';
+        const extra = [tx.propagation, tx.readOnly ? 'readOnly' : '', tx.rollbackFor ? `rollbackFor=${tx.rollbackFor}` : ''].filter(Boolean).join(', ');
+        lines.push(`- \`${tx.file}:${tx.line}\` — ${tx.className}${method} (${extra})`);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  // ── search_code ─────────────────────────────────────────────────────────────
+
+  private loadSearchIndex(): SearchIndexEntry[] {
+    if (this.searchIndexCache) return this.searchIndexCache;
+    const p = path.join(this.ticCodePath, 'search-index.json');
+    if (!fs.existsSync(p)) return [];
+    this.searchIndexCache = JSON.parse(fs.readFileSync(p, 'utf8')) as SearchIndexEntry[];
+    return this.searchIndexCache;
+  }
+
+  private loadInvertedIndex(): Map<string, string[]> {
+    if (this.invertedIndexCache) return this.invertedIndexCache;
+    const entries = this.loadSearchIndex();
+    const inv = new Map<string, string[]>();
+    for (const entry of entries) {
+      for (const term of entry.terms) {
+        if (!inv.has(term)) inv.set(term, []);
+        inv.get(term)!.push(entry.file);
+      }
+    }
+    this.invertedIndexCache = inv;
+    return inv;
+  }
+
+  private tokenizeQuery(query: string): string[] {
+    const raw = query.match(/[a-zA-Z]{3,}/g) ?? [];
+    const tokens = new Set<string>();
+    for (const word of raw) {
+      const parts = word
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+        .replace(/([a-z\d])([A-Z])/g, '$1_$2')
+        .split('_')
+        .map((t) => t.toLowerCase())
+        .filter((t) => t.length >= 3);
+      parts.forEach((p) => tokens.add(p));
+      tokens.add(word.toLowerCase());
+    }
+    return [...tokens];
+  }
+
+  private searchCodeTool(query: string): string {
+    if (!query) return 'Informe um query para busca.';
+
+    const entries = this.loadSearchIndex();
+    if (entries.length === 0) {
+      return 'search-index.json não encontrado. Execute a análise novamente para gerar o índice de busca.';
+    }
+
+    const queryTokens = this.tokenizeQuery(query);
+    if (queryTokens.length === 0) return 'Query muito curta. Use pelo menos 3 caracteres.';
+
+    const inv = this.loadInvertedIndex();
+    const scores = new Map<string, number>();
+    for (const token of queryTokens) {
+      for (const f of inv.get(token) ?? []) scores.set(f, (scores.get(f) ?? 0) + 2);
+      for (const [term, files] of inv) {
+        if (term !== token && term.startsWith(token)) {
+          for (const f of files) scores.set(f, (scores.get(f) ?? 0) + 1);
+        }
+      }
+    }
+
+    if (scores.size === 0) {
+      return `Nenhum arquivo encontrado para "${query}". Tente termos mais gerais.`;
+    }
+
+    const entryMap = new Map<string, SearchIndexEntry>(entries.map((e) => [e.file, e]));
+    const top10 = [...scores.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+    const lines: string[] = [
+      `## Resultados para: "${query}"`,
+      `*${top10.length} de ${scores.size} arquivos relevantes*`,
+      ''
+    ];
+    for (const [file, score] of top10) {
+      const entry = entryMap.get(file);
+      lines.push(`### \`${file}\` (score: ${score})`);
+      if (entry?.snippet) lines.push(`> ${entry.snippet}`);
+      lines.push('');
+    }
+    lines.push(`*Tokens da query: ${queryTokens.join(', ')}*`);
+    return lines.join('\n');
+  }
+
+  // ── get_concept_map ─────────────────────────────────────────────────────────
+
+  private getConceptMapTool(concept: string): string {
+    if (!concept) return 'Informe um conceito para mapear.';
+    const lower = concept.toLowerCase();
+    const lines: string[] = [`## Mapa do Conceito: "${concept}"`, ''];
+
+    // Modules + endpoints from analysis.json
+    const analysisPath = path.join(this.ticCodePath, 'analysis.json');
+    if (fs.existsSync(analysisPath)) {
+      type AnalysisModule = { name: string; fileCount: number };
+      type AnalysisEndpoint = { method: string; path: string; file: string; line: number; controller?: string };
+      const analysis = JSON.parse(fs.readFileSync(analysisPath, 'utf8')) as {
+        modules?: AnalysisModule[];
+        endpoints?: AnalysisEndpoint[];
+      };
+      const matchedModules = (analysis.modules ?? []).filter((m) => m.name.toLowerCase().includes(lower));
+      if (matchedModules.length > 0) {
+        lines.push(`### Módulos (${matchedModules.length})`);
+        matchedModules.slice(0, 8).forEach((m) => lines.push(`- \`${m.name}\` — ${m.fileCount} arquivos`));
+        lines.push('');
+      }
+      const matchedEndpoints = (analysis.endpoints ?? []).filter(
+        (e) => e.path.toLowerCase().includes(lower) || (e.controller?.toLowerCase().includes(lower) ?? false)
+      );
+      if (matchedEndpoints.length > 0) {
+        lines.push(`### Endpoints REST (${matchedEndpoints.length})`);
+        lines.push('| Método | Rota | Arquivo |');
+        lines.push('|--------|------|---------|');
+        matchedEndpoints.slice(0, 8).forEach((e) =>
+          lines.push(`| ${e.method} | \`${e.path}\` | \`${e.file}:${e.line}\` |`)
+        );
+        lines.push('');
+      }
+    }
+
+    // PL/SQL objects
+    const plsqlPath = path.join(this.ticCodePath, 'plsql-objects.json');
+    let cachedPlsql: PlsqlObj[] | null = null;
+    if (fs.existsSync(plsqlPath)) {
+      cachedPlsql = JSON.parse(fs.readFileSync(plsqlPath, 'utf8')) as PlsqlObj[];
+      const matched = cachedPlsql.filter((o) =>
+        o.name.toLowerCase().includes(lower) ||
+        (o.packageName?.toLowerCase().includes(lower) ?? false) ||
+        o.tablesRead.some((t) => t.toLowerCase().includes(lower)) ||
+        o.tablesWritten.some((t) => t.toLowerCase().includes(lower))
+      );
+      if (matched.length > 0) {
+        lines.push(`### Procedures PL/SQL (${matched.length})`);
+        lines.push('| Nome | Lê | Escreve |');
+        lines.push('|------|----|---------|');
+        matched.slice(0, 8).forEach((o) => {
+          const name = o.packageName ? `${o.packageName}.${o.name}` : o.name;
+          lines.push(`| \`${name}\` | ${o.tablesRead.slice(0, 3).join(', ') || '—'} | ${o.tablesWritten.slice(0, 3).join(', ') || '—'} |`);
+        });
+        lines.push('');
+      }
+    }
+
+    // DB schema tables
+    const dbSchemaPath = path.join(this.ticCodePath, 'db-schema.json');
+    if (fs.existsSync(dbSchemaPath)) {
+      type DbTable = { name: string; columns: unknown[] };
+      const schema = JSON.parse(fs.readFileSync(dbSchemaPath, 'utf8')) as { tables?: DbTable[] };
+      const matchedTables = (schema.tables ?? []).filter((t) => t.name.toLowerCase().includes(lower));
+      if (matchedTables.length > 0) {
+        lines.push(`### Tabelas (${matchedTables.length})`);
+        const plsqlObjs = cachedPlsql ?? [];
+        matchedTables.slice(0, 8).forEach((t) => {
+          const accessors = plsqlObjs.filter(
+            (o) => o.tablesRead.includes(t.name) || o.tablesWritten.includes(t.name)
+          ).length;
+          lines.push(`- \`${t.name}\`${accessors > 0 ? ` — acessada por ${accessors} procedure(s)` : ''}`);
+        });
+        lines.push('');
+      }
+    }
+
+    // @Transactional
+    const txPath = path.join(this.ticCodePath, 'transactions.json');
+    if (fs.existsSync(txPath)) {
+      const txs: TxBoundary[] = JSON.parse(fs.readFileSync(txPath, 'utf8'));
+      const matched = txs.filter(
+        (t) =>
+          t.className.toLowerCase().includes(lower) ||
+          (t.methodName?.toLowerCase().includes(lower) ?? false) ||
+          t.file.toLowerCase().includes(lower)
+      );
+      if (matched.length > 0) {
+        lines.push(`### @Transactional (${matched.length})`);
+        matched.slice(0, 5).forEach((t) => {
+          const method = t.methodName ? `.${t.methodName}` : '';
+          lines.push(`- \`${t.file}:${t.line}\` — ${t.className}${method} (${t.propagation}${t.readOnly ? ', readOnly' : ''})`);
+        });
+        lines.push('');
+      }
+    }
+
+    // Angular modules
+    const angularPath = path.join(this.ticCodePath, 'angular-modules.json');
+    if (fs.existsSync(angularPath)) {
+      type AngularMod = { name: string; file: string; lazyRoutes?: Array<{ path: string }> };
+      const angular = JSON.parse(fs.readFileSync(angularPath, 'utf8')) as { modules?: AngularMod[] };
+      const matched = (angular.modules ?? []).filter(
+        (m) => m.name.toLowerCase().includes(lower) || (m.lazyRoutes ?? []).some((r) => r.path.toLowerCase().includes(lower))
+      );
+      if (matched.length > 0) {
+        lines.push(`### Módulos Angular (${matched.length})`);
+        matched.slice(0, 5).forEach((m) => lines.push(`- \`${m.name}\` (\`${m.file}\`)`));
+        lines.push('');
+      }
+    }
+
+    // Search index cross-reference
+    const siEntries = this.loadSearchIndex();
+    if (siEntries.length > 0) {
+      const queryTokens = this.tokenizeQuery(concept);
+      const inv = this.loadInvertedIndex();
+      const scores = new Map<string, number>();
+      for (const token of queryTokens) {
+        for (const f of inv.get(token) ?? []) scores.set(f, (scores.get(f) ?? 0) + 1);
+      }
+      const topFiles = [...scores.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+      if (topFiles.length > 0) {
+        lines.push('### Arquivos Relacionados');
+        topFiles.forEach(([file, score]) => lines.push(`- \`${file}\` (score ${score})`));
+        lines.push('');
+      }
+    }
+
+    if (lines.length <= 2) {
+      return `Nenhum artefato encontrado para o conceito "${concept}". Tente termos mais genéricos ou verifique se a análise foi executada.`;
+    }
+
+    return lines.join('\n');
   }
 
   async startHttp(port = 7432): Promise<void> {
