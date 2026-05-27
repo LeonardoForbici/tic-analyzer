@@ -40,6 +40,7 @@ interface AnalysisResult {
   hotspots: number; violations: number; patterns: number;
   impactedFiles: number; inheritanceClasses: number;
   dbTables: number; cacheHits: number;
+  transactions: number; batchJobs: number; angularModules: number; deadComponents: number;
   error?: string;
 }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
@@ -1111,6 +1112,10 @@ export function App() {
                       ...(result.plsqlObjects > 0 ? [{ num: result.plsqlObjects.toString(), label: 'PL/SQL', color: '#f0c000' }] : []),
                       ...(result.frontendCalls > 0 ? [{ num: result.frontendCalls.toString(), label: 'HTTP calls', color: C.accent }] : []),
                       ...(result.dbCalls > 0 ? [{ num: result.dbCalls.toString(), label: 'Backend->BD', color: '#f0c000' }] : []),
+                      ...(result.transactions > 0 ? [{ num: result.transactions.toString(), label: '@Transactional', color: '#7c83fd' }] : []),
+                      ...(result.batchJobs > 0 ? [{ num: result.batchJobs.toString(), label: 'Batch/Async', color: C.orange }] : []),
+                      ...(result.angularModules > 0 ? [{ num: result.angularModules.toString(), label: 'Ng Modulos', color: '#dd0031' }] : []),
+                      ...(result.deadComponents > 0 ? [{ num: result.deadComponents.toString(), label: 'Dead Comps', color: C.muted }] : []),
                     ].map((s) => (
                       <div key={s.label} style={S.stat(s.color)}>
                         <div style={S.statNum(s.color)}>{s.num}</div>
@@ -1121,7 +1126,7 @@ export function App() {
                 </div>
 
                 <div style={S.card}>
-                  <div style={{ marginBottom: '12px', fontWeight: 600, fontSize: '13px', color: C.muted }}>MCP SERVER — 19 FERRAMENTAS</div>
+                  <div style={{ marginBottom: '12px', fontWeight: 600, fontSize: '13px', color: C.muted }}>MCP SERVER — 27 FERRAMENTAS</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={S.dot(mcpRunning)} />
                     <span style={{ fontSize: '13px', color: mcpRunning ? C.green : C.muted, flex: 1 }}>
@@ -1136,7 +1141,7 @@ export function App() {
                         {`{"mcpServers":{"tic-analyzer":{"url":"http://localhost:${mcpPort}/mcp"}}}`}
                       </div>
                       <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_diff_impact','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules'].map((tool) => (
+                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_diff_impact','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','find_path'].map((tool) => (
                           <span key={tool} style={{ padding: '2px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '4px', fontSize: '11px', color: C.accent, fontFamily: 'monospace' }}>{tool}</span>
                         ))}
                       </div>
@@ -1207,6 +1212,12 @@ export function App() {
                     { path: 'gaps.md + permissions.md + index.md', note: '', color: C.muted, indent: 1 },
                     { path: `modules/ x${result.modulesGenerated}`, note: 'context + business-rules + metrics + patterns', color: C.muted, indent: 1 },
                     ...(result.dbTables > 0 ? [{ path: `db-schema.md + db-schema-summary.md`, note: `${result.dbTables} tabelas detectadas`, color: '#f0c000', indent: 1 }] : []),
+                    ...(result.transactions > 0 ? [{ path: 'transactions.md', note: '@Transactional boundaries Spring', color: C.accent, indent: 1 }] : []),
+                    ...(result.batchJobs > 0 ? [{ path: 'batch-jobs.md', note: '@Scheduled, @Async, Quartz, Spring Batch', color: C.orange, indent: 1 }] : []),
+                    ...(result.angularModules > 0 ? [{ path: 'angular-modules.md', note: 'NgModule + lazy routes + NgRx', color: '#dd0031', indent: 1 }] : []),
+                    ...(result.plsqlObjects > 0 ? [{ path: 'plsql-objects.json', note: 'procedures/functions com tabelas lidas/escritas', color: '#f0c000', indent: 1 }] : []),
+                    ...(result.plsqlObjects > 0 ? [{ path: 'dead-plsql.json', note: 'procedures/functions sem referenciadores', color: C.muted, indent: 1 }] : []),
+                    ...(result.deadComponents > 0 ? [{ path: 'dead-components.json', note: 'React/Angular components com inDegree=0', color: C.muted, indent: 1 }] : []),
                     { path: 'analysis.json', note: 'export estruturado completo', color: '#7c83fd', indent: 1 },
                     { path: 'file-cache.json', note: `cache incremental${result.cacheHits > 0 ? ` (${result.cacheHits} módulos reutilizados)` : ''}`, color: C.green, indent: 1 },
                     { path: 'CLAUDE.md + .github/copilot-instructions.md', note: '', color: '#7c83fd', indent: 0 },
