@@ -419,7 +419,8 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     exportAnalysis(ticCodeDir, {
       projectName, projectPath, files, totalLines, stack, modules, endpoints, graph, risks,
       metrics, fileMetrics: metrics.files, violations, patternMatches, inheritanceTree,
-      dbSchema, impactIndex, quickContextTokens
+      dbSchema, impactIndex, quickContextTokens,
+      transactionBoundaries, batchJobs, angularModules, ngrxItems, deadComponents
     });
     markDone('export-json');
     report('export-json', 100, 'analysis.json exportado');

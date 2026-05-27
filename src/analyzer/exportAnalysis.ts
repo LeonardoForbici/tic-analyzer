@@ -12,6 +12,9 @@ import type { PatternMatch } from './detectPatterns';
 import type { InheritanceTree } from './detectInheritance';
 import type { DbSchema } from './detectDbSchema';
 import type { ImpactIndex } from './buildImpactIndex';
+import type { TransactionBoundary } from './detectTransactions';
+import type { BatchJob } from './detectBatchJobs';
+import type { AngularModule, NgRxItem } from './detectAngularModules';
 
 export interface ExportData {
   projectName: string;
@@ -31,6 +34,11 @@ export interface ExportData {
   dbSchema: DbSchema;
   impactIndex: ImpactIndex;
   quickContextTokens: number;
+  transactionBoundaries: TransactionBoundary[];
+  batchJobs: BatchJob[];
+  angularModules: AngularModule[];
+  ngrxItems: NgRxItem[];
+  deadComponents: Array<{ file: string; type: 'react' | 'angular' }>;
 }
 
 export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
@@ -128,6 +136,23 @@ export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
           directCount: entry.directCount,
           transitiveCount: entry.transitiveCount
         }))
+    },
+    spring: {
+      transactionCount: data.transactionBoundaries.length,
+      requiresNewCount: data.transactionBoundaries.filter((t) => t.propagation === 'REQUIRES_NEW').length,
+      batchJobCount: data.batchJobs.length,
+      scheduledCount: data.batchJobs.filter((b) => b.type === 'scheduled').length,
+      asyncCount: data.batchJobs.filter((b) => b.type === 'async').length
+    },
+    angular: {
+      moduleCount: data.angularModules.length,
+      lazyRouteCount: data.angularModules.reduce((sum, m) => sum + m.lazyRoutes.length, 0),
+      ngrxActionCount: data.ngrxItems.filter((n) => n.type === 'action').length,
+      ngrxReducerCount: data.ngrxItems.filter((n) => n.type === 'reducer').length,
+      ngrxEffectCount: data.ngrxItems.filter((n) => n.type === 'effect').length
+    },
+    deadCode: {
+      componentCount: data.deadComponents.length
     }
   };
 
