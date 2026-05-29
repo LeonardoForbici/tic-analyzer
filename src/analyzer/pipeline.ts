@@ -115,6 +115,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       success: false, outputPath: '', totalFiles: 0, totalLines: 0, modulesGenerated: 0,
       quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0,
       hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0,
+      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0,
       error: `Pasta inválida: "${projectPath}"\n\nSelecione a pasta RAIZ do projeto, não a pasta .tic-code.\nExemplo correto: C:\\Git\\meu-projeto`
     };
   }
