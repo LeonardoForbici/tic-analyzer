@@ -12,7 +12,7 @@
  * separa esta camada da heurística regex anterior: em engenharia reversa o
  * consumidor precisa saber em que confiar.
  */
-import type { FileSymbols } from './extractSymbols';
+import type { FileSymbols, CallRef } from './extractSymbols';
 import { SymbolTable } from './symbolTable';
 
 export type EdgeKind = 'import' | 'call' | 'extends' | 'implements';
@@ -35,10 +35,20 @@ export interface ClassInfoLite {
   isInterface: boolean;
 }
 
+export interface MethodEdge {
+  fromFile: string;
+  fromType?: string;
+  fromMethod?: string;
+  toFile: string;
+  toMethod: string;
+  confidence: Confidence;
+}
+
 export interface SemanticResult {
   edges: SemanticEdge[];
   externalDeps: string[];
   classes: ClassInfoLite[];
+  methodEdges: MethodEdge[];
 }
 
 /** Resolve um módulo TS para um arquivo do projeto (com extensões/index). */
@@ -53,6 +63,7 @@ export function resolveReferences(
   const edges = new EdgeSet();
   const externalDeps = new Set<string>();
   const classes: ClassInfoLite[] = [];
+  const methodEdges: MethodEdge[] = [];
 
   for (const sym of allSymbols) {
     if (sym.failed) continue;
@@ -69,16 +80,16 @@ export function resolveReferences(
       });
     }
 
-    if (sym.lang === 'java') resolveJavaFile(sym, table, edges, externalDeps);
+    if (sym.lang === 'java') resolveJavaFile(sym, table, edges, externalDeps, methodEdges);
     else resolveTsFile(sym, resolveTsModule, table, edges, externalDeps, fileSet, allSymbols);
   }
 
-  return { edges: edges.toArray(), externalDeps: [...externalDeps].sort().slice(0, 100), classes };
+  return { edges: edges.toArray(), externalDeps: [...externalDeps].sort().slice(0, 100), classes, methodEdges };
 }
 
 // ── Java ──────────────────────────────────────────────────────────────────────
 
-function resolveJavaFile(sym: FileSymbols, table: SymbolTable, edges: EdgeSet, externalDeps: Set<string>): void {
+function resolveJavaFile(sym: FileSymbols, table: SymbolTable, edges: EdgeSet, externalDeps: Set<string>, methodEdges: MethodEdge[]): void {
   // imports
   for (const imp of sym.imports) {
     if (imp.isWildcard) continue;
@@ -105,7 +116,7 @@ function resolveJavaFile(sym: FileSymbols, table: SymbolTable, edges: EdgeSet, e
     if (!call.receiver || !call.enclosingType) continue;
     const fieldType = fieldsByType.get(call.enclosingType)?.get(call.receiver);
     if (!fieldType) continue; // local/param — fora do escopo da Fase 1
-    resolveCallEdges(sym, fieldType, table, edges);
+    resolveCallEdges(sym, fieldType, table, edges, call, methodEdges);
   }
 }
 
@@ -118,9 +129,22 @@ function addTypeRefEdges(sym: FileSymbols, simpleName: string, kind: EdgeKind, t
   }
 }
 
-function resolveCallEdges(sym: FileSymbols, fieldType: string, table: SymbolTable, edges: EdgeSet): void {
+function resolveCallEdges(sym: FileSymbols, fieldType: string, table: SymbolTable, edges: EdgeSet, call: CallRef, methodEdges: MethodEdge[]): void {
   const candidates = table.resolveTypeName(fieldType, sym);
   const homonymAmbiguous = candidates.length > 1;
+
+  const emit = (toFile: string, confidence: Confidence) => {
+    if (toFile === sym.file) return;
+    edges.add(sym.file, toFile, 'call', confidence);
+    methodEdges.push({
+      fromFile: sym.file,
+      fromType: call.enclosingType,
+      fromMethod: call.enclosingMethod,
+      toFile,
+      toMethod: call.method,
+      confidence
+    });
+  };
 
   for (const fqn of candidates) {
     const entry = table.byFqn.get(fqn);
@@ -131,18 +155,18 @@ function resolveCallEdges(sym: FileSymbols, fieldType: string, table: SymbolTabl
       const impls = table.implementorsByInterface.get(fqn) ?? [];
       if (impls.length === 1 && !homonymAmbiguous) {
         const implFile = table.byFqn.get(impls[0])?.file;
-        if (implFile && implFile !== sym.file) edges.add(sym.file, implFile, 'call', 'resolved');
+        if (implFile) emit(implFile, 'resolved');
       } else if (impls.length > 1) {
         for (const impl of impls) {
           const implFile = table.byFqn.get(impl)?.file;
-          if (implFile && implFile !== sym.file) edges.add(sym.file, implFile, 'call', 'inferred');
+          if (implFile) emit(implFile, 'inferred');
         }
-      } else if (entry.file !== sym.file) {
+      } else {
         // sem implementador conhecido: aponta para o contrato (interface)
-        edges.add(sym.file, entry.file, 'call', homonymAmbiguous ? 'inferred' : 'resolved');
+        emit(entry.file, homonymAmbiguous ? 'inferred' : 'resolved');
       }
-    } else if (entry.file !== sym.file) {
-      edges.add(sym.file, entry.file, 'call', homonymAmbiguous ? 'inferred' : 'resolved');
+    } else {
+      emit(entry.file, homonymAmbiguous ? 'inferred' : 'resolved');
     }
   }
 }

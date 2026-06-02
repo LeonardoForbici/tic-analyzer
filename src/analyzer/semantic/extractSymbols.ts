@@ -50,6 +50,8 @@ export interface CallRef {
   line: number;
   /** Nome simples do tipo que declara o método onde a chamada ocorre. */
   enclosingType?: string;
+  /** Nome do método onde a chamada ocorre (para arestas método→método). */
+  enclosingMethod?: string;
 }
 
 export interface FileSymbols {
@@ -183,16 +185,21 @@ function readJavaType(node: SyntaxNode): TypeDeclSym {
 }
 
 function walkJavaBody(body: SyntaxNode, result: FileSymbols, enclosingType: string): void {
-  for (const call of body.descendantsOfType('method_invocation')) {
-    const obj = call.childForFieldName('object');
-    const name = call.childForFieldName('name');
-    if (!name) continue;
-    result.calls.push({
-      receiver: obj && obj.type === 'identifier' ? obj.text : undefined,
-      method: name.text,
-      line: name.startPosition.row + 1,
-      enclosingType
-    });
+  for (const member of body.namedChildren) {
+    const isMethod = member.type === 'method_declaration' || member.type === 'constructor_declaration';
+    const enclosingMethod = isMethod ? member.childForFieldName('name')?.text : undefined;
+    for (const call of member.descendantsOfType('method_invocation')) {
+      const obj = call.childForFieldName('object');
+      const name = call.childForFieldName('name');
+      if (!name) continue;
+      result.calls.push({
+        receiver: obj && obj.type === 'identifier' ? obj.text : undefined,
+        method: name.text,
+        line: name.startPosition.row + 1,
+        enclosingType,
+        enclosingMethod
+      });
+    }
   }
 }
 

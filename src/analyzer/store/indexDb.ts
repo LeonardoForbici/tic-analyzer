@@ -13,6 +13,7 @@ import type { ScannedFile } from '../scanFiles';
 import type { DependencyGraph } from '../buildDependencyGraph';
 import type { CallGraph } from '../buildCallGraph';
 import type { SearchIndexEntry } from '../buildSearchIndex';
+import type { MethodEdge } from '../semantic/resolveReferences';
 
 export const INDEX_DB_FILE = 'index.db';
 
@@ -41,6 +42,17 @@ CREATE TABLE symbols (
 );
 CREATE INDEX idx_symbols_name ON symbols(simple_name);
 
+CREATE TABLE method_edges (
+  from_file TEXT NOT NULL,
+  from_type TEXT,
+  from_method TEXT,
+  to_file TEXT NOT NULL,
+  to_method TEXT,
+  confidence TEXT
+);
+CREATE INDEX idx_method_edges_to ON method_edges(to_file);
+CREATE INDEX idx_method_edges_pair ON method_edges(from_file, to_file);
+
 CREATE TABLE cg_nodes (
   id TEXT PRIMARY KEY,
   label TEXT,
@@ -64,6 +76,7 @@ export interface IndexDbInput {
   graph: DependencyGraph;
   callGraph: CallGraph;
   searchEntries: SearchIndexEntry[];
+  methodEdges?: MethodEdge[];
 }
 
 /** (Re)constrói o index.db a partir dos resultados já computados na pipeline. */
@@ -88,6 +101,7 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
     );
     const insertEdge = db.prepare('INSERT INTO edges (from_file, to_file, kind, confidence) VALUES (?, ?, ?, ?)');
     const insertSymbol = db.prepare('INSERT INTO symbols (file, kind, simple_name, line) VALUES (?, ?, ?, ?)');
+    const insertMethodEdge = db.prepare('INSERT INTO method_edges (from_file, from_type, from_method, to_file, to_method, confidence) VALUES (?, ?, ?, ?, ?, ?)');
     const insertCgNode = db.prepare('INSERT OR REPLACE INTO cg_nodes (id, label, layer, file, line) VALUES (?, ?, ?, ?, ?)');
     const insertCgEdge = db.prepare('INSERT INTO cg_edges (from_id, to_id, type, confidence, label) VALUES (?, ?, ?, ?, ?)');
     const insertSearch = db.prepare('INSERT INTO search_fts (file, snippet, terms) VALUES (?, ?, ?)');
@@ -102,6 +116,9 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
       }
       for (const c of input.graph.semanticClasses ?? []) {
         insertSymbol.run(c.file, c.isInterface ? 'interface' : 'class', c.name, c.line);
+      }
+      for (const m of input.methodEdges ?? []) {
+        insertMethodEdge.run(m.fromFile, m.fromType ?? null, m.fromMethod ?? null, m.toFile, m.toMethod ?? null, m.confidence);
       }
       for (const n of input.callGraph.nodes) {
         insertCgNode.run(n.id, n.label, n.layer, n.file, n.line ?? null);

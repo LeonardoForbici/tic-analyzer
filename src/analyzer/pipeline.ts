@@ -431,7 +431,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
 
     // ── 24c. ÍNDICE PERSISTENTE (SQLite) ──────────────────────────────────────────
     report('persist-index', 95, 'Gravando índice consultável (SQLite)...');
-    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries });
+    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges });
     markDone('persist-index');
     report('persist-index', 100, `index.db: ${dbStats.nodes.toLocaleString()} nós, ${dbStats.edges.toLocaleString()} arestas (sem teto)`);
 

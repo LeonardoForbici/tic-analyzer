@@ -68,11 +68,15 @@ devolve:
 
 ```
 🖥️ TelaCliente
-  ↓ ☕ ClienteController
-  ↓ 📄 ClienteServiceImpl
+  ↓ ☕ ClienteController.salvar
+  ↓ 📄 ClienteServiceImpl.salvar
   ↓ 📄 ClienteRepository
   ↓ 🗄️ PKG_CLIENTE
 ```
+
+As chamadas Java são **resolvidas no nível de método** (`Classe.metodo`), via
+arestas método→método persistidas em `method_edges` (ex. real do Spring
+PetClinic: `OwnerController.findPaginated… → OwnerRepository#findByLastName…`).
 
 O miolo `Service → Repository`, que o multigrafo antigo pulava, agora aparece —
 porque a query atravessa as arestas `call` resolvidas (Fase 1) e os saltos

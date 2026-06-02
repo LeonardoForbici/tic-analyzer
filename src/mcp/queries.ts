@@ -231,6 +231,20 @@ export function queryCrossTierTrace(db: Database.Database, entry: string, maxNod
     }
   }
 
+  // Granularidade de método: anota cada chamador código→código com o método que
+  // faz a chamada (Classe.metodo), via method_edges resolvidas.
+  const methodForPair = db.prepare(
+    'SELECT from_method FROM method_edges WHERE from_file = ? AND to_file = ? AND from_method IS NOT NULL LIMIT 1'
+  );
+  for (let i = 0; i < samplePath.length - 1; i++) {
+    const a = samplePath[i];
+    const b = samplePath[i + 1];
+    if (a.key.startsWith('file:') && b.key.startsWith('file:')) {
+      const r = methodForPair.get(a.key.slice(5), b.key.slice(5)) as any;
+      if (r?.from_method) a.label = `${a.label}.${r.from_method}`;
+    }
+  }
+
   return { entry: start, upstream, samplePath };
 }
 

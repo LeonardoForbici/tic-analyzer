@@ -23,7 +23,7 @@ export interface SemanticGraph extends SemanticResult {
 
 export async function buildSemanticGraph(files: ScannedFile[], projectPath: string): Promise<SemanticGraph> {
   if (!grammarsAvailable()) {
-    return { edges: [], externalDeps: [], classes: [], parsedFiles: new Set(), available: false };
+    return { edges: [], externalDeps: [], classes: [], methodEdges: [], parsedFiles: new Set(), available: false };
   }
 
   const fileSet = new Set(files.map((f) => f.relativePath));

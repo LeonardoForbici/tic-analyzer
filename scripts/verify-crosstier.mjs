@@ -61,6 +61,10 @@ function cleanup(fixture) {
   check('cadeia termina no PL/SQL PKG_CLIENTE', pathLabels.some((l) => l.includes('PKG_CLIENTE')), pathLabels.join(' → '));
   check('cadeia ininterrupta na ordem correta', hasInOrder(['TelaCliente', 'ClienteController', 'ClienteServiceImpl', 'ClienteRepository', 'PKG_CLIENTE']), pathLabels.join(' → '));
 
+  // Granularidade de método: o rótulo deve trazer Classe.metodo nas chamadas Java
+  check('granularidade de método (ClienteController.salvar)', pathLabels.some((l) => l.includes('ClienteController.salvar')), pathLabels.join(' → '));
+  check('granularidade de método (ClienteServiceImpl.salvar)', pathLabels.some((l) => l.includes('ClienteServiceImpl.salvar')), pathLabels.join(' → '));
+
   const layers = new Set(trace.upstream.map((n) => n.layer));
   check('impacto cruza ao menos frontend + backend', layers.has('frontend') && (layers.has('backend') || layers.has('code')), [...layers].join(','));
 

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { ScannedFile } from './scanFiles';
 import { buildSemanticGraph } from './semantic/buildSemanticGraph';
-import type { EdgeKind, Confidence, ClassInfoLite } from './semantic/resolveReferences';
+import type { EdgeKind, Confidence, ClassInfoLite, MethodEdge } from './semantic/resolveReferences';
 import { langForExtension } from './semantic/treeSitter';
 
 export interface GraphNode {
@@ -28,6 +28,8 @@ export interface DependencyGraph {
   externalDeps: string[];
   /** Classes/interfaces extraídas via AST (TS/Java) — reusado por detectInheritance. */
   semanticClasses?: ClassInfoLite[];
+  /** Arestas método→método resolvidas (Java) — granularidade de método no trace. */
+  methodEdges?: MethodEdge[];
 }
 
 /**
@@ -113,7 +115,8 @@ export async function buildDependencyGraph(files: ScannedFile[], rootPath: strin
     edges: [...edgeMap.values()].slice(0, 50_000),
     centralFiles,
     externalDeps: [...externalDepsSet].sort().slice(0, 100),
-    semanticClasses: semantic.classes
+    semanticClasses: semantic.classes,
+    methodEdges: semantic.methodEdges
   };
 }
 
