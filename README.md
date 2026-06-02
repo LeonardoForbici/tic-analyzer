@@ -83,12 +83,15 @@ porque a query atravessa as arestas `call` resolvidas (Fase 1) e os saltos
 HTTP/DB cross-tier num único espaço de nós. Verificação:
 `test/fixtures/crosstier`.
 
-A cadeia também alcança **tabelas** (não só procedures): a camada ORM
+A cadeia também alcança **tabelas e colunas** (não só procedures): a camada ORM
 (`detectOrmMappings`) liga `@Entity`/`@Table`, repositórios Spring Data
-(`JpaRepository<Entity, Id>`) e SQL de `@Query`/`createNativeQuery` às tabelas,
-com um extrator SQL **multi-dialeto** (Oracle `schema.tab`, SQL Server
-`[dbo].[x]`, Postgres `"x"."y"`). Assim `trace_flow("PEDIDO")` sobe da tabela
-até a tela. Validado em código real (Spring PetClinic) e em `test/fixtures/orm`.
+(`JpaRepository<Entity, Id>`) e SQL de `@Query`/`createNativeQuery` às tabelas.
+O SQL é parseado por um **AST real multi-dialeto** (`node-sql-parser`:
+Postgres/SQL Server/MySQL/Oracle-DML; fallback regex para JPQL/PL-SQL), o que dá
+**lineage coluna-a-coluna**: `get_table_columns("PEDIDO")` lista quais colunas
+são lidas/escritas e por quais arquivos. Assim `trace_flow("PEDIDO")` sobe da
+tabela até a tela. Validado em código real (Spring PetClinic) e em
+`test/fixtures/orm`.
 
 ---
 
@@ -160,6 +163,7 @@ até a tela. Validado em código real (Spring PetClinic) e em `test/fixtures/orm
 | `get_angular_modules` | ~400 | Módulos Angular, lazy routes e NgRx store |
 | `get_dead_components` | ~200 | Componentes React/Angular sem uso |
 | `find_path` | ~200 | Menor caminho entre dois arquivos no grafo |
+| `get_table_columns` | ~200 | Lineage coluna-a-coluna: colunas lidas/escritas de uma tabela e onde |
 
 ---
 

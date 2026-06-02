@@ -10,7 +10,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { ImpactIndex } from '../analyzer/buildImpactIndex';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
-import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace } from './queries';
+import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns } from './queries';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
 interface CallGraphEdge { from: string; to: string; type: string; confidence: string; label?: string; }
@@ -239,6 +239,17 @@ export class TicAnalyzerMcpServer {
             type: 'object',
             properties: {
               table: { type: 'string', description: 'Nome da tabela Oracle (ex: "TB_CLIENTE" ou "PEDIDOS")' }
+            },
+            required: ['table']
+          }
+        },
+        {
+          name: 'get_table_columns',
+          description: 'Lineage coluna-a-coluna: quais COLUNAS de uma tabela são lidas/escritas e por quais arquivos (extraído de SQL real via parser AST multi-dialeto). Útil para impacto de alteração de coluna. ~200 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              table: { type: 'string', description: 'Nome da tabela (ex: "CLIENTE", "PEDIDO")' }
             },
             required: ['table']
           }
@@ -893,6 +904,31 @@ export class TicAnalyzerMcpServer {
           const entry = ((args as { entry: string }).entry ?? '').trim();
           const unified = this.crossTierTraceTool(entry);
           return respond({ content: [{ type: 'text', text: unified ?? this.traceFlowTool(entry) }] });
+        }
+
+        case 'get_table_columns': {
+          const table = ((args as { table: string }).table ?? '').trim();
+          if (!table) return respond({ content: [{ type: 'text', text: 'Informe o nome da tabela.' }] });
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond({ content: [{ type: 'text', text: 'index.db não encontrado. Execute a análise novamente.' }] });
+          try {
+            const lin = queryTableColumns(db, table);
+            if (!lin) return respond({ content: [{ type: 'text', text: `Nenhum acesso de coluna detectado para a tabela "${table}".` }] });
+            const fmt = (arr: Array<{ column: string; from: string }>) =>
+              arr.length ? arr.map((c) => `- \`${c.column}\` (em \`${c.from}\`)`).join('\n') : '_(nenhuma)_';
+            const text = [
+              `# Lineage de colunas: \`${lin.table}\``,
+              '',
+              `## ✍️ Escritas (${lin.writes.length})`,
+              fmt(lin.writes),
+              '',
+              `## 👁️ Leituras (${lin.reads.length})`,
+              fmt(lin.reads)
+            ].join('\n');
+            return respond({ content: [{ type: 'text', text }] });
+          } finally {
+            db.close();
+          }
         }
 
         case 'search_code': {

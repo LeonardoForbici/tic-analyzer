@@ -11,7 +11,12 @@
  * para resolver quais tabelas cada ponto do código toca, em qualquer dialeto.
  */
 import * as fs from 'fs';
+import { Parser } from 'node-sql-parser';
 import type { ScannedFile } from './scanFiles';
+
+const sqlParser = new Parser();
+// Ordem de tentativa de dialeto (cobre SQL Server/Postgres/MySQL/Oracle-DML).
+const SQL_DIALECTS = ['transactsql', 'postgresql', 'mysql', 'mariadb'];
 
 export interface EntityMapping {
   entityClass: string;
@@ -34,10 +39,19 @@ export interface TableAccess {
   line: number;
 }
 
+export interface ColumnAccess {
+  fromFile: string;
+  table: string;
+  column: string;
+  mode: AccessMode;
+  confidence: '🟢' | '🟡';
+}
+
 export interface OrmAnalysis {
   entities: EntityMapping[];
   repos: RepoEntity[];
   tableAccess: TableAccess[];
+  columnAccess: ColumnAccess[];
 }
 
 const JVM_EXTS = new Set(['.java', '.kt']);
@@ -56,6 +70,7 @@ export function detectOrmMappings(files: ScannedFile[]): OrmAnalysis {
   const entities: EntityMapping[] = [];
   const repos: RepoEntity[] = [];
   const rawAccess: TableAccess[] = [];
+  const columnAccess: ColumnAccess[] = [];
 
   for (const file of files) {
     if (!JVM_EXTS.has(file.extension)) continue;
@@ -82,10 +97,15 @@ export function detectOrmMappings(files: ScannedFile[]): OrmAnalysis {
 
     // SQL em @Query("..."), createNativeQuery("..."), createQuery("...")
     for (let i = 0; i < lines.length; i++) {
-      const sqlMatches = lines[i].matchAll(/(?:@Query\s*\(|createNativeQuery\s*\(|createQuery\s*\()\s*["']([^"']{6,})["']/g);
+      // Aceita @Query("..."), @Query(value = "...", nativeQuery = true), createNativeQuery("...")
+      const sqlMatches = lines[i].matchAll(/(?:@Query|createNativeQuery|createQuery)\s*\([^)"']*["']([^"']{6,})["']/g);
       for (const m of sqlMatches) {
-        for (const ref of extractSqlTables(m[1])) {
+        const access = parseSqlAccess(m[1]);
+        for (const ref of access.tables) {
           rawAccess.push({ fromFile: file.relativePath, table: ref.table, mode: ref.mode, confidence: '🟢', line: i + 1 });
+        }
+        for (const col of access.columns) {
+          if (col.table) columnAccess.push({ fromFile: file.relativePath, table: col.table, column: col.column, mode: col.mode, confidence: '🟢' });
         }
       }
     }
@@ -99,9 +119,62 @@ export function detectOrmMappings(files: ScannedFile[]): OrmAnalysis {
   }
 
   // JPQL referencia ENTIDADES, não tabelas: mapeia para a tabela quando casar.
-  const tableAccess = dedupe(rawAccess.map((a) => ({ ...a, table: tableByEntity.get(a.table.toUpperCase()) ?? a.table })));
+  const mapTable = (t: string) => tableByEntity.get(t.toUpperCase()) ?? t.toUpperCase();
+  const tableAccess = dedupe(rawAccess.map((a) => ({ ...a, table: mapTable(a.table) })));
+  const cols = dedupeCols(columnAccess.map((c) => ({ ...c, table: mapTable(c.table) })));
 
-  return { entities, repos, tableAccess };
+  return { entities, repos, tableAccess, columnAccess: cols };
+}
+
+/**
+ * Extrai tabelas + colunas de um statement SQL via parser AST real
+ * (node-sql-parser), tentando os dialetos. Cai para regex em JPQL/PL-SQL/binds
+ * Oracle que o parser não engole — preservando recall sem perder precisão.
+ */
+export function parseSqlAccess(sql: string): { tables: Array<{ table: string; mode: AccessMode }>; columns: Array<{ table?: string; column: string; mode: AccessMode }> } {
+  const cleaned = sql.replace(/:\w+/g, '0').replace(/\?\d+/g, '0'); // binds Oracle/JDBC
+  for (const database of SQL_DIALECTS) {
+    try {
+      const { tableList, columnList } = sqlParser.parse(cleaned, { database });
+      const tables = tableList.map(parseTableEntry).filter((t): t is { table: string; mode: AccessMode } => !!t);
+      const single = tables.length === 1 ? tables[0].table : undefined;
+      const columns = columnList
+        .map((c) => parseColumnEntry(c, single))
+        .filter((c): c is { table?: string; column: string; mode: AccessMode } => !!c);
+      return { tables: dedupeTables(tables), columns };
+    } catch {
+      // tenta o próximo dialeto
+    }
+  }
+  return { tables: extractSqlTables(sql), columns: [] };
+}
+
+// node-sql-parser: tableList = "mode::schema::table", columnList = "mode::table::column"
+function parseTableEntry(entry: string): { table: string; mode: AccessMode } | null {
+  const [mode, , table] = entry.split('::');
+  if (!table || table === 'null') return null;
+  return { table: table.toUpperCase(), mode: toMode(mode) };
+}
+
+function parseColumnEntry(entry: string, singleTable?: string): { table?: string; column: string; mode: AccessMode } | null {
+  const [mode, table, column] = entry.split('::');
+  if (!column || column === '(.*)' || column === '*') return null;
+  const tbl = table && table !== 'null' ? table.toUpperCase() : singleTable;
+  return { table: tbl, column: column.toUpperCase(), mode: toMode(mode) };
+}
+
+function toMode(m: string): AccessMode {
+  return m === 'select' ? 'read' : 'write';
+}
+
+function dedupeTables(tables: Array<{ table: string; mode: AccessMode }>): Array<{ table: string; mode: AccessMode }> {
+  const seen = new Set<string>();
+  return tables.filter((t) => { const k = `${t.table}|${t.mode}`; if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
+function dedupeCols(cols: ColumnAccess[]): ColumnAccess[] {
+  const seen = new Set<string>();
+  return cols.filter((c) => { const k = `${c.fromFile}|${c.table}|${c.column}|${c.mode}`; if (seen.has(k)) return false; seen.add(k); return true; });
 }
 
 /** Extrai referências de tabela de um statement SQL (multi-dialeto). */

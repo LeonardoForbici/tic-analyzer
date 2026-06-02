@@ -14,6 +14,7 @@ import type { DependencyGraph } from '../buildDependencyGraph';
 import type { CallGraph } from '../buildCallGraph';
 import type { SearchIndexEntry } from '../buildSearchIndex';
 import type { MethodEdge } from '../semantic/resolveReferences';
+import type { ColumnAccess } from '../detectOrmMappings';
 
 export const INDEX_DB_FILE = 'index.db';
 
@@ -68,6 +69,15 @@ CREATE TABLE cg_edges (
   label TEXT
 );
 
+CREATE TABLE column_access (
+  from_file TEXT,
+  "table" TEXT NOT NULL,
+  column TEXT NOT NULL,
+  mode TEXT,
+  confidence TEXT
+);
+CREATE INDEX idx_column_access_table ON column_access("table");
+
 CREATE VIRTUAL TABLE search_fts USING fts5(file UNINDEXED, snippet UNINDEXED, terms);
 `;
 
@@ -77,6 +87,7 @@ export interface IndexDbInput {
   callGraph: CallGraph;
   searchEntries: SearchIndexEntry[];
   methodEdges?: MethodEdge[];
+  columnAccess?: ColumnAccess[];
 }
 
 /** (Re)constrói o index.db a partir dos resultados já computados na pipeline. */
@@ -105,6 +116,7 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
     const insertCgNode = db.prepare('INSERT OR REPLACE INTO cg_nodes (id, label, layer, file, line) VALUES (?, ?, ?, ?, ?)');
     const insertCgEdge = db.prepare('INSERT INTO cg_edges (from_id, to_id, type, confidence, label) VALUES (?, ?, ?, ?, ?)');
     const insertSearch = db.prepare('INSERT INTO search_fts (file, snippet, terms) VALUES (?, ?, ?)');
+    const insertColumn = db.prepare('INSERT INTO column_access (from_file, "table", column, mode, confidence) VALUES (?, ?, ?, ?, ?)');
 
     const writeAll = db.transaction(() => {
       for (const n of input.graph.nodes) {
@@ -128,6 +140,9 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
       }
       for (const s of input.searchEntries) {
         insertSearch.run(s.file, s.snippet, s.terms.join(' '));
+      }
+      for (const c of input.columnAccess ?? []) {
+        insertColumn.run(c.fromFile, c.table, c.column, c.mode, c.confidence);
       }
     });
     writeAll();

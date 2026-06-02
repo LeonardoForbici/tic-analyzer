@@ -285,6 +285,28 @@ function resolveTraceNode(db: Database.Database, entry: string): TraceNode | nul
   return null;
 }
 
+export interface ColumnLineage {
+  table: string;
+  reads: Array<{ column: string; from: string }>;
+  writes: Array<{ column: string; from: string }>;
+}
+
+/** Lineage coluna-a-coluna: quais colunas de uma tabela são lidas/escritas e onde. */
+export function queryTableColumns(db: Database.Database, table: string): ColumnLineage | null {
+  const up = table.toUpperCase();
+  const rows = db
+    .prepare('SELECT DISTINCT column, mode, from_file FROM column_access WHERE UPPER("table") = ? ORDER BY column')
+    .all(up) as any[];
+  if (rows.length === 0) return null;
+  const reads: Array<{ column: string; from: string }> = [];
+  const writes: Array<{ column: string; from: string }> = [];
+  for (const r of rows) {
+    const item = { column: r.column as string, from: (r.from_file as string)?.split('/').pop() ?? r.from_file };
+    (r.mode === 'write' ? writes : reads).push(item);
+  }
+  return { table: up, reads, writes };
+}
+
 /** Resolve um arquivo: match exato em rel_path, senão sufixo/substring. */
 function resolveFile(db: Database.Database, query: string): string | null {
   const exact = db.prepare('SELECT rel_path FROM files WHERE rel_path = ?').get(query) as any;

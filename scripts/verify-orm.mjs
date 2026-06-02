@@ -15,9 +15,9 @@ const require = createRequire(import.meta.url);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const need = (p) => { if (!existsSync(p)) { console.error(`✗ dist ausente: ${p}. Rode \`npm run build:electron\`.`); process.exit(1); } return p; };
 
-const { extractSqlTables } = require(need(join(root, 'dist/src/analyzer/detectOrmMappings.js')));
+const { extractSqlTables, parseSqlAccess } = require(need(join(root, 'dist/src/analyzer/detectOrmMappings.js')));
 const { openIndexDb } = require(need(join(root, 'dist/src/analyzer/store/indexDb.js')));
-const { queryCrossTierTrace } = require(need(join(root, 'dist/src/mcp/queries.js')));
+const { queryCrossTierTrace, queryTableColumns } = require(need(join(root, 'dist/src/mcp/queries.js')));
 const { runPipeline } = require(need(join(root, 'dist/src/analyzer/pipeline.js')));
 
 const failures = [];
@@ -40,6 +40,19 @@ check('Postgres UPDATE "public"."pedido_item"', tablesOf('UPDATE "public"."pedid
 // DELETE genérico
 check('DELETE FROM Conta', tablesOf('DELETE FROM Conta WHERE id = 1').includes('write:CONTA'));
 
+console.log('\n(1b) parseSqlAccess — parser AST real + colunas\n');
+const cols = (sql) => parseSqlAccess(sql).columns.map((c) => `${c.mode}:${c.table}.${c.column}`);
+// SQL Server: colunas do INSERT atribuídas à tabela
+check('colunas do INSERT (SQLServer) com tabela', (() => {
+  const c = cols('INSERT INTO [dbo].[Cliente] (nome, cpf) VALUES (1, 2)');
+  return c.includes('write:CLIENTE.NOME') && c.includes('write:CLIENTE.CPF');
+})(), cols('INSERT INTO [dbo].[Cliente] (nome, cpf) VALUES (1, 2)').join(','));
+// Oracle binds (:1) saneados → UPDATE com colunas
+check('colunas do UPDATE com binds Oracle (:x)', (() => {
+  const c = cols('UPDATE conta SET saldo = :saldo, limite = :lim WHERE id = :id');
+  return c.includes('write:CONTA.SALDO') && c.includes('write:CONTA.LIMITE');
+})(), cols('UPDATE conta SET saldo = :saldo, limite = :lim WHERE id = :id').join(','));
+
 console.log('\n(2) Pipeline real — fixture ORM (cadeia até a tabela)\n');
 const fixture = join(root, 'test', 'fixtures', 'orm');
 const cleanup = () => { for (const p of ['.tic-code', '.github', 'CLAUDE.md']) rmSync(join(fixture, p), { recursive: true, force: true }); };
@@ -60,6 +73,13 @@ const cleanup = () => { for (const p of ['.tic-code', '.github', 'CLAUDE.md']) r
         .every((w, i, arr) => labels.findIndex((l) => l.includes(w)) >= (i === 0 ? 0 : labels.findIndex((l2) => l2.includes(arr[i - 1])))),
       labels.join(' → '));
     if (labels.length) console.log('\n  Cadeia: ' + labels.join('  →  '));
+
+    // lineage de coluna real (UPDATE pedido SET status, total ...)
+    const lin = queryTableColumns(db, 'PEDIDO');
+    const written = lin ? lin.writes.map((w) => w.column) : [];
+    check('lineage de coluna: PEDIDO recebe escrita em STATUS e TOTAL',
+      written.includes('STATUS') && written.includes('TOTAL'), written.join(','));
+
     db.close();
   }
   cleanup();
