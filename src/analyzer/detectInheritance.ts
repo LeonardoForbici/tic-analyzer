@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import type { ScannedFile } from './scanFiles';
+import { langForExtension } from './semantic/treeSitter';
 
 export interface ClassInfo {
   name: string;
@@ -20,12 +21,22 @@ export interface InheritanceTree {
 
 const CODE_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.java', '.kt', '.cs', '.py']);
 
-/** Extrai hierarquia de herança de classes Java/TypeScript/Python/C# */
-export function detectInheritance(files: ScannedFile[]): InheritanceTree {
+/**
+ * Extrai hierarquia de herança de classes Java/TypeScript/Python/C#.
+ *
+ * Quando `semanticClasses` (extraídas via AST em buildDependencyGraph) são
+ * fornecidas, usa-as para TS/Java (resolução confiável) e cai para regex apenas
+ * nas linguagens sem grammar (Python/C#/Kotlin).
+ */
+export function detectInheritance(files: ScannedFile[], semanticClasses?: ClassInfo[]): InheritanceTree {
   const classes: ClassInfo[] = [];
+  const useSemantic = !!semanticClasses && semanticClasses.length > 0;
+  if (useSemantic) classes.push(...semanticClasses!);
 
   for (const file of files) {
     if (!CODE_EXTS.has(file.extension)) continue;
+    // Já coberto pela camada semântica (AST)?
+    if (useSemantic && langForExtension(file.extension) !== null) continue;
 
     let content: string;
     try { content = fs.readFileSync(file.absolutePath, 'utf8'); }

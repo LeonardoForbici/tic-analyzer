@@ -37,13 +37,83 @@ código (74k+ arquivos) → engine local → resumo compacto → IA (mínimo de 
 
 ---
 
-## O que é analisado — 29 fases
+## Análise semântica (AST + resolução de símbolos)
+
+A partir da Fase 1 da evolução rumo a paridade com o CAST Imaging, o grafo de
+dependências deixou de ser regex e passa a usar **parsing AST real**
+(`tree-sitter`, 100% local/offline) com **resolução de símbolos** para
+TypeScript/JS/TSX e Java:
+
+- Imports TS resolvidos com **aliases de tsconfig** (`@/...`) e **barris**
+  (`export ... from`) seguidos até a origem.
+- Java: `extends`/`implements` resolvidos e **chamadas via interface→implementador**
+  (padrão DI) — sabe que `userService.findAll()` chama `UserServiceImpl`.
+- Cada aresta carrega `confidence`: **`resolved`** (alvo único confirmado) ou
+  **`inferred`** (ambíguo — ex.: interface com vários implementadores). Em
+  engenharia reversa, isso diz no que confiar.
+- Linguagens sem grammar (Python/Go/C#/Rust/PHP/Kotlin) continuam via regex como
+  fallback.
+
+Verificação: `npm run verify` roda o resolvedor sobre `test/fixtures/semantic`.
+
+---
+
+## Trace cross-tier — impacto end-to-end (React → Java → PL/SQL)
+
+A tool MCP `trace_flow` reconstrói a **cadeia de impacto ininterrupta** entre as
+camadas, unificando dois grafos que vivem no `index.db`: o **intra-código
+resolvido** (Fase 1) e o **cross-tier** (HTTP/DB/PL-SQL), usando os arquivos como
+ponte. Pergunta típica — *"o que quebra se eu mudar `PKG_CLIENTE.SALVAR`?"* —
+devolve:
+
+```
+🖥️ TelaCliente
+  ↓ ☕ ClienteController.salvar
+  ↓ 📄 ClienteServiceImpl.salvar
+  ↓ 📄 ClienteRepository
+  ↓ 🗄️ PKG_CLIENTE
+```
+
+As chamadas Java são **resolvidas no nível de método** (`Classe.metodo`), via
+arestas método→método persistidas em `method_edges` (ex. real do Spring
+PetClinic: `OwnerController.findPaginated… → OwnerRepository#findByLastName…`).
+
+O miolo `Service → Repository`, que o multigrafo antigo pulava, agora aparece —
+porque a query atravessa as arestas `call` resolvidas (Fase 1) e os saltos
+HTTP/DB cross-tier num único espaço de nós. Verificação:
+`test/fixtures/crosstier`.
+
+A cadeia também alcança **tabelas e colunas** (não só procedures): a camada ORM
+(`detectOrmMappings`) liga `@Entity`/`@Table`, repositórios Spring Data
+(`JpaRepository<Entity, Id>`) e SQL de `@Query`/`createNativeQuery` às tabelas.
+O SQL é parseado por um **AST real multi-dialeto** (`node-sql-parser`:
+Postgres/SQL Server/MySQL/Oracle-DML; fallback regex para JPQL/PL-SQL), o que dá
+**lineage coluna-a-coluna**: `get_table_columns("PEDIDO")` lista quais colunas
+são lidas/escritas e por quais arquivos. Assim `trace_flow("PEDIDO")` sobe da
+tabela até a tela. Validado em código real (Spring PetClinic) e em
+`test/fixtures/orm`.
+
+---
+
+## Busca semântica local (opt-in)
+
+`search_code` tem dois modos: **FTS5** (léxico, padrão) e **vetorial**
+(embeddings locais, ONNX via `@xenova/transformers`, sem chamada de API). O modo
+vetorial é **opt-in** porque baixa um modelo (~25MB) na 1ª execução — ative com
+`TIC_EMBEDDINGS=1` ao rodar a análise. Os vetores ficam no `index.db`; em runtime
+o MCP embeda a query e ranqueia por cosseno. Onde o host do modelo é bloqueado
+(ex.: sandboxes), a busca cai automaticamente para FTS5. A infraestrutura
+(armazenamento + ranking por cosseno) é verificada em `verify-embeddings`.
+
+---
+
+## O que é analisado — 30 fases
 
 | # | Fase | O que produz |
 |---|------|-------------|
 | 1 | Scan de arquivos | Índice de todos os arquivos com linhas e extensões |
 | 2 | Detecção de stack | Linguagens, frameworks, gerenciadores de pacotes |
-| 3 | Grafo de dependências | `dep-graph.json` — nós e arestas de imports |
+| 3 | Grafo de dependências (AST) | `dep-graph.json` — arestas `import`/`call`/`extends`/`implements` com `confidence` (`resolved`/`inferred`) |
 | 4 | Detecção de riscos (OWASP) | A02 Crypto, A03 Injection, A05 Misconfig, A09 Logging |
 | 5 | Endpoints REST | Rotas detectadas em Express, Spring, NestJS, etc. |
 | 6 | Chamadas HTTP frontend | fetch/axios/HttpClient com método e URL |
@@ -68,8 +138,9 @@ código (74k+ arquivos) → engine local → resumo compacto → IA (mínimo de 
 | 25 | Batch jobs | @Scheduled, @Async, Quartz Job, Spring Batch |
 | 26 | Módulos Angular/NgRx | @NgModule, lazy routes, actions, reducers, effects, selectors |
 | 27 | Dead components | React/Angular components com inDegree=0 no grafo |
-| 28 | Export JSON | `analysis.json` estruturado com todos os dados |
-| 29 | Arquivos para IA | `CLAUDE.md` e `.github/copilot-instructions.md` |
+| 28 | Índice consultável (SQLite) | `index.db` — grafo/símbolos/busca FTS5 **sem teto de nós**, consultado pelo MCP |
+| 29 | Export JSON | `analysis.json` estruturado com todos os dados |
+| 30 | Arquivos para IA | `CLAUDE.md` e `.github/copilot-instructions.md` |
 
 ---
 
@@ -104,6 +175,7 @@ código (74k+ arquivos) → engine local → resumo compacto → IA (mínimo de 
 | `get_angular_modules` | ~400 | Módulos Angular, lazy routes e NgRx store |
 | `get_dead_components` | ~200 | Componentes React/Angular sem uso |
 | `find_path` | ~200 | Menor caminho entre dois arquivos no grafo |
+| `get_table_columns` | ~200 | Lineage coluna-a-coluna: colunas lidas/escritas de uma tabela e onde |
 
 ---
 
@@ -113,7 +185,8 @@ código (74k+ arquivos) → engine local → resumo compacto → IA (mínimo de 
 .tic-code/
 ├── quick-context.md          # resumo ~12k tokens
 ├── index.md                  # mapa de navegação
-├── dep-graph.json            # grafo de dependências
+├── index.db                  # índice consultável (SQLite) — fonte do MCP, sem teto de nós
+├── dep-graph.json            # grafo de dependências (subconjunto p/ o visualizador da UI)
 ├── call-graph.json           # grafo multi-camada
 ├── impact-index.json         # índice de impacto de mudanças
 ├── analysis.json             # export estruturado completo
@@ -169,12 +242,22 @@ npm run dist:mac     # → release/TIC Analyzer.dmg
 npm run dist:linux   # → release/TIC Analyzer.AppImage
 ```
 
+> **Módulo nativo (`better-sqlite3`):** o `index.db` usa um módulo nativo. O
+> empacotamento (`dist:*`) recompila-o para o runtime do Electron
+> automaticamente (electron-builder). Para `npm run dev`, rode
+> `npm run rebuild:electron` uma vez. Os scripts de verificação (`npm run
+> verify`) rodam sob Node e usam o binário Node-ABI.
+
 ---
 
 ## TIC Analyzer vs CAST Imaging
 
 | Feature | CAST Imaging | TIC Analyzer |
 |---------|-------------|-------------|
+| Grafo por AST + símbolos resolvidos (TS/Java) | Sim | Sim (Fase 1) |
+| Confiança por aresta (resolved/inferred) | Parcial | Sim |
+| Índice consultável em escala (70k+ arquivos) | Sim | Sim (SQLite, Fase 2) |
+| Trace de impacto cross-tier (React→Java→PL/SQL) | Sim | Sim (Fase 3) |
 | PL/SQL data flow (tabelas por procedure) | Sim | Sim |
 | Dead PL/SQL detection | Sim | Sim |
 | Spring @Transactional mapping | Sim | Sim |

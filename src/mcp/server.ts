@@ -9,6 +9,9 @@ import {
   ListToolsRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 import type { ImpactIndex } from '../analyzer/buildImpactIndex';
+import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
+import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount } from './queries';
+import { getEmbedder } from '../analyzer/semantic/embeddings';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
 interface CallGraphEdge { from: string; to: string; type: string; confidence: string; label?: string; }
@@ -54,6 +57,11 @@ export class TicAnalyzerMcpServer {
   private callGraphCache: { nodes: CallGraphNode[]; edges: CallGraphEdge[] } | null = null;
   private searchIndexCache: SearchIndexEntry[] | null = null;
   private invertedIndexCache: Map<string, string[]> | null = null;
+
+  /** Caminho do índice SQLite consultável (escala sem o teto de 3000 nós). */
+  private get indexDbPath(): string {
+    return path.join(this.ticCodePath, INDEX_DB_FILE);
+  }
 
   constructor(options: McpServerOptions) {
     this.projectPath = options.projectPath;
@@ -237,6 +245,17 @@ export class TicAnalyzerMcpServer {
           }
         },
         {
+          name: 'get_table_columns',
+          description: 'Lineage coluna-a-coluna: quais COLUNAS de uma tabela são lidas/escritas e por quais arquivos (extraído de SQL real via parser AST multi-dialeto). Útil para impacto de alteração de coluna. ~200 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              table: { type: 'string', description: 'Nome da tabela (ex: "CLIENTE", "PEDIDO")' }
+            },
+            required: ['table']
+          }
+        },
+        {
           name: 'get_dead_plsql',
           description: 'Retorna procedures e functions PL/SQL que não são chamadas por nenhum outro código (Java, TS ou PL/SQL). Útil para identificar código morto antes de uma refatoração.',
           inputSchema: { type: 'object', properties: {} }
@@ -376,6 +395,36 @@ export class TicAnalyzerMcpServer {
 
         case 'get_impact': {
           const fileArg = (args as { file: string }).file;
+
+          // Consulta o índice SQLite (sem teto de 3000 nós). Fallback: JSON.
+          const impactDb = openIndexDb(this.indexDbPath);
+          if (impactDb) {
+            try {
+              const r = queryImpact(impactDb, fileArg);
+              if (!r) {
+                return respond({ content: [{ type: 'text', text: `Nenhum dependente encontrado para "${fileArg}". Este arquivo não é importado por outros.` }] });
+              }
+              const lines = [
+                `# Impacto de Mudança: \`${fileArg}\``,
+                '',
+                `| Métrica | Valor |`,
+                `| --- | --- |`,
+                `| Dependentes diretos | ${r.directCount} |`,
+                `| Dependentes transitivos | ${r.transitiveCount} |`,
+                '',
+                '## Dependentes Diretos',
+                ...r.direct.map((f) => `- \`${f}\``),
+                '',
+                r.transitive.length > 0 ? '## Impacto Transitivo (sample)' : '',
+                ...r.transitive.slice(0, 20).map((f) => `- \`${f}\``),
+                r.transitiveCount > 20 ? `- ... e mais ${r.transitiveCount - 20} arquivos afetados` : ''
+              ].filter((l) => l !== undefined);
+              return respond({ content: [{ type: 'text', text: lines.join('\n') }] });
+            } finally {
+              impactDb.close();
+            }
+          }
+
           const indexPath = path.join(this.ticCodePath, 'impact-index.json');
           if (!fs.existsSync(indexPath)) {
             return respond({ content: [{ type: 'text', text: 'impact-index.json não encontrado. Execute a análise novamente.' }] });
@@ -752,6 +801,32 @@ export class TicAnalyzerMcpServer {
         case 'find_path': {
           const fromArg = ((args as { from: string }).from ?? '').trim();
           const toArg = ((args as { to: string }).to ?? '').trim();
+
+          // Consulta o índice SQLite (grafo completo, sem teto). Fallback: JSON.
+          const pathDb = openIndexDb(this.indexDbPath);
+          if (pathDb) {
+            try {
+              const res = queryFindPath(pathDb, fromArg, toArg);
+              if ('error' in res) return respond({ content: [{ type: 'text', text: res.error }] });
+              if (res.pathFiles && res.pathFiles.length === 1) {
+                return respond({ content: [{ type: 'text', text: '✅ Origem e destino são o mesmo arquivo.' }] });
+              }
+              if (!res.pathFiles) {
+                return respond({ content: [{ type: 'text', text: `Nenhum caminho encontrado entre "${fromArg}" e "${toArg}".\nEsses arquivos podem não se conectar por dependências de import.` }] });
+              }
+              const pathLines = [
+                `# Caminho: \`${fromArg}\` → \`${toArg}\``,
+                '',
+                `**${res.pathFiles.length - 1} salto(s)**`,
+                '',
+                ...res.pathFiles.map((p, i) => `${i + 1}. \`${p}\``)
+              ];
+              return respond({ content: [{ type: 'text', text: pathLines.join('\n') }] });
+            } finally {
+              pathDb.close();
+            }
+          }
+
           const graphPath = path.join(this.ticCodePath, 'dep-graph.json');
           if (!fs.existsSync(graphPath)) {
             return respond({ content: [{ type: 'text', text: 'dep-graph.json não encontrado. Execute a análise novamente.' }] });
@@ -828,12 +903,39 @@ export class TicAnalyzerMcpServer {
 
         case 'trace_flow': {
           const entry = ((args as { entry: string }).entry ?? '').trim();
-          return respond({ content: [{ type: 'text', text: this.traceFlowTool(entry) }] });
+          const unified = this.crossTierTraceTool(entry);
+          return respond({ content: [{ type: 'text', text: unified ?? this.traceFlowTool(entry) }] });
+        }
+
+        case 'get_table_columns': {
+          const table = ((args as { table: string }).table ?? '').trim();
+          if (!table) return respond({ content: [{ type: 'text', text: 'Informe o nome da tabela.' }] });
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond({ content: [{ type: 'text', text: 'index.db não encontrado. Execute a análise novamente.' }] });
+          try {
+            const lin = queryTableColumns(db, table);
+            if (!lin) return respond({ content: [{ type: 'text', text: `Nenhum acesso de coluna detectado para a tabela "${table}".` }] });
+            const fmt = (arr: Array<{ column: string; from: string }>) =>
+              arr.length ? arr.map((c) => `- \`${c.column}\` (em \`${c.from}\`)`).join('\n') : '_(nenhuma)_';
+            const text = [
+              `# Lineage de colunas: \`${lin.table}\``,
+              '',
+              `## ✍️ Escritas (${lin.writes.length})`,
+              fmt(lin.writes),
+              '',
+              `## 👁️ Leituras (${lin.reads.length})`,
+              fmt(lin.reads)
+            ].join('\n');
+            return respond({ content: [{ type: 'text', text }] });
+          } finally {
+            db.close();
+          }
         }
 
         case 'search_code': {
           const query = ((args as { query: string }).query ?? '').trim();
-          return respond({ content: [{ type: 'text', text: this.searchCodeTool(query) }] });
+          const semantic = await this.searchSemanticTool(query);
+          return respond({ content: [{ type: 'text', text: semantic ?? this.searchCodeTool(query) }] });
         }
 
         case 'get_concept_map': {
@@ -881,10 +983,84 @@ export class TicAnalyzerMcpServer {
 
   private loadCallGraph(): { nodes: CallGraphNode[]; edges: CallGraphEdge[] } | null {
     if (this.callGraphCache) return this.callGraphCache;
+
+    // Fonte preferencial: índice SQLite (fonte única). Fallback: call-graph.json.
+    const db = openIndexDb(this.indexDbPath);
+    if (db) {
+      try {
+        const cg = queryCallGraph(db);
+        if (cg.nodes.length > 0) {
+          this.callGraphCache = cg as { nodes: CallGraphNode[]; edges: CallGraphEdge[] };
+          return this.callGraphCache;
+        }
+      } finally {
+        db.close();
+      }
+    }
+
     const p = path.join(this.ticCodePath, 'call-graph.json');
     if (!fs.existsSync(p)) return null;
     this.callGraphCache = JSON.parse(fs.readFileSync(p, 'utf8')) as { nodes: CallGraphNode[]; edges: CallGraphEdge[] };
     return this.callGraphCache;
+  }
+
+  /**
+   * Trace cross-tier unificado (Fase 3): caminha sobre o grafo intra-código
+   * (resolvido) + o cross-tier (HTTP/DB/PL-SQL) no index.db, devolvendo a cadeia
+   * ininterrupta de impacto. Retorna null se não há DB ou o entry não casa
+   * (cai para o traceFlowTool legado).
+   */
+  private crossTierTraceTool(entry: string): string | null {
+    if (!entry) return null;
+    const db = openIndexDb(this.indexDbPath);
+    if (!db) return null;
+    try {
+      const trace = queryCrossTierTrace(db, entry);
+      if (!trace.entry) return null;
+
+      const tierIcon: Record<string, string> = { frontend: '🖥️', backend: '☕', database: '🗄️', code: '📄' };
+      const lines: string[] = [
+        `# Trace cross-tier: \`${trace.entry.label}\``,
+        '',
+        `Camada de origem: ${tierIcon[trace.entry.layer] ?? ''} ${trace.entry.layer}`,
+        ''
+      ];
+
+      if (trace.samplePath.length > 1) {
+        lines.push('## Cadeia de impacto (chamador → … → alterado)');
+        lines.push('');
+        lines.push('```');
+        trace.samplePath.forEach((n, i) => {
+          const arrow = i === 0 ? '' : '  ↓ ';
+          lines.push(`${arrow}${tierIcon[n.layer] ?? ''} ${n.label}`);
+        });
+        lines.push('```');
+        lines.push('');
+      }
+
+      const byLayer = (layer: string) => trace.upstream.filter((n) => n.layer === layer);
+      const tiers: Array<[string, string]> = [
+        ['frontend', 'Frontend afetado'],
+        ['backend', 'Backend afetado'],
+        ['code', 'Código afetado'],
+        ['database', 'Banco afetado']
+      ];
+      lines.push(`## Quem quebra se \`${trace.entry.label}\` mudar (${trace.upstream.length})`);
+      lines.push('');
+      for (const [layer, title] of tiers) {
+        const items = byLayer(layer);
+        if (items.length === 0) continue;
+        lines.push(`### ${tierIcon[layer] ?? ''} ${title} (${items.length})`);
+        for (const n of items.slice(0, 25)) lines.push(`- \`${n.label}\``);
+        if (items.length > 25) lines.push(`- … e mais ${items.length - 25}`);
+        lines.push('');
+      }
+      if (trace.upstream.length === 0) lines.push('_Nenhum chamador encontrado — este ponto não é alcançado por outras camadas._');
+
+      return lines.join('\n').trim();
+    } finally {
+      db.close();
+    }
   }
 
   private traceFlowTool(entry: string): string {
@@ -1087,8 +1263,63 @@ export class TicAnalyzerMcpServer {
     return [...tokens];
   }
 
+  /**
+   * Busca semântica via embeddings locais (Fase 4). Retorna null quando não há
+   * embeddings no índice ou o modelo não está disponível — aí o caller usa FTS.
+   */
+  private async searchSemanticTool(query: string): Promise<string | null> {
+    if (!query) return null;
+    const db = openIndexDb(this.indexDbPath);
+    if (!db) return null;
+    try {
+      if (embeddingsCount(db) === 0) return null;
+      const embedder = await getEmbedder();
+      if (!embedder) return null;
+      const [qvec] = await embedder([query]);
+      const hits = queryVectorSearch(db, qvec, 10);
+      if (hits.length === 0) return null;
+      const lines = [
+        `## Resultados semânticos para: "${query}"`,
+        `*${hits.length} arquivos por similaridade vetorial (embeddings locais)*`,
+        ''
+      ];
+      for (const h of hits) lines.push(`### \`${h.file}\` (similaridade: ${h.score})`);
+      return lines.join('\n');
+    } finally {
+      db.close();
+    }
+  }
+
   private searchCodeTool(query: string): string {
     if (!query) return 'Informe um query para busca.';
+
+    const queryTokensFts = this.tokenizeQuery(query);
+    if (queryTokensFts.length === 0) return 'Query muito curta. Use pelo menos 3 caracteres.';
+
+    // Busca preferencial via FTS5 no índice SQLite. Fallback: índice invertido JSON.
+    const searchDb = openIndexDb(this.indexDbPath);
+    if (searchDb) {
+      try {
+        const hits = querySearch(searchDb, queryTokensFts, 10);
+        if (hits.length === 0) {
+          return `Nenhum arquivo encontrado para "${query}". Tente termos mais gerais.`;
+        }
+        const lines: string[] = [
+          `## Resultados para: "${query}"`,
+          `*${hits.length} arquivos relevantes (FTS5/BM25)*`,
+          ''
+        ];
+        for (const hit of hits) {
+          lines.push(`### \`${hit.file}\` (score: ${hit.score})`);
+          if (hit.snippet) lines.push(`> ${hit.snippet}`);
+          lines.push('');
+        }
+        lines.push(`*Tokens da query: ${queryTokensFts.join(', ')}*`);
+        return lines.join('\n');
+      } finally {
+        searchDb.close();
+      }
+    }
 
     const entries = this.loadSearchIndex();
     if (entries.length === 0) {

@@ -21,6 +21,9 @@ import { detectTransactions, formatTransactionsReport } from './detectTransactio
 import { detectBatchJobs, formatBatchJobsReport } from './detectBatchJobs';
 import { detectAngularModules, formatAngularModulesReport } from './detectAngularModules';
 import { buildCallGraph } from './buildCallGraph';
+import { detectOrmMappings } from './detectOrmMappings';
+import { getEmbedder } from './semantic/embeddings';
+import type { SearchIndexEntry } from './buildSearchIndex';
 import { generateMultiGraph } from './generateMultiGraph';
 import { buildImpactIndex } from './buildImpactIndex';
 import { computeMetrics } from './computeMetrics';
@@ -31,6 +34,7 @@ import { detectPatterns, formatPatternsReport } from './detectPatterns';
 import { detectDbSchema, formatDbSchemaReport, formatDbSchemaSummary } from './detectDbSchema';
 import { exportAnalysis } from './exportAnalysis';
 import { buildSearchIndex } from './buildSearchIndex';
+import { writeIndexDb, INDEX_DB_FILE } from './store/indexDb';
 import { loadFileCache, computeChangedFiles, saveFileCache } from './buildFileCache';
 
 export type PhaseStatus = 'pending' | 'running' | 'done' | 'error';
@@ -104,6 +108,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'angular-modules', label: 'Detectando módulos Angular e NgRx', status: 'pending' },
   { id: 'dead-components', label: 'Detectando componentes sem uso (dead code)', status: 'pending' },
   { id: 'search-index', label: 'Construindo índice de busca por código', status: 'pending' },
+  { id: 'persist-index', label: 'Gravando índice consultável (SQLite)', status: 'pending' },
   { id: 'export-json', label: 'Exportando analysis.json', status: 'pending' },
   { id: 'ai-files', label: 'Gerando arquivos para IA', status: 'pending' }
 ];
@@ -165,12 +170,13 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     report('stack', 100, `${stack.primaryLanguage} — ${stack.frameworks.join(', ') || 'sem frameworks'}`);
 
     // ── 3. GRAFO ─────────────────────────────────────────────────────────────────
-    report('graph', 18, 'Construindo grafo de dependências...');
-    const graph = buildDependencyGraph(files, projectPath);
+    report('graph', 18, 'Construindo grafo de dependências (AST + símbolos)...');
+    const graph = await buildDependencyGraph(files, projectPath);
     // Salva para o visualizador interativo
     fs.writeFileSync(path.join(ticCodeDir, 'dep-graph.json'), JSON.stringify({ nodes: graph.nodes.slice(0, 3000), edges: graph.edges.slice(0, 5000) }), 'utf8');
     markDone('graph');
-    report('graph', 100, `${graph.nodes.length.toLocaleString()} nós, ${graph.edges.length.toLocaleString()} arestas`);
+    const resolvedEdges = graph.edges.filter((e) => e.confidence === 'resolved').length;
+    report('graph', 100, `${graph.nodes.length.toLocaleString()} nós, ${graph.edges.length.toLocaleString()} arestas (${resolvedEdges.toLocaleString()} resolvidas)`);
 
     // ── 4. RISCOS ────────────────────────────────────────────────────────────────
     report('risks', 26, 'Detectando riscos técnicos...');
@@ -306,8 +312,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     report('gaps', 100, 'gaps.md gerado');
 
     // ── 15. MULTI-GRAFO ──────────────────────────────────────────────────────────
-    report('multigraph', 70, 'Construindo grafo Frontend→Endpoint→Backend→PL/SQL...');
-    const callGraph = buildCallGraph(frontendCallsData, endpoints, plsqlObjects, plsqlCalls, dbCallsData);
+    report('multigraph', 70, 'Construindo grafo Frontend→Endpoint→Backend→(PL/SQL + Tabelas)...');
+    const orm = detectOrmMappings(files);
+    const callGraph = buildCallGraph(frontendCallsData, endpoints, plsqlObjects, plsqlCalls, dbCallsData, orm.tableAccess);
     generateMultiGraph(ticCodeDir, callGraph);
     // Salva JSON do call-graph para o visualizador interativo
     fs.writeFileSync(path.join(ticCodeDir, 'call-graph.json'), JSON.stringify(callGraph), 'utf8');
@@ -340,7 +347,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
 
     // ── 18. HERANÇA ───────────────────────────────────────────────────────────────
     report('inheritance', 84, 'Detectando hierarquia de classes...');
-    const inheritanceTree = detectInheritance(files);
+    const inheritanceTree = detectInheritance(files, graph.semanticClasses);
     if (inheritanceTree.classes.length > 0) {
       const inheritanceReport = formatInheritanceReport(inheritanceTree);
       fs.writeFileSync(path.join(ticCodeDir, 'inheritance.md'), inheritanceReport, 'utf8');
@@ -419,10 +426,22 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
 
     // ── 24b. SEARCH INDEX ─────────────────────────────────────────────────────────
     report('search-index', 95, 'Indexando termos de código para busca semântica...');
-    buildSearchIndex(files, ticCodeDir);
+    const searchEntries = buildSearchIndex(files, ticCodeDir);
     markDone('search-index');
     const codeFileCount = files.filter((f) => ['.ts', '.tsx', '.js', '.jsx', '.java', '.py', '.cs', '.go', '.rs', '.php', '.rb', '.sql'].includes(f.extension)).length;
     report('search-index', 100, `${codeFileCount} arquivos indexados`);
+
+    // ── 24c. ÍNDICE PERSISTENTE (SQLite) ──────────────────────────────────────────
+    report('persist-index', 95, 'Gerando embeddings locais (busca semântica)...');
+    const embeddings = await computeEmbeddings(searchEntries, (done, total) =>
+      report('persist-index', 95, `Embeddings ${done}/${total}...`)
+    );
+
+    report('persist-index', 97, 'Gravando índice consultável (SQLite)...');
+    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges, columnAccess: orm.columnAccess, embeddings });
+    markDone('persist-index');
+    const vecNote = embeddings ? `, ${embeddings.length} embeddings` : ' (embeddings off: modelo indisponível, FTS ativo)';
+    report('persist-index', 100, `index.db: ${dbStats.nodes.toLocaleString()} nós, ${dbStats.edges.toLocaleString()} arestas (sem teto)${vecNote}`);
 
     // ── 25. EXPORT JSON ───────────────────────────────────────────────────────────
     report('export-json', 92, 'Exportando analysis.json estruturado...');
@@ -477,6 +496,32 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, error
     };
   }
+}
+
+/**
+ * Gera embeddings por arquivo para busca semântica (Fase 4). Retorna undefined
+ * quando o modelo local não está disponível (ex.: host de modelos bloqueado) —
+ * nesse caso a busca segue via FTS5, sem quebrar nada.
+ */
+async function computeEmbeddings(
+  searchEntries: SearchIndexEntry[],
+  onProgress: (done: number, total: number) => void
+): Promise<Array<{ file: string; vector: Float32Array }> | undefined> {
+  // Opt-in: a busca semântica baixa um modelo (~25MB) na 1ª vez. Só ativa com
+  // TIC_EMBEDDINGS=1, para não surpreender com download/latência. Sem ela, FTS.
+  if (!process.env.TIC_EMBEDDINGS) return undefined;
+  const embedder = await getEmbedder();
+  if (!embedder) return undefined;
+
+  const texts = searchEntries.map((e) => `${e.file} ${e.snippet} ${e.terms.slice(0, 40).join(' ')}`.slice(0, 512));
+  const out: Array<{ file: string; vector: Float32Array }> = [];
+  const BATCH = 64;
+  for (let i = 0; i < texts.length; i += BATCH) {
+    const vecs = await embedder(texts.slice(i, i + BATCH));
+    for (let j = 0; j < vecs.length; j++) out.push({ file: searchEntries[i + j].file, vector: vecs[j] });
+    onProgress(Math.min(i + BATCH, texts.length), texts.length);
+  }
+  return out;
 }
 
 function computeDeadComponents(files: ScannedFile[], graph: DependencyGraph): Array<{ file: string; type: 'react' | 'angular' }> {

@@ -2,9 +2,10 @@ import type { FrontendCall } from './detectFrontendCalls';
 import type { EndpointFound } from './detectEndpoints';
 import type { PlsqlObject, PlsqlCall } from './detectPlsqlObjects';
 import type { DbCall } from './detectBackendDbCalls';
+import type { TableAccess } from './detectOrmMappings';
 
 export type LayerType = 'frontend' | 'backend' | 'database';
-export type EdgeType = 'HTTP_CALL' | 'DB_CALL' | 'PLSQL_CALL';
+export type EdgeType = 'HTTP_CALL' | 'DB_CALL' | 'PLSQL_CALL' | 'TABLE_ACCESS';
 
 export interface CallGraphNode {
   id: string;
@@ -32,7 +33,8 @@ export function buildCallGraph(
   endpoints: EndpointFound[],
   plsqlObjects: PlsqlObject[],
   plsqlCalls: PlsqlCall[],
-  dbCalls: DbCall[]
+  dbCalls: DbCall[],
+  tableAccess: TableAccess[] = []
 ): CallGraph {
   const nodes = new Map<string, CallGraphNode>();
   const edges: CallGraphEdge[] = [];
@@ -126,6 +128,29 @@ export function buildCallGraph(
     addEdge({ from: beId(dbCall.fromFile), to: dbId(key), type: 'DB_CALL', confidence: dbCall.confidence, label });
   }
 
+  // ── 5b. Backend → Tabela (TABLE_ACCESS, via JPA/Hibernate/SQL) ────────────
+  for (const acc of tableAccess) {
+    if (!backendFilesSeen.has(acc.fromFile)) {
+      addNode({ id: beId(acc.fromFile), label: className(acc.fromFile), layer: 'backend', file: acc.fromFile });
+      backendFilesSeen.add(acc.fromFile);
+    }
+    addNode({ id: tblId(acc.table), label: acc.table.toUpperCase(), layer: 'database', file: '' });
+    addEdge({ from: beId(acc.fromFile), to: tblId(acc.table), type: 'TABLE_ACCESS', confidence: acc.confidence, label: acc.mode });
+  }
+
+  // ── 5c. PL/SQL → Tabela (TABLE_ACCESS, lidas/escritas pela procedure) ──────
+  for (const obj of plsqlObjects) {
+    const objKey = obj.packageName ?? obj.name;
+    for (const t of obj.tablesWritten ?? []) {
+      addNode({ id: tblId(t), label: t.toUpperCase(), layer: 'database', file: '' });
+      addEdge({ from: dbId(objKey), to: tblId(t), type: 'TABLE_ACCESS', confidence: '🟢', label: 'write' });
+    }
+    for (const t of obj.tablesRead ?? []) {
+      addNode({ id: tblId(t), label: t.toUpperCase(), layer: 'database', file: '' });
+      addEdge({ from: dbId(objKey), to: tblId(t), type: 'TABLE_ACCESS', confidence: '🟢', label: 'read' });
+    }
+  }
+
   // ── 6. PL/SQL → PL/SQL (PLSQL_CALL) ──────────────────────────────────────
   const objPackageMap = new Map<string, string>();
   for (const obj of plsqlObjects) {
@@ -199,6 +224,7 @@ function domainKeyword(filename: string): string {
 function feId(file: string): string { return `fe_${sanitize(file)}`; }
 function beId(file: string): string { return `be_${sanitize(file)}`; }
 function dbId(name: string): string { return `db_${sanitize(name.toUpperCase())}`; }
+function tblId(name: string): string { return `tbl_${sanitize(name.toUpperCase())}`; }
 
 function className(file: string): string {
   return basename(file).replace(/\.(java|ts|tsx|js|jsx|py|cs|kt)$/, '');
