@@ -10,7 +10,8 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { ImpactIndex } from '../analyzer/buildImpactIndex';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
-import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns } from './queries';
+import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount } from './queries';
+import { getEmbedder } from '../analyzer/semantic/embeddings';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
 interface CallGraphEdge { from: string; to: string; type: string; confidence: string; label?: string; }
@@ -933,7 +934,8 @@ export class TicAnalyzerMcpServer {
 
         case 'search_code': {
           const query = ((args as { query: string }).query ?? '').trim();
-          return respond({ content: [{ type: 'text', text: this.searchCodeTool(query) }] });
+          const semantic = await this.searchSemanticTool(query);
+          return respond({ content: [{ type: 'text', text: semantic ?? this.searchCodeTool(query) }] });
         }
 
         case 'get_concept_map': {
@@ -1259,6 +1261,33 @@ export class TicAnalyzerMcpServer {
       tokens.add(word.toLowerCase());
     }
     return [...tokens];
+  }
+
+  /**
+   * Busca semântica via embeddings locais (Fase 4). Retorna null quando não há
+   * embeddings no índice ou o modelo não está disponível — aí o caller usa FTS.
+   */
+  private async searchSemanticTool(query: string): Promise<string | null> {
+    if (!query) return null;
+    const db = openIndexDb(this.indexDbPath);
+    if (!db) return null;
+    try {
+      if (embeddingsCount(db) === 0) return null;
+      const embedder = await getEmbedder();
+      if (!embedder) return null;
+      const [qvec] = await embedder([query]);
+      const hits = queryVectorSearch(db, qvec, 10);
+      if (hits.length === 0) return null;
+      const lines = [
+        `## Resultados semânticos para: "${query}"`,
+        `*${hits.length} arquivos por similaridade vetorial (embeddings locais)*`,
+        ''
+      ];
+      for (const h of hits) lines.push(`### \`${h.file}\` (similaridade: ${h.score})`);
+      return lines.join('\n');
+    } finally {
+      db.close();
+    }
   }
 
   private searchCodeTool(query: string): string {

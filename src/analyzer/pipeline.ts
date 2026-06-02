@@ -22,6 +22,8 @@ import { detectBatchJobs, formatBatchJobsReport } from './detectBatchJobs';
 import { detectAngularModules, formatAngularModulesReport } from './detectAngularModules';
 import { buildCallGraph } from './buildCallGraph';
 import { detectOrmMappings } from './detectOrmMappings';
+import { getEmbedder } from './semantic/embeddings';
+import type { SearchIndexEntry } from './buildSearchIndex';
 import { generateMultiGraph } from './generateMultiGraph';
 import { buildImpactIndex } from './buildImpactIndex';
 import { computeMetrics } from './computeMetrics';
@@ -430,10 +432,16 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     report('search-index', 100, `${codeFileCount} arquivos indexados`);
 
     // ── 24c. ÍNDICE PERSISTENTE (SQLite) ──────────────────────────────────────────
-    report('persist-index', 95, 'Gravando índice consultável (SQLite)...');
-    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges, columnAccess: orm.columnAccess });
+    report('persist-index', 95, 'Gerando embeddings locais (busca semântica)...');
+    const embeddings = await computeEmbeddings(searchEntries, (done, total) =>
+      report('persist-index', 95, `Embeddings ${done}/${total}...`)
+    );
+
+    report('persist-index', 97, 'Gravando índice consultável (SQLite)...');
+    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges, columnAccess: orm.columnAccess, embeddings });
     markDone('persist-index');
-    report('persist-index', 100, `index.db: ${dbStats.nodes.toLocaleString()} nós, ${dbStats.edges.toLocaleString()} arestas (sem teto)`);
+    const vecNote = embeddings ? `, ${embeddings.length} embeddings` : ' (embeddings off: modelo indisponível, FTS ativo)';
+    report('persist-index', 100, `index.db: ${dbStats.nodes.toLocaleString()} nós, ${dbStats.edges.toLocaleString()} arestas (sem teto)${vecNote}`);
 
     // ── 25. EXPORT JSON ───────────────────────────────────────────────────────────
     report('export-json', 92, 'Exportando analysis.json estruturado...');
@@ -488,6 +496,32 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, error
     };
   }
+}
+
+/**
+ * Gera embeddings por arquivo para busca semântica (Fase 4). Retorna undefined
+ * quando o modelo local não está disponível (ex.: host de modelos bloqueado) —
+ * nesse caso a busca segue via FTS5, sem quebrar nada.
+ */
+async function computeEmbeddings(
+  searchEntries: SearchIndexEntry[],
+  onProgress: (done: number, total: number) => void
+): Promise<Array<{ file: string; vector: Float32Array }> | undefined> {
+  // Opt-in: a busca semântica baixa um modelo (~25MB) na 1ª vez. Só ativa com
+  // TIC_EMBEDDINGS=1, para não surpreender com download/latência. Sem ela, FTS.
+  if (!process.env.TIC_EMBEDDINGS) return undefined;
+  const embedder = await getEmbedder();
+  if (!embedder) return undefined;
+
+  const texts = searchEntries.map((e) => `${e.file} ${e.snippet} ${e.terms.slice(0, 40).join(' ')}`.slice(0, 512));
+  const out: Array<{ file: string; vector: Float32Array }> = [];
+  const BATCH = 64;
+  for (let i = 0; i < texts.length; i += BATCH) {
+    const vecs = await embedder(texts.slice(i, i + BATCH));
+    for (let j = 0; j < vecs.length; j++) out.push({ file: searchEntries[i + j].file, vector: vecs[j] });
+    onProgress(Math.min(i + BATCH, texts.length), texts.length);
+  }
+  return out;
 }
 
 function computeDeadComponents(files: ScannedFile[], graph: DependencyGraph): Array<{ file: string; type: 'react' | 'angular' }> {

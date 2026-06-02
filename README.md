@@ -95,6 +95,18 @@ tabela até a tela. Validado em código real (Spring PetClinic) e em
 
 ---
 
+## Busca semântica local (opt-in)
+
+`search_code` tem dois modos: **FTS5** (léxico, padrão) e **vetorial**
+(embeddings locais, ONNX via `@xenova/transformers`, sem chamada de API). O modo
+vetorial é **opt-in** porque baixa um modelo (~25MB) na 1ª execução — ative com
+`TIC_EMBEDDINGS=1` ao rodar a análise. Os vetores ficam no `index.db`; em runtime
+o MCP embeda a query e ranqueia por cosseno. Onde o host do modelo é bloqueado
+(ex.: sandboxes), a busca cai automaticamente para FTS5. A infraestrutura
+(armazenamento + ranking por cosseno) é verificada em `verify-embeddings`.
+
+---
+
 ## O que é analisado — 30 fases
 
 | # | Fase | O que produz |

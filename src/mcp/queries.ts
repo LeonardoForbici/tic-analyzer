@@ -7,6 +7,7 @@
  * inteiro na memória e **sem o teto de 3000 nós** do `dep-graph.json`.
  */
 import type Database from 'better-sqlite3';
+import { blobToVector, cosine } from '../analyzer/semantic/embeddings';
 
 export interface ImpactResult {
   matchedKey: string;
@@ -113,6 +114,19 @@ export function querySearch(db: Database.Database, tokens: string[], limit = 10)
     snippet: (r.snippet as string) ?? '',
     score: Math.round(-(r.rank as number) * 10) / 10
   }));
+}
+
+/** Quantos arquivos têm embedding (0 = busca vetorial inativa → usa FTS). */
+export function embeddingsCount(db: Database.Database): number {
+  return (db.prepare('SELECT COUNT(*) c FROM embeddings').get() as any).c;
+}
+
+/** Busca semântica por similaridade de cosseno sobre os embeddings (Fase 4). */
+export function queryVectorSearch(db: Database.Database, queryVec: Float32Array, limit = 10): SearchHit[] {
+  const rows = db.prepare('SELECT file, vec FROM embeddings').all() as any[];
+  const scored = rows.map((r) => ({ file: r.file as string, score: cosine(queryVec, blobToVector(r.vec as Buffer)) }));
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((s) => ({ file: s.file, snippet: '', score: Math.round(s.score * 1000) / 1000 }));
 }
 
 export interface DbCallGraph {

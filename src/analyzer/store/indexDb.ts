@@ -15,6 +15,7 @@ import type { CallGraph } from '../buildCallGraph';
 import type { SearchIndexEntry } from '../buildSearchIndex';
 import type { MethodEdge } from '../semantic/resolveReferences';
 import type { ColumnAccess } from '../detectOrmMappings';
+import { vectorToBlob } from '../semantic/embeddings';
 
 export const INDEX_DB_FILE = 'index.db';
 
@@ -79,6 +80,11 @@ CREATE TABLE column_access (
 CREATE INDEX idx_column_access_table ON column_access("table");
 
 CREATE VIRTUAL TABLE search_fts USING fts5(file UNINDEXED, snippet UNINDEXED, terms);
+
+CREATE TABLE embeddings (
+  file TEXT PRIMARY KEY,
+  vec BLOB NOT NULL
+);
 `;
 
 export interface IndexDbInput {
@@ -88,6 +94,8 @@ export interface IndexDbInput {
   searchEntries: SearchIndexEntry[];
   methodEdges?: MethodEdge[];
   columnAccess?: ColumnAccess[];
+  /** Embeddings por arquivo (Fase 4). Ausente quando o modelo não está disponível. */
+  embeddings?: Array<{ file: string; vector: Float32Array }>;
 }
 
 /** (Re)constrói o index.db a partir dos resultados já computados na pipeline. */
@@ -117,6 +125,7 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
     const insertCgEdge = db.prepare('INSERT INTO cg_edges (from_id, to_id, type, confidence, label) VALUES (?, ?, ?, ?, ?)');
     const insertSearch = db.prepare('INSERT INTO search_fts (file, snippet, terms) VALUES (?, ?, ?)');
     const insertColumn = db.prepare('INSERT INTO column_access (from_file, "table", column, mode, confidence) VALUES (?, ?, ?, ?, ?)');
+    const insertEmbedding = db.prepare('INSERT OR REPLACE INTO embeddings (file, vec) VALUES (?, ?)');
 
     const writeAll = db.transaction(() => {
       for (const n of input.graph.nodes) {
@@ -143,6 +152,9 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
       }
       for (const c of input.columnAccess ?? []) {
         insertColumn.run(c.fromFile, c.table, c.column, c.mode, c.confidence);
+      }
+      for (const e of input.embeddings ?? []) {
+        insertEmbedding.run(e.file, vectorToBlob(e.vector));
       }
     });
     writeAll();
