@@ -37,13 +37,34 @@ código (74k+ arquivos) → engine local → resumo compacto → IA (mínimo de 
 
 ---
 
+## Análise semântica (AST + resolução de símbolos)
+
+A partir da Fase 1 da evolução rumo a paridade com o CAST Imaging, o grafo de
+dependências deixou de ser regex e passa a usar **parsing AST real**
+(`tree-sitter`, 100% local/offline) com **resolução de símbolos** para
+TypeScript/JS/TSX e Java:
+
+- Imports TS resolvidos com **aliases de tsconfig** (`@/...`) e **barris**
+  (`export ... from`) seguidos até a origem.
+- Java: `extends`/`implements` resolvidos e **chamadas via interface→implementador**
+  (padrão DI) — sabe que `userService.findAll()` chama `UserServiceImpl`.
+- Cada aresta carrega `confidence`: **`resolved`** (alvo único confirmado) ou
+  **`inferred`** (ambíguo — ex.: interface com vários implementadores). Em
+  engenharia reversa, isso diz no que confiar.
+- Linguagens sem grammar (Python/Go/C#/Rust/PHP/Kotlin) continuam via regex como
+  fallback.
+
+Verificação: `npm run verify` roda o resolvedor sobre `test/fixtures/semantic`.
+
+---
+
 ## O que é analisado — 29 fases
 
 | # | Fase | O que produz |
 |---|------|-------------|
 | 1 | Scan de arquivos | Índice de todos os arquivos com linhas e extensões |
 | 2 | Detecção de stack | Linguagens, frameworks, gerenciadores de pacotes |
-| 3 | Grafo de dependências | `dep-graph.json` — nós e arestas de imports |
+| 3 | Grafo de dependências (AST) | `dep-graph.json` — arestas `import`/`call`/`extends`/`implements` com `confidence` (`resolved`/`inferred`) |
 | 4 | Detecção de riscos (OWASP) | A02 Crypto, A03 Injection, A05 Misconfig, A09 Logging |
 | 5 | Endpoints REST | Rotas detectadas em Express, Spring, NestJS, etc. |
 | 6 | Chamadas HTTP frontend | fetch/axios/HttpClient com método e URL |

@@ -1,17 +1,24 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ScannedFile } from './scanFiles';
+import { buildSemanticGraph } from './semantic/buildSemanticGraph';
+import type { EdgeKind, Confidence, ClassInfoLite } from './semantic/resolveReferences';
+import { langForExtension } from './semantic/treeSitter';
 
 export interface GraphNode {
   id: string;
   path: string;
-  inDegree: number;  // quantos outros arquivos importam este
-  outDegree: number; // quantos arquivos este importa
+  inDegree: number;  // quantos outros arquivos importam/usam este
+  outDegree: number; // quantos arquivos este importa/usa
 }
 
 export interface GraphEdge {
   from: string;
   to: string;
+  /** Tipo da relação. Ausente em arestas legadas/regex (tratadas como 'import'). */
+  kind?: EdgeKind;
+  /** 'resolved' = alvo único confirmado via AST; 'inferred' = heurística/ambíguo. */
+  confidence?: Confidence;
 }
 
 export interface DependencyGraph {
@@ -19,55 +26,73 @@ export interface DependencyGraph {
   edges: GraphEdge[];
   centralFiles: string[]; // top arquivos mais referenciados
   externalDeps: string[];
+  /** Classes/interfaces extraídas via AST (TS/Java) — reusado por detectInheritance. */
+  semanticClasses?: ClassInfoLite[];
 }
 
-/** Constrói grafo de dependências por análise de imports (sem executar o código) */
-export function buildDependencyGraph(files: ScannedFile[], rootPath: string): DependencyGraph {
+/**
+ * Constrói o grafo de dependências. Usa parsing AST + resolução de símbolos
+ * (TS/JS/TSX/Java) e cai para extração por regex apenas em linguagens sem
+ * grammar (Python/Go/C#/Rust/PHP) ou em arquivos que falharam o parse.
+ */
+export async function buildDependencyGraph(files: ScannedFile[], rootPath: string): Promise<DependencyGraph> {
   const fileSet = new Set(files.map((f) => f.relativePath));
-  const edges: GraphEdge[] = [];
-  const inDegree: Record<string, number> = {};
-  const outDegree: Record<string, number> = {};
+  const edgeMap = new Map<string, GraphEdge>();
   const externalDepsSet = new Set<string>();
 
-  // Inicializa contadores
-  for (const f of files) {
-    inDegree[f.relativePath] = 0;
-    outDegree[f.relativePath] = 0;
-  }
+  const addEdge = (from: string, to: string, kind: EdgeKind, confidence: Confidence) => {
+    if (from === to) return;
+    const key = `${from} ${to} ${kind}`;
+    const existing = edgeMap.get(key);
+    if (!existing) edgeMap.set(key, { from, to, kind, confidence });
+    else if (existing.confidence === 'inferred' && confidence === 'resolved') existing.confidence = 'resolved';
+  };
 
-  const codeExts = new Set(['.ts', '.tsx', '.js', '.jsx', '.java', '.py', '.go', '.cs', '.rs', '.php']);
+  // ── 1. Camada semântica (AST) ──────────────────────────────────────────────
+  const semantic = await buildSemanticGraph(files, rootPath);
+  for (const e of semantic.edges) addEdge(e.from, e.to, e.kind, e.confidence);
+  for (const dep of semantic.externalDeps) externalDepsSet.add(dep);
 
+  // ── 2. Fallback regex (linguagens sem grammar ou parse falho) ──────────────
+  // Cai para regex em: Python/Go/C#/Rust/PHP/Kotlin (sem grammar) e em arquivos
+  // de linguagem suportada que não foram parseados (grammars ausentes ou erro).
+  const regexExts = new Set(['.py', '.go', '.cs', '.rs', '.php', '.kt']);
   for (const file of files) {
-    if (!codeExts.has(file.extension)) continue;
+    const langSupported = langForExtension(file.extension) !== null;
+    const needsFallback = regexExts.has(file.extension) || (langSupported && !semantic.parsedFiles.has(file.relativePath));
+    if (!needsFallback) continue;
 
     let content: string;
     try { content = fs.readFileSync(file.absolutePath, 'utf8'); }
     catch { continue; }
 
-    const imports = extractImports(content, file.extension);
-
-    for (const imp of imports) {
+    for (const imp of extractImports(content, file.extension)) {
       if (imp.startsWith('.')) {
-        // Import relativo — resolve para caminho relativo do root
         const dir = path.dirname(file.absolutePath);
         const resolved = path.resolve(dir, imp).replace(/\\/g, '/');
         const rel = path.relative(rootPath, resolved).replace(/\\/g, '/');
-
-        // Tenta com e sem extensão
         const candidates = [rel, `${rel}.ts`, `${rel}.tsx`, `${rel}.js`, `${rel}.jsx`, `${rel}/index.ts`, `${rel}/index.js`];
         const found = candidates.find((c) => fileSet.has(c));
-
-        if (found && found !== file.relativePath) {
-          edges.push({ from: file.relativePath, to: found });
-          outDegree[file.relativePath] = (outDegree[file.relativePath] ?? 0) + 1;
-          inDegree[found] = (inDegree[found] ?? 0) + 1;
-        }
+        if (found) addEdge(file.relativePath, found, 'import', 'inferred');
       } else if (!imp.startsWith('/')) {
-        // Dependência externa (npm package, etc.)
         const pkg = imp.startsWith('@') ? imp.split('/').slice(0, 2).join('/') : imp.split('/')[0];
         if (pkg) externalDepsSet.add(pkg);
       }
     }
+  }
+
+  // ── 3. Graus (contados por par único from→to, qualquer tipo de aresta) ──────
+  const inDegree: Record<string, number> = {};
+  const outDegree: Record<string, number> = {};
+  for (const f of files) { inDegree[f.relativePath] = 0; outDegree[f.relativePath] = 0; }
+
+  const seenPairs = new Set<string>();
+  for (const e of edgeMap.values()) {
+    const pair = `${e.from} ${e.to}`;
+    if (seenPairs.has(pair)) continue;
+    seenPairs.add(pair);
+    outDegree[e.from] = (outDegree[e.from] ?? 0) + 1;
+    inDegree[e.to] = (inDegree[e.to] ?? 0) + 1;
   }
 
   const nodes: GraphNode[] = files.map((f) => ({
@@ -85,9 +110,10 @@ export function buildDependencyGraph(files: ScannedFile[], rootPath: string): De
 
   return {
     nodes,
-    edges: edges.slice(0, 10_000), // limita arestas para não explodir memória
+    edges: [...edgeMap.values()].slice(0, 50_000),
     centralFiles,
-    externalDeps: [...externalDepsSet].sort().slice(0, 100)
+    externalDeps: [...externalDepsSet].sort().slice(0, 100),
+    semanticClasses: semantic.classes
   };
 }
 
@@ -95,10 +121,8 @@ function extractImports(content: string, ext: string): string[] {
   const imports: string[] = [];
 
   if (['.ts', '.tsx', '.js', '.jsx', '.mjs'].includes(ext)) {
-    // ES Modules: import ... from '...' / import('...')
     const esm = content.matchAll(/(?:import|from)\s+['"]([^'"]+)['"]/g);
     for (const m of esm) if (m[1]) imports.push(m[1]);
-    // require('...')
     const cjs = content.matchAll(/require\s*\(\s*['"]([^'"]+)['"]\s*\)/g);
     for (const m of cjs) if (m[1]) imports.push(m[1]);
   }

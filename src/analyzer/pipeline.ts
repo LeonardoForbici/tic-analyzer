@@ -165,12 +165,13 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     report('stack', 100, `${stack.primaryLanguage} — ${stack.frameworks.join(', ') || 'sem frameworks'}`);
 
     // ── 3. GRAFO ─────────────────────────────────────────────────────────────────
-    report('graph', 18, 'Construindo grafo de dependências...');
-    const graph = buildDependencyGraph(files, projectPath);
+    report('graph', 18, 'Construindo grafo de dependências (AST + símbolos)...');
+    const graph = await buildDependencyGraph(files, projectPath);
     // Salva para o visualizador interativo
     fs.writeFileSync(path.join(ticCodeDir, 'dep-graph.json'), JSON.stringify({ nodes: graph.nodes.slice(0, 3000), edges: graph.edges.slice(0, 5000) }), 'utf8');
     markDone('graph');
-    report('graph', 100, `${graph.nodes.length.toLocaleString()} nós, ${graph.edges.length.toLocaleString()} arestas`);
+    const resolvedEdges = graph.edges.filter((e) => e.confidence === 'resolved').length;
+    report('graph', 100, `${graph.nodes.length.toLocaleString()} nós, ${graph.edges.length.toLocaleString()} arestas (${resolvedEdges.toLocaleString()} resolvidas)`);
 
     // ── 4. RISCOS ────────────────────────────────────────────────────────────────
     report('risks', 26, 'Detectando riscos técnicos...');
@@ -340,7 +341,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
 
     // ── 18. HERANÇA ───────────────────────────────────────────────────────────────
     report('inheritance', 84, 'Detectando hierarquia de classes...');
-    const inheritanceTree = detectInheritance(files);
+    const inheritanceTree = detectInheritance(files, graph.semanticClasses);
     if (inheritanceTree.classes.length > 0) {
       const inheritanceReport = formatInheritanceReport(inheritanceTree);
       fs.writeFileSync(path.join(ticCodeDir, 'inheritance.md'), inheritanceReport, 'utf8');
