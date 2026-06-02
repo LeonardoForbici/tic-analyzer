@@ -58,6 +58,29 @@ Verificação: `npm run verify` roda o resolvedor sobre `test/fixtures/semantic`
 
 ---
 
+## Trace cross-tier — impacto end-to-end (React → Java → PL/SQL)
+
+A tool MCP `trace_flow` reconstrói a **cadeia de impacto ininterrupta** entre as
+camadas, unificando dois grafos que vivem no `index.db`: o **intra-código
+resolvido** (Fase 1) e o **cross-tier** (HTTP/DB/PL-SQL), usando os arquivos como
+ponte. Pergunta típica — *"o que quebra se eu mudar `PKG_CLIENTE.SALVAR`?"* —
+devolve:
+
+```
+🖥️ TelaCliente
+  ↓ ☕ ClienteController
+  ↓ 📄 ClienteServiceImpl
+  ↓ 📄 ClienteRepository
+  ↓ 🗄️ PKG_CLIENTE
+```
+
+O miolo `Service → Repository`, que o multigrafo antigo pulava, agora aparece —
+porque a query atravessa as arestas `call` resolvidas (Fase 1) e os saltos
+HTTP/DB cross-tier num único espaço de nós. Verificação:
+`test/fixtures/crosstier`.
+
+---
+
 ## O que é analisado — 30 fases
 
 | # | Fase | O que produz |
@@ -207,6 +230,7 @@ npm run dist:linux   # → release/TIC Analyzer.AppImage
 | Grafo por AST + símbolos resolvidos (TS/Java) | Sim | Sim (Fase 1) |
 | Confiança por aresta (resolved/inferred) | Parcial | Sim |
 | Índice consultável em escala (70k+ arquivos) | Sim | Sim (SQLite, Fase 2) |
+| Trace de impacto cross-tier (React→Java→PL/SQL) | Sim | Sim (Fase 3) |
 | PL/SQL data flow (tabelas por procedure) | Sim | Sim |
 | Dead PL/SQL detection | Sim | Sim |
 | Spring @Transactional mapping | Sim | Sim |

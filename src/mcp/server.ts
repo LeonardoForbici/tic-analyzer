@@ -10,7 +10,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { ImpactIndex } from '../analyzer/buildImpactIndex';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
-import { queryImpact, queryFindPath, querySearch, queryCallGraph } from './queries';
+import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace } from './queries';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
 interface CallGraphEdge { from: string; to: string; type: string; confidence: string; label?: string; }
@@ -891,7 +891,8 @@ export class TicAnalyzerMcpServer {
 
         case 'trace_flow': {
           const entry = ((args as { entry: string }).entry ?? '').trim();
-          return respond({ content: [{ type: 'text', text: this.traceFlowTool(entry) }] });
+          const unified = this.crossTierTraceTool(entry);
+          return respond({ content: [{ type: 'text', text: unified ?? this.traceFlowTool(entry) }] });
         }
 
         case 'search_code': {
@@ -963,6 +964,65 @@ export class TicAnalyzerMcpServer {
     if (!fs.existsSync(p)) return null;
     this.callGraphCache = JSON.parse(fs.readFileSync(p, 'utf8')) as { nodes: CallGraphNode[]; edges: CallGraphEdge[] };
     return this.callGraphCache;
+  }
+
+  /**
+   * Trace cross-tier unificado (Fase 3): caminha sobre o grafo intra-código
+   * (resolvido) + o cross-tier (HTTP/DB/PL-SQL) no index.db, devolvendo a cadeia
+   * ininterrupta de impacto. Retorna null se não há DB ou o entry não casa
+   * (cai para o traceFlowTool legado).
+   */
+  private crossTierTraceTool(entry: string): string | null {
+    if (!entry) return null;
+    const db = openIndexDb(this.indexDbPath);
+    if (!db) return null;
+    try {
+      const trace = queryCrossTierTrace(db, entry);
+      if (!trace.entry) return null;
+
+      const tierIcon: Record<string, string> = { frontend: '🖥️', backend: '☕', database: '🗄️', code: '📄' };
+      const lines: string[] = [
+        `# Trace cross-tier: \`${trace.entry.label}\``,
+        '',
+        `Camada de origem: ${tierIcon[trace.entry.layer] ?? ''} ${trace.entry.layer}`,
+        ''
+      ];
+
+      if (trace.samplePath.length > 1) {
+        lines.push('## Cadeia de impacto (chamador → … → alterado)');
+        lines.push('');
+        lines.push('```');
+        trace.samplePath.forEach((n, i) => {
+          const arrow = i === 0 ? '' : '  ↓ ';
+          lines.push(`${arrow}${tierIcon[n.layer] ?? ''} ${n.label}`);
+        });
+        lines.push('```');
+        lines.push('');
+      }
+
+      const byLayer = (layer: string) => trace.upstream.filter((n) => n.layer === layer);
+      const tiers: Array<[string, string]> = [
+        ['frontend', 'Frontend afetado'],
+        ['backend', 'Backend afetado'],
+        ['code', 'Código afetado'],
+        ['database', 'Banco afetado']
+      ];
+      lines.push(`## Quem quebra se \`${trace.entry.label}\` mudar (${trace.upstream.length})`);
+      lines.push('');
+      for (const [layer, title] of tiers) {
+        const items = byLayer(layer);
+        if (items.length === 0) continue;
+        lines.push(`### ${tierIcon[layer] ?? ''} ${title} (${items.length})`);
+        for (const n of items.slice(0, 25)) lines.push(`- \`${n.label}\``);
+        if (items.length > 25) lines.push(`- … e mais ${items.length - 25}`);
+        lines.push('');
+      }
+      if (trace.upstream.length === 0) lines.push('_Nenhum chamador encontrado — este ponto não é alcançado por outras camadas._');
+
+      return lines.join('\n').trim();
+    } finally {
+      db.close();
+    }
   }
 
   private traceFlowTool(entry: string): string {
