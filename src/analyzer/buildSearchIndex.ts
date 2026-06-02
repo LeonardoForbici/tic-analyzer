@@ -109,7 +109,7 @@ function buildSnippet(lines: string[]): string {
   return meaningful.join(' | ');
 }
 
-export function buildSearchIndex(files: ScannedFile[], ticCodeDir: string): void {
+export function buildSearchIndex(files: ScannedFile[], ticCodeDir: string): SearchIndexEntry[] {
   const index: SearchIndexEntry[] = [];
 
   for (const file of files) {
@@ -144,4 +144,5 @@ export function buildSearchIndex(files: ScannedFile[], ticCodeDir: string): void
   }
 
   fs.writeFileSync(path.join(ticCodeDir, 'search-index.json'), JSON.stringify(index), 'utf8');
+  return index;
 }

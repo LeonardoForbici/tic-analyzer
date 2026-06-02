@@ -58,7 +58,7 @@ Verificação: `npm run verify` roda o resolvedor sobre `test/fixtures/semantic`
 
 ---
 
-## O que é analisado — 29 fases
+## O que é analisado — 30 fases
 
 | # | Fase | O que produz |
 |---|------|-------------|
@@ -89,8 +89,9 @@ Verificação: `npm run verify` roda o resolvedor sobre `test/fixtures/semantic`
 | 25 | Batch jobs | @Scheduled, @Async, Quartz Job, Spring Batch |
 | 26 | Módulos Angular/NgRx | @NgModule, lazy routes, actions, reducers, effects, selectors |
 | 27 | Dead components | React/Angular components com inDegree=0 no grafo |
-| 28 | Export JSON | `analysis.json` estruturado com todos os dados |
-| 29 | Arquivos para IA | `CLAUDE.md` e `.github/copilot-instructions.md` |
+| 28 | Índice consultável (SQLite) | `index.db` — grafo/símbolos/busca FTS5 **sem teto de nós**, consultado pelo MCP |
+| 29 | Export JSON | `analysis.json` estruturado com todos os dados |
+| 30 | Arquivos para IA | `CLAUDE.md` e `.github/copilot-instructions.md` |
 
 ---
 
@@ -134,7 +135,8 @@ Verificação: `npm run verify` roda o resolvedor sobre `test/fixtures/semantic`
 .tic-code/
 ├── quick-context.md          # resumo ~12k tokens
 ├── index.md                  # mapa de navegação
-├── dep-graph.json            # grafo de dependências
+├── index.db                  # índice consultável (SQLite) — fonte do MCP, sem teto de nós
+├── dep-graph.json            # grafo de dependências (subconjunto p/ o visualizador da UI)
 ├── call-graph.json           # grafo multi-camada
 ├── impact-index.json         # índice de impacto de mudanças
 ├── analysis.json             # export estruturado completo
@@ -190,12 +192,21 @@ npm run dist:mac     # → release/TIC Analyzer.dmg
 npm run dist:linux   # → release/TIC Analyzer.AppImage
 ```
 
+> **Módulo nativo (`better-sqlite3`):** o `index.db` usa um módulo nativo. O
+> empacotamento (`dist:*`) recompila-o para o runtime do Electron
+> automaticamente (electron-builder). Para `npm run dev`, rode
+> `npm run rebuild:electron` uma vez. Os scripts de verificação (`npm run
+> verify`) rodam sob Node e usam o binário Node-ABI.
+
 ---
 
 ## TIC Analyzer vs CAST Imaging
 
 | Feature | CAST Imaging | TIC Analyzer |
 |---------|-------------|-------------|
+| Grafo por AST + símbolos resolvidos (TS/Java) | Sim | Sim (Fase 1) |
+| Confiança por aresta (resolved/inferred) | Parcial | Sim |
+| Índice consultável em escala (70k+ arquivos) | Sim | Sim (SQLite, Fase 2) |
 | PL/SQL data flow (tabelas por procedure) | Sim | Sim |
 | Dead PL/SQL detection | Sim | Sim |
 | Spring @Transactional mapping | Sim | Sim |

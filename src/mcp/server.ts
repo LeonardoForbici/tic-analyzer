@@ -9,6 +9,8 @@ import {
   ListToolsRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 import type { ImpactIndex } from '../analyzer/buildImpactIndex';
+import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
+import { queryImpact, queryFindPath, querySearch, queryCallGraph } from './queries';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
 interface CallGraphEdge { from: string; to: string; type: string; confidence: string; label?: string; }
@@ -54,6 +56,11 @@ export class TicAnalyzerMcpServer {
   private callGraphCache: { nodes: CallGraphNode[]; edges: CallGraphEdge[] } | null = null;
   private searchIndexCache: SearchIndexEntry[] | null = null;
   private invertedIndexCache: Map<string, string[]> | null = null;
+
+  /** Caminho do índice SQLite consultável (escala sem o teto de 3000 nós). */
+  private get indexDbPath(): string {
+    return path.join(this.ticCodePath, INDEX_DB_FILE);
+  }
 
   constructor(options: McpServerOptions) {
     this.projectPath = options.projectPath;
@@ -376,6 +383,36 @@ export class TicAnalyzerMcpServer {
 
         case 'get_impact': {
           const fileArg = (args as { file: string }).file;
+
+          // Consulta o índice SQLite (sem teto de 3000 nós). Fallback: JSON.
+          const impactDb = openIndexDb(this.indexDbPath);
+          if (impactDb) {
+            try {
+              const r = queryImpact(impactDb, fileArg);
+              if (!r) {
+                return respond({ content: [{ type: 'text', text: `Nenhum dependente encontrado para "${fileArg}". Este arquivo não é importado por outros.` }] });
+              }
+              const lines = [
+                `# Impacto de Mudança: \`${fileArg}\``,
+                '',
+                `| Métrica | Valor |`,
+                `| --- | --- |`,
+                `| Dependentes diretos | ${r.directCount} |`,
+                `| Dependentes transitivos | ${r.transitiveCount} |`,
+                '',
+                '## Dependentes Diretos',
+                ...r.direct.map((f) => `- \`${f}\``),
+                '',
+                r.transitive.length > 0 ? '## Impacto Transitivo (sample)' : '',
+                ...r.transitive.slice(0, 20).map((f) => `- \`${f}\``),
+                r.transitiveCount > 20 ? `- ... e mais ${r.transitiveCount - 20} arquivos afetados` : ''
+              ].filter((l) => l !== undefined);
+              return respond({ content: [{ type: 'text', text: lines.join('\n') }] });
+            } finally {
+              impactDb.close();
+            }
+          }
+
           const indexPath = path.join(this.ticCodePath, 'impact-index.json');
           if (!fs.existsSync(indexPath)) {
             return respond({ content: [{ type: 'text', text: 'impact-index.json não encontrado. Execute a análise novamente.' }] });
@@ -752,6 +789,32 @@ export class TicAnalyzerMcpServer {
         case 'find_path': {
           const fromArg = ((args as { from: string }).from ?? '').trim();
           const toArg = ((args as { to: string }).to ?? '').trim();
+
+          // Consulta o índice SQLite (grafo completo, sem teto). Fallback: JSON.
+          const pathDb = openIndexDb(this.indexDbPath);
+          if (pathDb) {
+            try {
+              const res = queryFindPath(pathDb, fromArg, toArg);
+              if ('error' in res) return respond({ content: [{ type: 'text', text: res.error }] });
+              if (res.pathFiles && res.pathFiles.length === 1) {
+                return respond({ content: [{ type: 'text', text: '✅ Origem e destino são o mesmo arquivo.' }] });
+              }
+              if (!res.pathFiles) {
+                return respond({ content: [{ type: 'text', text: `Nenhum caminho encontrado entre "${fromArg}" e "${toArg}".\nEsses arquivos podem não se conectar por dependências de import.` }] });
+              }
+              const pathLines = [
+                `# Caminho: \`${fromArg}\` → \`${toArg}\``,
+                '',
+                `**${res.pathFiles.length - 1} salto(s)**`,
+                '',
+                ...res.pathFiles.map((p, i) => `${i + 1}. \`${p}\``)
+              ];
+              return respond({ content: [{ type: 'text', text: pathLines.join('\n') }] });
+            } finally {
+              pathDb.close();
+            }
+          }
+
           const graphPath = path.join(this.ticCodePath, 'dep-graph.json');
           if (!fs.existsSync(graphPath)) {
             return respond({ content: [{ type: 'text', text: 'dep-graph.json não encontrado. Execute a análise novamente.' }] });
@@ -881,6 +944,21 @@ export class TicAnalyzerMcpServer {
 
   private loadCallGraph(): { nodes: CallGraphNode[]; edges: CallGraphEdge[] } | null {
     if (this.callGraphCache) return this.callGraphCache;
+
+    // Fonte preferencial: índice SQLite (fonte única). Fallback: call-graph.json.
+    const db = openIndexDb(this.indexDbPath);
+    if (db) {
+      try {
+        const cg = queryCallGraph(db);
+        if (cg.nodes.length > 0) {
+          this.callGraphCache = cg as { nodes: CallGraphNode[]; edges: CallGraphEdge[] };
+          return this.callGraphCache;
+        }
+      } finally {
+        db.close();
+      }
+    }
+
     const p = path.join(this.ticCodePath, 'call-graph.json');
     if (!fs.existsSync(p)) return null;
     this.callGraphCache = JSON.parse(fs.readFileSync(p, 'utf8')) as { nodes: CallGraphNode[]; edges: CallGraphEdge[] };
@@ -1089,6 +1167,34 @@ export class TicAnalyzerMcpServer {
 
   private searchCodeTool(query: string): string {
     if (!query) return 'Informe um query para busca.';
+
+    const queryTokensFts = this.tokenizeQuery(query);
+    if (queryTokensFts.length === 0) return 'Query muito curta. Use pelo menos 3 caracteres.';
+
+    // Busca preferencial via FTS5 no índice SQLite. Fallback: índice invertido JSON.
+    const searchDb = openIndexDb(this.indexDbPath);
+    if (searchDb) {
+      try {
+        const hits = querySearch(searchDb, queryTokensFts, 10);
+        if (hits.length === 0) {
+          return `Nenhum arquivo encontrado para "${query}". Tente termos mais gerais.`;
+        }
+        const lines: string[] = [
+          `## Resultados para: "${query}"`,
+          `*${hits.length} arquivos relevantes (FTS5/BM25)*`,
+          ''
+        ];
+        for (const hit of hits) {
+          lines.push(`### \`${hit.file}\` (score: ${hit.score})`);
+          if (hit.snippet) lines.push(`> ${hit.snippet}`);
+          lines.push('');
+        }
+        lines.push(`*Tokens da query: ${queryTokensFts.join(', ')}*`);
+        return lines.join('\n');
+      } finally {
+        searchDb.close();
+      }
+    }
 
     const entries = this.loadSearchIndex();
     if (entries.length === 0) {

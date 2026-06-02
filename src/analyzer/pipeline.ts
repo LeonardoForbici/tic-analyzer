@@ -31,6 +31,7 @@ import { detectPatterns, formatPatternsReport } from './detectPatterns';
 import { detectDbSchema, formatDbSchemaReport, formatDbSchemaSummary } from './detectDbSchema';
 import { exportAnalysis } from './exportAnalysis';
 import { buildSearchIndex } from './buildSearchIndex';
+import { writeIndexDb, INDEX_DB_FILE } from './store/indexDb';
 import { loadFileCache, computeChangedFiles, saveFileCache } from './buildFileCache';
 
 export type PhaseStatus = 'pending' | 'running' | 'done' | 'error';
@@ -104,6 +105,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'angular-modules', label: 'Detectando módulos Angular e NgRx', status: 'pending' },
   { id: 'dead-components', label: 'Detectando componentes sem uso (dead code)', status: 'pending' },
   { id: 'search-index', label: 'Construindo índice de busca por código', status: 'pending' },
+  { id: 'persist-index', label: 'Gravando índice consultável (SQLite)', status: 'pending' },
   { id: 'export-json', label: 'Exportando analysis.json', status: 'pending' },
   { id: 'ai-files', label: 'Gerando arquivos para IA', status: 'pending' }
 ];
@@ -420,10 +422,16 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
 
     // ── 24b. SEARCH INDEX ─────────────────────────────────────────────────────────
     report('search-index', 95, 'Indexando termos de código para busca semântica...');
-    buildSearchIndex(files, ticCodeDir);
+    const searchEntries = buildSearchIndex(files, ticCodeDir);
     markDone('search-index');
     const codeFileCount = files.filter((f) => ['.ts', '.tsx', '.js', '.jsx', '.java', '.py', '.cs', '.go', '.rs', '.php', '.rb', '.sql'].includes(f.extension)).length;
     report('search-index', 100, `${codeFileCount} arquivos indexados`);
+
+    // ── 24c. ÍNDICE PERSISTENTE (SQLite) ──────────────────────────────────────────
+    report('persist-index', 95, 'Gravando índice consultável (SQLite)...');
+    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries });
+    markDone('persist-index');
+    report('persist-index', 100, `index.db: ${dbStats.nodes.toLocaleString()} nós, ${dbStats.edges.toLocaleString()} arestas (sem teto)`);
 
     // ── 25. EXPORT JSON ───────────────────────────────────────────────────────────
     report('export-json', 92, 'Exportando analysis.json estruturado...');
