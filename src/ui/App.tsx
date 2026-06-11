@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo, MouseEvent as RMouseEvent } from 'react';
 import mermaid from 'mermaid';
 import { GraphViewer } from './GraphViewer';
+import { HierGraphViewer } from './HierGraphViewer';
+import { HealthDashboard } from './HealthDashboard';
 
 mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
 
@@ -16,6 +18,7 @@ declare global {
       readFile: (path: string) => Promise<string | null>;
       getGitDiff: (projectPath: string) => Promise<{ files: string[]; error?: string }>;
       getImpactOf: (projectPath: string, entity: string) => Promise<ImpactOfResponse>;
+      getGraphLevel: (projectPath: string, expanded: string[]) => Promise<unknown>;
       getTokenStats: () => Promise<TokenStats | null>;
       clearTokenStats: () => Promise<void>;
       onTokenUpdate: (cb: (entry: TokenEntry) => void) => () => void;
@@ -42,6 +45,7 @@ interface AnalysisResult {
   impactedFiles: number; inheritanceClasses: number;
   dbTables: number; cacheHits: number;
   transactions: number; batchJobs: number; angularModules: number; deadComponents: number;
+  impactEdges?: number; healthScore?: number; healthGrade?: string;
   error?: string;
 }
 interface ImpactedNode { id: string; kind: string; depth: number; confidence: string; module?: string; }
@@ -51,7 +55,7 @@ interface ImpactOfResponse {
   blast?: { entity: string; totalAffected: number; truncated: boolean; byKind: Record<string, number>; byModule: Record<string, number>; top: Array<{ id: string; kind: string; depth: number; dependents: number; confidence: string }> };
 }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
-type Tab = 'overview' | 'multigraph' | 'modules' | 'impact' | 'metrics' | 'files' | 'docs';
+type Tab = 'overview' | 'health' | 'explorer' | 'multigraph' | 'modules' | 'impact' | 'metrics' | 'files' | 'docs';
 
 const C = { bg: '#0f0f1a', card: '#16213e', border: '#2a2a4e', accent: '#7c83fd', green: '#56cfad', red: '#ff6b6b', orange: '#f0a500', text: '#e0e0e0', muted: '#888' };
 
@@ -1126,6 +1130,8 @@ export function App() {
 
   const TABS: Array<{ id: Tab; label: string }> = [
     { id: 'overview', label: 'Visão Geral' },
+    { id: 'health', label: 'Saúde' },
+    { id: 'explorer', label: 'Explorador' },
     { id: 'impact', label: 'Impacto' },
     { id: 'metrics', label: 'Métricas' },
     { id: 'multigraph', label: 'Multi-Grafo' },
@@ -1214,6 +1220,11 @@ export function App() {
                   <div style={{ marginBottom: '16px', fontWeight: 600, fontSize: '14px', color: C.green }}>Analise concluida</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '16px' }}>
                     {[
+                      ...(typeof result.healthScore === 'number' ? [{
+                        num: `${result.healthScore} ${result.healthGrade ?? ''}`.trim(),
+                        label: 'Health Score',
+                        color: result.healthScore >= 75 ? C.green : result.healthScore >= 60 ? C.orange : C.red
+                      }] : []),
                       { num: result.totalFiles.toLocaleString(), label: 'Arquivos', color: C.accent },
                       { num: result.totalLines.toLocaleString(), label: 'Linhas', color: C.accent },
                       { num: result.modulesGenerated.toString(), label: 'Modulos', color: C.accent },
@@ -1257,7 +1268,7 @@ export function App() {
                         {`{"mcpServers":{"tic-analyzer":{"url":"http://localhost:${mcpPort}/mcp"}}}`}
                       </div>
                       <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_impact_of','get_blast_radius','get_table_impact','get_diff_impact','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
+                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_impact_of','get_blast_radius','get_table_impact','get_diff_impact','get_health','get_graph_level','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
                           <span key={tool} style={{ padding: '2px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '4px', fontSize: '11px', color: C.accent, fontFamily: 'monospace' }}>{tool}</span>
                         ))}
                       </div>
@@ -1272,6 +1283,20 @@ export function App() {
                   )}
                 </div>
               </>
+            )}
+
+            {activeTab === 'health' && (
+              <div style={S.card}><HealthDashboard ticCodeDir={result.outputPath} /></div>
+            )}
+
+            {activeTab === 'explorer' && (
+              <div style={S.card}>
+                <div style={{ marginBottom: '12px' }}>
+                  <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>Explorador Hierárquico</div>
+                  <div style={{ fontSize: '12px', color: C.muted }}>Aplicação → Camadas → Módulos → Arquivos → Símbolos · peso da aresta = nº de dependências agregadas</div>
+                </div>
+                <HierGraphViewer projectPath={projectPath} />
+              </div>
             )}
 
             {activeTab === 'impact' && (
