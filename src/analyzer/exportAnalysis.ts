@@ -15,6 +15,7 @@ import type { ImpactIndex } from './buildImpactIndex';
 import type { TransactionBoundary } from './detectTransactions';
 import type { BatchJob } from './detectBatchJobs';
 import type { AngularModule, NgRxItem } from './detectAngularModules';
+import type { HealthScore } from './computeHealthScore';
 
 export interface ExportData {
   projectName: string;
@@ -39,6 +40,7 @@ export interface ExportData {
   angularModules: AngularModule[];
   ngrxItems: NgRxItem[];
   deadComponents: Array<{ file: string; type: 'react' | 'angular' }>;
+  health?: HealthScore;
 }
 
 export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
@@ -47,6 +49,7 @@ export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
   const analysis = {
     version: '2.0',
     analyzedAt: new Date().toISOString(),
+    health: data.health,
     project: {
       name: data.projectName,
       totalFiles: data.files.length,

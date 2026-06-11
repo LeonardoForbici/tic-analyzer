@@ -214,6 +214,11 @@ export class TicAnalyzerMcpServer {
           }
         },
         {
+          name: 'get_health',
+          description: 'Health score do projeto (0-100, grade A-E) com breakdown por dimensão (dívida, riscos, violações, dead code, acoplamento) e delta vs análise anterior. ~200 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
           name: 'get_metrics',
           description: 'Retorna métricas de qualidade de um módulo: complexidade ciclomática, hotspots, dívida técnica.',
           inputSchema: {
@@ -549,6 +554,37 @@ export class TicAnalyzerMcpServer {
             }
             return respond(textResult(formatBlastRadius(r)));
           } finally { db.close(); }
+        }
+
+        case 'get_health': {
+          const snapPath = path.join(this.ticCodePath, 'snapshots.json');
+          if (!fs.existsSync(snapPath)) {
+            return respond(textResult('snapshots.json não encontrado. Execute a análise novamente (versão atual gera health score).'));
+          }
+          let snaps: any[] = [];
+          try { snaps = JSON.parse(fs.readFileSync(snapPath, 'utf8')); } catch { /* corrompido */ }
+          if (!Array.isArray(snaps) || snaps.length === 0) {
+            return respond(textResult('Nenhum snapshot de health disponível. Execute a análise.'));
+          }
+          const cur = snaps[snaps.length - 1];
+          const prev = snaps.length > 1 ? snaps[snaps.length - 2] : null;
+          const delta = prev ? Math.round((cur.score - prev.score) * 10) / 10 : null;
+          const lines = [
+            `# Health Score: ${cur.score}/100 (grade ${cur.grade})`,
+            delta !== null ? `Δ vs análise anterior: ${delta > 0 ? '+' : ''}${delta} (era ${prev.score})` : '(primeira análise — sem histórico)',
+            `Analisado em: ${cur.timestamp}${cur.gitSha ? ` · git ${String(cur.gitSha).slice(0, 8)}` : ''}`,
+            '',
+            '## Penalidades por dimensão',
+            '| Dimensão | Penalidade | Bruto |',
+            '| --- | --- | --- |',
+            ...Object.entries(cur.breakdown as Record<string, { penalty: number; raw: number; max: number }>)
+              .sort((a, b) => b[1].penalty - a[1].penalty)
+              .map(([k, v]) => `| ${k} | -${v.penalty} (máx ${v.max}) | ${v.raw} |`),
+            '',
+            `Contagens: riscos ${cur.counts.risks} · violações ${cur.counts.violations} · hotspots ${cur.counts.hotspots} · dead code ${cur.counts.deadComponents + cur.counts.deadPlsql} · arestas resolvidas ${cur.counts.resolvedEdges}/${cur.counts.totalEdges}`,
+            `Histórico: ${snaps.length} análise(s) em snapshots.json`
+          ];
+          return respond(textResult(lines.join('\n')));
         }
 
         case 'get_metrics': {

@@ -37,6 +37,8 @@ import { exportAnalysis } from './exportAnalysis';
 import { buildSearchIndex } from './buildSearchIndex';
 import { writeIndexDb, INDEX_DB_FILE } from './store/indexDb';
 import { loadFileCache, computeChangedFiles, saveFileCache } from './buildFileCache';
+import { computeHealthScore } from './computeHealthScore';
+import { appendSnapshot } from './store/snapshots';
 
 export type PhaseStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -77,6 +79,9 @@ export interface PipelineResult {
   deadComponents: number;
   /** Arestas do grafo de impacto unificado (file/method/plsql/table/column). */
   impactEdges?: number;
+  /** Health score do projeto (0–100) e grade (A–E). */
+  healthScore?: number;
+  healthGrade?: string;
   /** Duração (ms) por fase — para identificar gargalos em projetos grandes. */
   phaseTimings?: Record<string, number>;
   error?: string;
@@ -113,6 +118,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'batch-jobs', label: 'Detectando @Scheduled, @Async e batch jobs', status: 'pending' },
   { id: 'angular-modules', label: 'Detectando módulos Angular e NgRx', status: 'pending' },
   { id: 'dead-components', label: 'Detectando componentes sem uso (dead code)', status: 'pending' },
+  { id: 'health', label: 'Computando health score do projeto', status: 'pending' },
   { id: 'search-index', label: 'Construindo índice de busca por código', status: 'pending' },
   { id: 'persist-index', label: 'Gravando índice consultável (SQLite)', status: 'pending' },
   { id: 'export-json', label: 'Exportando analysis.json', status: 'pending' },
@@ -446,6 +452,34 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('dead-components');
     report('dead-components', 100, `${deadComponents.length} componentes sem importadores detectados`);
 
+    // ── 24a. HEALTH SCORE + SNAPSHOT ─────────────────────────────────────────────
+    report('health', 94, 'Computando health score do projeto...');
+    const health = computeHealthScore({
+      totalFiles: files.length, totalLines, metrics, risks, violations,
+      deadComponents: deadComponents.length, deadPlsql: deadPlsql.length, edges: graph.edges
+    });
+    appendSnapshot(ticCodeDir, projectPath, {
+      totalFiles: files.length,
+      totalLines,
+      score: health.score,
+      grade: health.grade,
+      breakdown: health.breakdown,
+      counts: {
+        risks: risks.length,
+        violations: violations.length,
+        hotspots: metrics.hotspotCount,
+        deadComponents: deadComponents.length,
+        deadPlsql: deadPlsql.length,
+        resolvedEdges,
+        totalEdges: graph.edges.length,
+        endpoints: endpoints.length,
+        modules: modules.length,
+        impactEdges: impactEdges.length
+      }
+    });
+    markDone('health');
+    report('health', 100, `Health score: ${health.score}/100 (grade ${health.grade})`);
+
     // ── 24b. SEARCH INDEX ─────────────────────────────────────────────────────────
     report('search-index', 95, 'Indexando termos de código para busca semântica...');
     const searchEntries = buildSearchIndex(files, ticCodeDir);
@@ -470,7 +504,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     exportAnalysis(ticCodeDir, {
       projectName, projectPath, files, totalLines, stack, modules, endpoints, graph, risks,
       metrics, fileMetrics: metrics.files, violations, patternMatches, inheritanceTree,
-      dbSchema, impactIndex, quickContextTokens,
+      dbSchema, impactIndex, quickContextTokens, health,
       transactionBoundaries, batchJobs, angularModules, ngrxItems, deadComponents
     });
     markDone('export-json');
@@ -508,6 +542,8 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       angularModules: angularModules.length,
       deadComponents: deadComponents.length,
       impactEdges: impactEdges.length,
+      healthScore: health.score,
+      healthGrade: health.grade,
       phaseTimings
     };
 
