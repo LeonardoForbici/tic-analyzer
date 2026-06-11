@@ -1,0 +1,38 @@
+# CI do TIC Analyzer: build + suíte de verificação completa + smoke test da CLI.
+#
+# IMPORTANTE: nunca rodar `npm run rebuild:electron` aqui — ele recompila o
+# better-sqlite3 para a ABI do Electron e quebra a execução em Node puro.
+# O `npm ci` usa os prebuilds Node (linux-x64) que funcionam direto.
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify (build + suíte completa)
+        run: npm run verify
+
+      - name: Smoke test CLI
+        run: |
+          node dist/src/cli/index.js analyze test/fixtures/crosstier --no-ai-files --json > /tmp/result.json
+          node -e "
+            const r = require('/tmp/result.json');
+            if (!r.success) { console.error('analyze falhou', r.error); process.exit(1); }
+            if (typeof r.healthScore !== 'number') { console.error('sem healthScore'); process.exit(1); }
+            console.log('CLI ok — health', r.healthScore, 'grade', r.healthGrade);
+          "

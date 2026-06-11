@@ -12,13 +12,14 @@
     "build:electron": "tsc -p tsconfig.electron.json && npm run copy:grammars",
     "copy:grammars": "node scripts/copy-grammars.mjs",
     "rebuild:electron": "electron-builder install-app-deps",
-    "verify": "npm run build:electron && node scripts/verify-semantic.mjs && node scripts/verify-store.mjs && node scripts/verify-crosstier.mjs && node scripts/verify-orm.mjs && node scripts/verify-impact.mjs && node scripts/verify-health.mjs && node scripts/verify-embeddings.mjs",
+    "verify": "npm run build:electron && node scripts/verify-semantic.mjs && node scripts/verify-store.mjs && node scripts/verify-crosstier.mjs && node scripts/verify-orm.mjs && node scripts/verify-impact.mjs && node scripts/verify-health.mjs && node scripts/verify-pr-review.mjs && node scripts/verify-embeddings.mjs",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
     "dist:win:portable": "npm run build && electron-builder --win zip",
     "dist:win:dir": "npm run build && electron-builder --win dir",
     "dist:mac": "npm run build && electron-builder --mac",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "dist:linux": "npm run build && electron-builder --linux",
+    "cli": "node dist/src/cli/index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
@@ -69,5 +70,8 @@
       "target": "AppImage",
       "icon": "assets/icon.png"
     }
+  },
+  "bin": {
+    "tic-analyzer": "dist/src/cli/index.js"
   }
 }

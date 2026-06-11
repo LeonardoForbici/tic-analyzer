@@ -127,7 +127,9 @@ export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
       critical: risksByLevel('critical'),
       high: risksByLevel('high'),
       medium: risksByLevel('medium'),
-      low: risksByLevel('low')
+      low: risksByLevel('low'),
+      // Lista por arquivo+regra (sem linha — linhas deslocam) p/ delta entre análises (PR review)
+      items: data.risks.map((r) => ({ level: r.level, title: r.title, file: r.file }))
     },
     impact: {
       indexedFiles: Object.keys(data.impactIndex).length,

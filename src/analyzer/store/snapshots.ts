@@ -61,7 +61,7 @@ export function appendSnapshot(ticCodeDir: string, projectPath: string, snapshot
 
 function gitSha(projectPath: string): string | undefined {
   try {
-    return execSync('git rev-parse HEAD', { cwd: projectPath, encoding: 'utf8', timeout: 3000 }).trim() || undefined;
+    return execSync('git rev-parse HEAD', { cwd: projectPath, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || undefined;
   } catch {
     return undefined;
   }

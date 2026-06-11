@@ -1,0 +1,26 @@
+# Dogfood: roda o próprio TIC Analyzer PR Review nos PRs deste repositório.
+# Para usar em OUTRO repositório:
+#
+#   - uses: <org>/tic-coder-lite@v1
+#     with:
+#       gate: new-high-risks,health-drop:5
+name: TIC PR Review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  tic-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: ./
+        with:
+          gate: new-high-risks

@@ -89,6 +89,11 @@ export interface PipelineResult {
 
 export type ProgressCallback = (progress: PipelineProgress) => void;
 
+export interface PipelineOptions {
+  /** Pula a geração de CLAUDE.md/copilot-instructions.md no projeto analisado (CI não deve sujar o checkout). */
+  skipAiFiles?: boolean;
+}
+
 const PHASES: PipelinePhase[] = [
   { id: 'scan', label: 'Escaneando arquivos', status: 'pending' },
   { id: 'stack', label: 'Detectando stack', status: 'pending' },
@@ -125,7 +130,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'ai-files', label: 'Gerando arquivos para IA', status: 'pending' }
 ];
 
-export async function runPipeline(projectPath: string, onProgress: ProgressCallback): Promise<PipelineResult> {
+export async function runPipeline(projectPath: string, onProgress: ProgressCallback, opts: PipelineOptions = {}): Promise<PipelineResult> {
   const normalized = projectPath.replace(/[\\/]$/, '');
   if (normalized.endsWith('.tic-code')) {
     return {
@@ -514,11 +519,16 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     saveFileCache(ticCodeDir, files);
 
     // ── 22. ARQUIVOS PARA IA ─────────────────────────────────────────────────────
-    report('ai-files', 94, 'Gerando copilot-instructions.md e CLAUDE.md...');
-    writeCopilotInstructions(projectPath, projectName, files.length, modules);
-    writeClaudeMd(projectPath, projectName, files.length, modules);
-    markDone('ai-files');
-    report('ai-files', 100, 'Concluído!');
+    if (opts.skipAiFiles) {
+      markDone('ai-files');
+      report('ai-files', 100, 'Concluído! (arquivos de IA pulados — modo CI)');
+    } else {
+      report('ai-files', 94, 'Gerando copilot-instructions.md e CLAUDE.md...');
+      writeCopilotInstructions(projectPath, projectName, files.length, modules);
+      writeClaudeMd(projectPath, projectName, files.length, modules);
+      markDone('ai-files');
+      report('ai-files', 100, 'Concluído!');
+    }
 
     return {
       success: true,

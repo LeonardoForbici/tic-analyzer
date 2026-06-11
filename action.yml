@@ -1,0 +1,106 @@
+name: 'TIC Analyzer PR Review'
+description: >
+  Análise estática local (zero tokens de IA) que comenta no PR o impacto
+  cross-tier das mudanças, riscos novos, violações arquiteturais e delta do
+  health score. Compara a branch base (merge-base) com o head do PR.
+author: 'TIC Analyzer'
+
+inputs:
+  base-ref:
+    description: 'Branch base do PR (default: github.base_ref)'
+    required: false
+    default: ${{ github.base_ref }}
+  gate:
+    description: 'Quality gates: new-high-risks, new-violations, health-drop:N (separados por vírgula). Vazio = só comenta.'
+    required: false
+    default: ''
+  comment:
+    description: 'Postar/atualizar comentário sticky no PR (precisa de permissions: pull-requests: write)'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'Token para o comentário no PR'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout TIC Analyzer
+      uses: actions/checkout@v4
+      with:
+        # action_repository/ref ficam vazios quando usada localmente (uses: ./) — cai no próprio repo
+        repository: ${{ github.action_repository || github.repository }}
+        ref: ${{ github.action_ref || github.sha }}
+        path: .tic-analyzer-tool
+
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: npm
+        cache-dependency-path: .tic-analyzer-tool/package-lock.json
+
+    - name: Build analyzer (sem electron-builder — better-sqlite3 usa prebuild Node)
+      shell: bash
+      working-directory: .tic-analyzer-tool
+      run: |
+        npm ci --no-audit --no-fund
+        npm run build:electron
+
+    - name: Analyze base (merge-base) e head
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+      run: |
+        set -euo pipefail
+        git fetch origin "$BASE_REF" --depth=200 || git fetch origin "$BASE_REF"
+        MERGE_BASE=$(git merge-base "origin/$BASE_REF" HEAD)
+        echo "merge-base: $MERGE_BASE"
+        git worktree add /tmp/tic-base "$MERGE_BASE"
+        node .tic-analyzer-tool/dist/src/cli/index.js analyze /tmp/tic-base --no-ai-files
+        node .tic-analyzer-tool/dist/src/cli/index.js analyze "$PWD" --no-ai-files
+
+    - name: Compare e gera report
+      id: review
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+        GATE: ${{ inputs.gate }}
+      run: |
+        set +e
+        node .tic-analyzer-tool/dist/src/cli/index.js pr-review \
+          --base /tmp/tic-base --head "$PWD" \
+          --base-ref "origin/$BASE_REF" \
+          ${GATE:+--gate "$GATE"} \
+          --out /tmp/tic-report.md
+        echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+    - name: Comentário sticky no PR
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        MARKER='<!-- tic-analyzer-report -->'
+        EXISTING=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" | head -1)
+        if [ -n "$EXISTING" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$EXISTING" -F body=@/tmp/tic-report.md
+        else
+          gh api "repos/$REPO/issues/$PR/comments" -F body=@/tmp/tic-report.md
+        fi
+
+    - name: Quality gate
+      shell: bash
+      run: |
+        if [ "${{ steps.review.outputs.exit_code }}" = "1" ]; then
+          echo "::error::Quality gate do TIC Analyzer falhou (veja o comentário no PR)"
+          exit 1
+        elif [ "${{ steps.review.outputs.exit_code }}" != "0" ]; then
+          echo "::error::tic-analyzer pr-review terminou com erro"
+          exit 1
+        fi
