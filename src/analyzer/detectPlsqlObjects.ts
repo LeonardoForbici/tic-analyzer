@@ -15,6 +15,10 @@ export interface PlsqlObject {
   line: number;
   tablesRead: string[];
   tablesWritten: string[];
+  /** TRIGGER: tabela na cláusula ON — mudar a tabela dispara/afeta o trigger. */
+  onTable?: string;
+  /** SYNONYM: objeto alvo (FOR <alvo>), para resolver chamadas via sinônimo. */
+  synonymFor?: string;
 }
 
 export interface PlsqlCall {
@@ -239,7 +243,19 @@ export function detectPlsqlObjects(files: ScannedFile[]): { objects: PlsqlObject
       if (trigMatch) {
         const name = trigMatch[1].toUpperCase();
         currentObject = name;
-        objects.push({ type: 'TRIGGER', name, file: file.relativePath, line: lineNum, ...getAccess(name) });
+        // Cláusula ON <tabela> no cabeçalho (pode estar nas linhas seguintes,
+        // antes de FOR EACH ROW/DECLARE/BEGIN).
+        let onTable: string | undefined;
+        for (let j = i; j < Math.min(lines.length, i + 6); j++) {
+          const header = lines[j].toUpperCase();
+          if (j > i && /\b(DECLARE|BEGIN)\b/.test(header)) break;
+          const onMatch = header.match(/\bON\s+([\w$#.]+)/);
+          if (onMatch) {
+            onTable = canonTable(onMatch[1]) ?? undefined;
+            break;
+          }
+        }
+        objects.push({ type: 'TRIGGER', name, file: file.relativePath, line: lineNum, onTable, ...getAccess(name) });
         continue;
       }
 
@@ -273,7 +289,7 @@ export function detectPlsqlObjects(files: ScannedFile[]): { objects: PlsqlObject
       const synMatch = line.match(/CREATE\s+(?:OR\s+REPLACE\s+)?(?:PUBLIC\s+)?SYNONYM\s+(\w+)\s+FOR\s+(\w+(?:\.\w+)?)/i);
       if (synMatch) {
         const name = synMatch[1].toUpperCase();
-        objects.push({ type: 'SYNONYM', name, file: file.relativePath, line: lineNum, tablesRead: [], tablesWritten: [] });
+        objects.push({ type: 'SYNONYM', name, synonymFor: synMatch[2].toUpperCase(), file: file.relativePath, line: lineNum, tablesRead: [], tablesWritten: [] });
         continue;
       }
 

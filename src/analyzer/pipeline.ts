@@ -26,6 +26,7 @@ import { getEmbedder } from './semantic/embeddings';
 import type { SearchIndexEntry } from './buildSearchIndex';
 import { generateMultiGraph } from './generateMultiGraph';
 import { buildImpactIndex } from './buildImpactIndex';
+import { buildImpactGraph } from './buildImpactGraph';
 import { computeMetrics } from './computeMetrics';
 import { detectLayerViolations } from './detectLayerViolations';
 import { generateMetricsReport } from './generateMetricsReport';
@@ -74,6 +75,10 @@ export interface PipelineResult {
   batchJobs: number;
   angularModules: number;
   deadComponents: number;
+  /** Arestas do grafo de impacto unificado (file/method/plsql/table/column). */
+  impactEdges?: number;
+  /** Duração (ms) por fase — para identificar gargalos em projetos grandes. */
+  phaseTimings?: Record<string, number>;
   error?: string;
 }
 
@@ -99,6 +104,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'gaps', label: 'Gerando relatório de gaps', status: 'pending' },
   { id: 'multigraph', label: 'Gerando multi-grafo (frontend→endpoint→backend→PL/SQL)', status: 'pending' },
   { id: 'impact', label: 'Construindo índice de impacto', status: 'pending' },
+  { id: 'impact-graph', label: 'Consolidando grafo de impacto unificado', status: 'pending' },
   { id: 'metrics', label: 'Computando métricas de qualidade', status: 'pending' },
   { id: 'inheritance', label: 'Detectando hierarquia de classes', status: 'pending' },
   { id: 'patterns', label: 'Identificando padrões arquiteturais', status: 'pending' },
@@ -129,7 +135,11 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
   const ticCodeDir = path.join(projectPath, '.tic-code');
   const modulesDir = path.join(ticCodeDir, 'modules');
 
+  const phaseStart = new Map<string, number>();
+  const phaseTimings: Record<string, number> = {};
+
   const report = (phaseId: string, percent: number, detail: string) => {
+    if (!phaseStart.has(phaseId)) phaseStart.set(phaseId, Date.now());
     const phase = phases.find((p) => p.id === phaseId);
     if (phase) {
       phase.status = percent === 100 ? 'done' : 'running';
@@ -141,6 +151,8 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
   const markDone = (phaseId: string) => {
     const phase = phases.find((p) => p.id === phaseId);
     if (phase) phase.status = 'done';
+    const start = phaseStart.get(phaseId);
+    if (start !== undefined && !(phaseId in phaseTimings)) phaseTimings[phaseId] = Date.now() - start;
   };
 
   try {
@@ -337,6 +349,16 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('impact');
     report('impact', 100, `${impactedFiles} arquivos com dependentes mapeados`);
 
+    // ── 16b. GRAFO DE IMPACTO UNIFICADO ──────────────────────────────────────────
+    report('impact-graph', 76, 'Consolidando impacto cross-tier (arquivo/método/PL-SQL/tabela/coluna)...');
+    const impactEdges = buildImpactGraph({
+      graph, methodEdges: graph.methodEdges, callGraph,
+      plsqlObjects, plsqlCalls, dbCalls: dbCallsData,
+      tableAccess: orm.tableAccess, columnAccess: orm.columnAccess
+    });
+    markDone('impact-graph');
+    report('impact-graph', 100, `${impactEdges.length.toLocaleString()} arestas de impacto unificadas`);
+
     // ── 17. MÉTRICAS ─────────────────────────────────────────────────────────────
     report('metrics', 78, 'Computando complexidade ciclomática e dívida técnica...');
     const metrics = computeMetrics(files, graph, modules);
@@ -438,7 +460,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     );
 
     report('persist-index', 97, 'Gravando índice consultável (SQLite)...');
-    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges, columnAccess: orm.columnAccess, embeddings });
+    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges, columnAccess: orm.columnAccess, modules, impactEdges, embeddings });
     markDone('persist-index');
     const vecNote = embeddings ? `, ${embeddings.length} embeddings` : ' (embeddings off: modelo indisponível, FTS ativo)';
     report('persist-index', 100, `index.db: ${dbStats.nodes.toLocaleString()} nós, ${dbStats.edges.toLocaleString()} arestas (sem teto)${vecNote}`);
@@ -484,7 +506,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       transactions: transactionBoundaries.length,
       batchJobs: batchJobs.length,
       angularModules: angularModules.length,
-      deadComponents: deadComponents.length
+      deadComponents: deadComponents.length,
+      impactEdges: impactEdges.length,
+      phaseTimings
     };
 
   } catch (err) {
