@@ -12,6 +12,7 @@ import type { ImpactIndex } from '../analyzer/buildImpactIndex';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
 import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount } from './queries';
 import { queryImpactOf, queryBlastRadius, type ImpactOfResult, type BlastRadiusResult } from '../analyzer/store/impactQueries';
+import { queryGraphLevel } from '../analyzer/store/graphQueries';
 import { getEmbedder } from '../analyzer/semantic/embeddings';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
@@ -211,6 +212,16 @@ export class TicAnalyzerMcpServer {
               column: { type: 'string', description: 'Coluna específica (opcional, ex: "CPF").' }
             },
             required: ['table']
+          }
+        },
+        {
+          name: 'get_graph_level',
+          description: 'Grafo hierárquico agregado (app → layer → module → file → symbol). Sem "expanded": visão por camadas. Expanda passando ids (ex: ["layer:backend","module:cliente"]). Peso da aresta = nº de dependências arquivo→arquivo agregadas. ~300-600 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              expanded: { type: 'array', items: { type: 'string' }, description: 'Ids expandidos: layer:<nome>, module:<nome>, file:<rel_path>.' }
+            }
           }
         },
         {
@@ -553,6 +564,34 @@ export class TicAnalyzerMcpServer {
               return respond(textResult(`Tabela/coluna "${column ? `${table}.${column}` : table}" não encontrada no grafo de impacto.`));
             }
             return respond(textResult(formatBlastRadius(r)));
+          } finally { db.close(); }
+        }
+
+        case 'get_graph_level': {
+          const expanded = ((args as { expanded?: string[] } | undefined)?.expanded ?? []).filter((e) => typeof e === 'string');
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const hasModules = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='modules'").get();
+            if (!hasModules) return respond(textResult('index.db antigo (sem agregação por módulo). Execute a análise novamente.'));
+            const level = queryGraphLevel(db, { expanded });
+            const lines = [
+              `# Grafo agregado${expanded.length ? ` (expandido: ${expanded.join(', ')})` : ' (visão por camadas)'}`,
+              '',
+              '## Nós',
+              ...level.nodes.slice(0, 80).map((n) => `- [${n.kind}] \`${n.id.slice(n.id.indexOf(':') + 1)}\` — ${n.childCount > 0 ? `${n.childCount} filhos, ` : ''}in ${n.inWeight} / out ${n.outWeight}`),
+              level.nodes.length > 80 ? `- ... e mais ${level.nodes.length - 80} nós` : '',
+              '',
+              '## Arestas (peso = dependências agregadas)',
+              ...level.edges
+                .sort((a, b) => b.weight - a.weight)
+                .slice(0, 60)
+                .map((e) => `- \`${e.from.slice(e.from.indexOf(':') + 1)}\` → \`${e.to.slice(e.to.indexOf(':') + 1)}\` (${e.weight}${e.resolvedWeight < e.weight ? `, ${e.resolvedWeight} resolvidas` : ''})`),
+              level.edges.length > 60 ? `- ... e mais ${level.edges.length - 60} arestas` : '',
+              '',
+              '> Para detalhar: get_graph_level(expanded=[..., "module:<nome>"]).'
+            ].filter(Boolean);
+            return respond(textResult(lines.join('\n')));
           } finally { db.close(); }
         }
 

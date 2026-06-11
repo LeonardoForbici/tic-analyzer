@@ -5,6 +5,7 @@ import { runPipeline, type PipelineProgress, type PipelineResult } from '../src/
 import { TicAnalyzerMcpServer } from '../src/mcp/server';
 import { openIndexDb, INDEX_DB_FILE } from '../src/analyzer/store/indexDb';
 import { queryImpactOf, queryBlastRadius } from '../src/analyzer/store/impactQueries';
+import { queryGraphLevel } from '../src/analyzer/store/graphQueries';
 
 const isDev = !app.isPackaged;
 
@@ -143,6 +144,20 @@ ipcMain.handle('get-impact-of', async (_event, projectPath: string, entity: stri
     if (!impact) return { error: `Entidade "${entity}" não encontrada.` };
     const blast = queryBlastRadius(db, impact.entity);
     return { impact, blast };
+  } catch (err) {
+    return { error: String(err) };
+  } finally {
+    db.close();
+  }
+});
+
+ipcMain.handle('get-graph-level', async (_event, projectPath: string, expanded: string[]) => {
+  const db = openIndexDb(path.join(projectPath, '.tic-code', INDEX_DB_FILE));
+  if (!db) return { error: 'index.db não encontrado. Execute a análise novamente.' };
+  try {
+    const hasModules = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='modules'").get();
+    if (!hasModules) return { error: 'index.db antigo (sem agregação por módulo). Execute a análise novamente.' };
+    return queryGraphLevel(db, { expanded: Array.isArray(expanded) ? expanded : [] });
   } catch (err) {
     return { error: String(err) };
   } finally {

@@ -37,6 +37,9 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   getImpactOf: (projectPath: string, entity: string): Promise<unknown> =>
     ipcRenderer.invoke('get-impact-of', projectPath, entity),
 
+  getGraphLevel: (projectPath: string, expanded: string[]): Promise<unknown> =>
+    ipcRenderer.invoke('get-graph-level', projectPath, expanded),
+
   getTokenStats: (): Promise<unknown> =>
     ipcRenderer.invoke('get-token-stats'),
 

@@ -17,6 +17,7 @@ const need = (p) => { if (!existsSync(p)) { console.error(`✗ dist ausente: ${p
 
 const { openIndexDb } = require(need(join(root, 'dist/src/analyzer/store/indexDb.js')));
 const { queryImpactOf, queryBlastRadius, resolveImpactId } = require(need(join(root, 'dist/src/analyzer/store/impactQueries.js')));
+const { queryGraphLevel } = require(need(join(root, 'dist/src/analyzer/store/graphQueries.js')));
 const { runPipeline } = require(need(join(root, 'dist/src/analyzer/pipeline.js')));
 
 const failures = [];
@@ -71,6 +72,21 @@ function cleanupFixture(fixture) {
   const blast = queryBlastRadius(db, 'PKG_CLIENTE.SALVAR');
   check('B1: blast radius da procedure inclui o repository no top', !!blast && blast.top.some((t) => t.id.endsWith('ClienteRepository.java')), JSON.stringify(blast?.top ?? []));
   check('B2: blast radius reporta totalAffected e truncated', !!blast && blast.totalAffected > 0 && blast.truncated === false);
+
+  // Grafo hierárquico agregado (drill-down)
+  const top = queryGraphLevel(db, { expanded: [] });
+  check('G1: nível topo agrega por layer/module', top.nodes.length > 0 && top.nodes.every((n) => n.kind === 'layer' || n.kind === 'module'), top.nodes.map((n) => n.id).join(', '));
+  const firstLayer = top.nodes.find((n) => n.kind === 'layer');
+  if (firstLayer) {
+    const lvl2 = queryGraphLevel(db, { expanded: [firstLayer.id] });
+    check('G2: expandir layer revela módulos', lvl2.nodes.some((n) => n.kind === 'module'), lvl2.nodes.map((n) => n.id).join(', '));
+  }
+  const anyModule = db.prepare('SELECT name FROM modules LIMIT 1').get();
+  if (anyModule) {
+    const lvl3 = queryGraphLevel(db, { expanded: [`module:${anyModule.name}`] });
+    check('G3: expandir módulo revela arquivos', lvl3.nodes.some((n) => n.kind === 'file'), lvl3.nodes.map((n) => n.id).join(', '));
+    check('G4: arestas agregadas têm peso', lvl3.edges.every((e) => e.weight >= 1));
+  }
 
   db.close();
   cleanupFixture(fixture);
