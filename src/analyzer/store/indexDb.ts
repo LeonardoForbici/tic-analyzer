@@ -213,7 +213,7 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
   }
 }
 
-const FRONTEND_EXTS = new Set(['.tsx', '.jsx', '.vue', '.html', '.css', '.scss', '.less']);
+const FRONTEND_EXTS = new Set(['.tsx', '.jsx', '.vue', '.html', '.css', '.scss', '.less', '.osw']);
 const DB_EXTS = new Set(['.sql', '.plsql', '.pls', '.pck', '.pks', '.pkb', '.prc', '.fnc', '.trg', '.pkg']);
 const FRONTEND_SEGS = new Set(['frontend', 'front', 'ui', 'web', 'webapp', 'client', 'pages', 'components', 'views']);
 

@@ -15,7 +15,7 @@
 import type { FileSymbols, CallRef } from './extractSymbols';
 import { SymbolTable } from './symbolTable';
 
-export type EdgeKind = 'import' | 'call' | 'extends' | 'implements';
+export type EdgeKind = 'import' | 'call' | 'extends' | 'implements' | 'osw-ref';
 export type Confidence = 'resolved' | 'inferred';
 
 export interface SemanticEdge {

@@ -1,0 +1,9 @@
+{
+  "screen": "kitAssembly",
+  "title": "Montagem de Kit",
+  "controller": "KitAssemblyController",
+  "widgets": [
+    { "type": "form", "binding": "cliente" },
+    { "type": "button", "action": "salvar" }
+  ]
+}
