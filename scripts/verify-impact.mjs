@@ -73,6 +73,15 @@ function cleanupFixture(fixture) {
   check('B1: blast radius da procedure inclui o repository no top', !!blast && blast.top.some((t) => t.id.endsWith('ClienteRepository.java')), JSON.stringify(blast?.top ?? []));
   check('B2: blast radius reporta totalAffected e truncated', !!blast && blast.totalAffected > 0 && blast.truncated === false);
 
+  // Sanidade dos módulos persistidos (bugs do Explorador: módulo com nome de
+  // arquivo tipo "frontend/package.json" e camada errada por arquivo)
+  const modRows = db.prepare('SELECT name FROM modules').all().map((r) => r.name);
+  check('M1: nenhum módulo com nome de arquivo', modRows.every((n) => !/\.(json|md|ts|tsx|js|java|sql|yml|yaml|lock)$/i.test(n)), modRows.join(', '));
+  const layerRows = db.prepare("SELECT rel_path, layer FROM files WHERE rel_path LIKE '%.tsx'").all();
+  check('M2: arquivos .tsx têm layer frontend (por arquivo, não por módulo)', layerRows.length > 0 && layerRows.every((r) => r.layer === 'frontend'), JSON.stringify(layerRows));
+  const plsqlLayer = db.prepare("SELECT layer FROM files WHERE rel_path LIKE '%.pkb' OR rel_path LIKE '%.trg'").all();
+  check('M3: arquivos PL/SQL têm layer database', plsqlLayer.length > 0 && plsqlLayer.every((r) => r.layer === 'database'), JSON.stringify(plsqlLayer));
+
   // Grafo hierárquico agregado (drill-down)
   const top = queryGraphLevel(db, { expanded: [] });
   check('G1: nível topo agrega por layer/module', top.nodes.length > 0 && top.nodes.every((n) => n.kind === 'layer' || n.kind === 'module'), top.nodes.map((n) => n.id).join(', '));

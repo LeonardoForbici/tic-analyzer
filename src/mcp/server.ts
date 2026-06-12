@@ -573,7 +573,8 @@ export class TicAnalyzerMcpServer {
           if (!db) return respond(noIndexDb());
           try {
             const hasModules = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='modules'").get();
-            if (!hasModules) return respond(textResult('index.db antigo (sem agregação por módulo). Execute a análise novamente.'));
+            const hasLayer = hasModules && (db.prepare('PRAGMA table_info(files)').all() as any[]).some((c: any) => c.name === 'layer');
+            if (!hasLayer) return respond(textResult('index.db antigo (sem agregação por módulo/camada). Execute a análise novamente.'));
             const level = queryGraphLevel(db, { expanded });
             const lines = [
               `# Grafo agregado${expanded.length ? ` (expandido: ${expanded.join(', ')})` : ' (visão por camadas)'}`,

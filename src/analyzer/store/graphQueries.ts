@@ -91,22 +91,25 @@ export function queryGraphLevel(db: Database.Database, req: GraphLevelRequest): 
         nodes.set(`module:${m.name}`, { id: `module:${m.name}`, label: m.name, kind: 'module', layer, childCount: m.file_count, inWeight: 0, outWeight: 0 });
         continue;
       }
-      // Módulo expandido → arquivos (top N por grau, resto agregado)
+      // Módulo expandido → só arquivos CONECTADOS (top N por grau); os sem
+      // dependência (package.json, README...) viram um único pseudo-nó.
       const files = db
-        .prepare('SELECT rel_path, in_degree, out_degree FROM files WHERE module = ? ORDER BY (in_degree + out_degree) DESC LIMIT ?')
-        .all(m.name, MAX_CHILDREN + 1) as Array<{ rel_path: string; in_degree: number; out_degree: number }>;
-      const shown = files.slice(0, MAX_CHILDREN);
-      for (const f of shown) {
+        .prepare('SELECT rel_path, in_degree, out_degree, layer FROM files WHERE module = ? AND (in_degree + out_degree) > 0 ORDER BY (in_degree + out_degree) DESC LIMIT ?')
+        .all(m.name, MAX_CHILDREN) as Array<{ rel_path: string; in_degree: number; out_degree: number; layer: string | null }>;
+      for (const f of files) {
         const id = `file:${f.rel_path}`;
         nodes.set(id, {
-          id, label: f.rel_path.split('/').pop() ?? f.rel_path, kind: 'file', layer,
+          id, label: f.rel_path.split('/').pop() ?? f.rel_path, kind: 'file',
+          layer: f.layer ?? layer,
           childCount: 0, inWeight: f.in_degree, outWeight: f.out_degree
         });
         visibleFiles.set(f.rel_path, id);
       }
-      if (m.file_count > shown.length) {
+      const hidden = m.file_count - files.length;
+      if (hidden > 0) {
         const id = `more:${m.name}`;
-        nodes.set(id, { id, label: `…${m.file_count - shown.length} arquivos`, kind: 'more', layer, childCount: m.file_count - shown.length, inWeight: 0, outWeight: 0 });
+        const label = files.length >= MAX_CHILDREN ? `…${hidden} arquivos` : `…${hidden} sem dependências`;
+        nodes.set(id, { id, label, kind: 'more', layer, childCount: hidden, inWeight: 0, outWeight: 0 });
       }
     }
   }

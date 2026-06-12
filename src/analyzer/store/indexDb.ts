@@ -28,7 +28,8 @@ CREATE TABLE files (
   lines INTEGER,
   in_degree INTEGER,
   out_degree INTEGER,
-  module TEXT
+  module TEXT,
+  layer TEXT
 );
 CREATE INDEX idx_files_module ON files(module);
 
@@ -142,23 +143,22 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
     const linesByPath = new Map<string, ScannedFile>();
     for (const f of input.files) linesByPath.set(f.relativePath, f);
 
-    // Mapa arquivo→módulo + camada predominante por módulo
+    // Mapa arquivo→módulo + camada predominante por módulo (a camada do ARQUIVO
+    // é individual — um módulo misto não pinta um package.json de "backend")
     const moduleByFile = new Map<string, string>();
     const moduleLayers: Array<{ name: string; fileCount: number; layer: string }> = [];
     for (const mod of input.modules ?? []) {
-      let fe = 0, dbc = 0, be = 0;
+      const counts = { frontend: 0, backend: 0, database: 0 };
       for (const f of mod.files) {
         moduleByFile.set(f.relativePath, mod.name);
-        if (['.tsx', '.jsx', '.vue', '.html', '.css', '.scss'].includes(f.extension)) fe++;
-        else if (['.sql', '.plsql', '.pls', '.pck', '.pks', '.pkb', '.prc', '.fnc', '.trg', '.pkg'].includes(f.extension)) dbc++;
-        else be++;
+        counts[fileLayer(f.relativePath, f.extension)]++;
       }
-      const layer = dbc >= fe && dbc >= be ? 'database' : fe >= be ? 'frontend' : 'backend';
+      const layer = (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0]) ?? 'backend';
       moduleLayers.push({ name: mod.name, fileCount: mod.fileCount, layer });
     }
 
     const insertFile = db.prepare(
-      'INSERT OR REPLACE INTO files (rel_path, ext, lines, in_degree, out_degree, module) VALUES (?, ?, ?, ?, ?, ?)'
+      'INSERT OR REPLACE INTO files (rel_path, ext, lines, in_degree, out_degree, module, layer) VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
     const insertModule = db.prepare('INSERT OR REPLACE INTO modules (name, file_count, layer) VALUES (?, ?, ?)');
     const insertImpact = db.prepare('INSERT INTO impact_edges (from_id, to_id, from_kind, to_kind, via, confidence) VALUES (?, ?, ?, ?, ?, ?)');
@@ -174,7 +174,7 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
     const writeAll = db.transaction(() => {
       for (const n of input.graph.nodes) {
         const sf = linesByPath.get(n.path);
-        insertFile.run(n.path, sf?.extension ?? null, sf?.lines ?? null, n.inDegree, n.outDegree, moduleByFile.get(n.path) ?? null);
+        insertFile.run(n.path, sf?.extension ?? null, sf?.lines ?? null, n.inDegree, n.outDegree, moduleByFile.get(n.path) ?? null, fileLayer(n.path, sf?.extension ?? ''));
       }
       for (const m of moduleLayers) insertModule.run(m.name, m.fileCount, m.layer);
       for (const e of input.impactEdges ?? []) {
@@ -211,6 +211,21 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
   } finally {
     db.close();
   }
+}
+
+const FRONTEND_EXTS = new Set(['.tsx', '.jsx', '.vue', '.html', '.css', '.scss', '.less']);
+const DB_EXTS = new Set(['.sql', '.plsql', '.pls', '.pck', '.pks', '.pkb', '.prc', '.fnc', '.trg', '.pkg']);
+const FRONTEND_SEGS = new Set(['frontend', 'front', 'ui', 'web', 'webapp', 'client', 'pages', 'components', 'views']);
+
+/** Camada de um ARQUIVO individual (extensão + path), independente do módulo. */
+export function fileLayer(relPath: string, ext: string): 'frontend' | 'backend' | 'database' {
+  if (DB_EXTS.has(ext)) return 'database';
+  if (FRONTEND_EXTS.has(ext)) return 'frontend';
+  if (['.ts', '.js', '.json', '.md'].includes(ext)) {
+    const segs = relPath.toLowerCase().split('/');
+    if (segs.some((s) => FRONTEND_SEGS.has(s))) return 'frontend';
+  }
+  return 'backend';
 }
 
 /** Abre o index.db em modo leitura para o MCP. Retorna null se ausente. */

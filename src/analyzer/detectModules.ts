@@ -119,9 +119,11 @@ function detectSubProjectModules(
     const parts = innerPath.split('/');
 
     const keyDepth = Math.min(depth, parts.length - 1);
+    // keyDepth 0 = arquivo na RAIZ do subprojeto (ex.: frontend/package.json):
+    // agrupa no módulo raiz do subprojeto — nunca usa o nome do arquivo como módulo.
     const innerKey = keyDepth > 0
       ? parts.slice(0, keyDepth).join('/')
-      : (parts[0] ?? '__root__');
+      : '__root__';
 
     const fullKey = `${subProjectDir}/${innerKey}`;
     if (!moduleMap.has(fullKey)) moduleMap.set(fullKey, []);
@@ -205,7 +207,7 @@ export function detectModules(files: ScannedFile[], maxModules = 25): ProjectMod
       const topDir = keyParts[0];
       const lastSeg = keyParts[keyParts.length - 1];
       name = subProjectDirs.has(topDir) && keyParts.length > 1
-        ? `${shortSubProjectName(topDir)}/${lastSeg}`
+        ? (lastSeg === '__root__' ? shortSubProjectName(topDir) : `${shortSubProjectName(topDir)}/${lastSeg}`)
         : lastSeg;
     }
 
@@ -221,23 +223,56 @@ export function detectModules(files: ScannedFile[], maxModules = 25): ProjectMod
 
   moduleList.sort((a, b) => b.fileCount - a.fileCount);
 
-  // Merge modules that ended up with the same display name (e.g. src/main vs src/test)
+  // Merge modules that ended up with the same display name (e.g. src/main vs
+  // src/test) — mas só quando vêm do MESMO topo: "frontend/application" e
+  // "backend/application" são módulos diferentes (senão arquivos frontend
+  // acabam dentro de um módulo classificado backend).
+  const mergeInto = (target: ProjectModule, mod: ProjectModule) => {
+    target.files.push(...mod.files);
+    target.fileCount += mod.fileCount;
+    target.estimatedTokens += mod.estimatedTokens;
+    for (const lang of mod.languages) {
+      if (!target.languages.includes(lang)) target.languages.push(lang);
+    }
+  };
+
   const merged = new Map<string, ProjectModule>();
   for (const mod of moduleList) {
     const existing = merged.get(mod.name);
+    if (existing && existing.path.split('/')[0] === mod.path.split('/')[0]) {
+      mergeInto(existing, mod);
+      continue;
+    }
+    let name = mod.name;
     if (existing) {
-      existing.files.push(...mod.files);
-      existing.fileCount += mod.fileCount;
-      existing.estimatedTokens += mod.estimatedTokens;
-      for (const lang of mod.languages) {
-        if (!existing.languages.includes(lang)) existing.languages.push(lang);
-      }
+      // Mesmo display name, topos diferentes → desambigua com o topo
+      name = `${mod.path.split('/')[0]}/${mod.name}`;
+      if (merged.has(name)) { mergeInto(merged.get(name)!, mod); continue; }
+    }
+    merged.set(name, { ...mod, name, files: [...mod.files] });
+  }
+
+  // Funde módulos minúsculos (< MIN_GROUP_FILES) no módulo raiz do seu topo —
+  // elimina "módulos" de 1-2 arquivos que poluem o grafo hierárquico.
+  const finalList = [...merged.values()].sort((a, b) => b.fileCount - a.fileCount);
+  const byName = new Map(finalList.map((m) => [m.name, m]));
+  const result: ProjectModule[] = [];
+  for (const mod of finalList) {
+    if (mod.fileCount >= MIN_GROUP_FILES || finalList.length === 1) { result.push(mod); continue; }
+    const topDir = mod.path.split('/')[0];
+    const host =
+      byName.get(shortSubProjectName(topDir)) ??
+      byName.get(topDir) ??
+      byName.get('__root__') ??
+      result.find((m) => m.path.split('/')[0] === topDir && m !== mod);
+    if (host && host !== mod && host.fileCount >= MIN_GROUP_FILES) {
+      mergeInto(host, mod);
     } else {
-      merged.set(mod.name, { ...mod, files: [...mod.files] });
+      result.push(mod); // sem destino melhor: mantém
     }
   }
 
-  return [...merged.values()]
+  return result
     .sort((a, b) => b.fileCount - a.fileCount)
     .slice(0, maxModules);
 }
