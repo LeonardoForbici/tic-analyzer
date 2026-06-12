@@ -39,6 +39,10 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
   const [data, setData] = useState<LevelData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<AggNode | null>(null);
+  // Lido pelo loop de desenho via ref — selecionar um nó NÃO pode reiniciar a
+  // simulação de forças (era a causa do grafo "se mexer sozinho" a cada clique).
+  const selectedRef = useRef<AggNode | null>(null);
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
 
   const simRef = useRef<{
     positions: Map<string, { x: number; y: number; vx: number; vy: number }>;
@@ -173,7 +177,10 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
           fy += (H / 2 - pi.y) * 0.006;
           pi.vx = (pi.vx + fx) * 0.62;
           pi.vy = (pi.vy + fy) * 0.62;
-          const maxV = 18;
+          // resfriamento: passo máximo decai até 0 — o grafo ASSENTA em vez de
+          // ficar vibrando até o último frame
+          const cool = 1 - frame / SIM_FRAMES;
+          const maxV = 18 * cool * cool;
           pi.x += Math.max(-maxV, Math.min(maxV, pi.vx));
           pi.y += Math.max(-maxV, Math.min(maxV, pi.vy));
         }
@@ -227,7 +234,7 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
         if (!p) continue;
         const R = radiusOf(node) / Math.max(0.7, Math.min(1.6, sim.scale));
         const color = LAYER_COLORS[node.layer ?? 'default'];
-        const isSel = selected?.id === node.id;
+        const isSel = selectedRef.current?.id === node.id;
 
         if (node.kind === 'layer' || node.kind === 'module') {
           // halo p/ containers expandíveis
@@ -279,7 +286,7 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
     };
     sim.animFrame = requestAnimationFrame(tick);
     return () => { if (sim.animFrame) cancelAnimationFrame(sim.animFrame); };
-  }, [data, selected, radiusOf]);
+  }, [data, radiusOf]);
 
   const nodeAt = useCallback((mx: number, my: number): AggNode | null => {
     if (!data) return null;

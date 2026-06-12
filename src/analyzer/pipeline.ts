@@ -6,6 +6,7 @@ import { detectModules } from './detectModules';
 import { detectRisks } from './detectRisks';
 import { detectEndpoints } from './detectEndpoints';
 import { buildDependencyGraph, type DependencyGraph } from './buildDependencyGraph';
+import { detectOswLinks } from './detectOswLinks';
 import { generateQuickContext } from './generateQuickContext';
 import { generateModuleContext } from './generateModuleContext';
 import { generateMasterIndex } from './generateMasterIndex';
@@ -195,6 +196,20 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     // ── 3. GRAFO ─────────────────────────────────────────────────────────────────
     report('graph', 18, 'Construindo grafo de dependências (AST + símbolos)...');
     const graph = await buildDependencyGraph(files, projectPath);
+
+    // Telas .osw (JSON do frontend) → controller de código (kitAssembly.osw →
+    // KitAssemblyController.tsx). Mescladas no grafo para fluírem ao impacto.
+    const oswEdges = detectOswLinks(files);
+    if (oswEdges.length > 0) {
+      const nodeByPath = new Map(graph.nodes.map((n) => [n.path, n]));
+      for (const e of oswEdges) {
+        graph.edges.push(e);
+        const from = nodeByPath.get(e.from);
+        const to = nodeByPath.get(e.to);
+        if (from) from.outDegree++;
+        if (to) to.inDegree++;
+      }
+    }
     // Salva para o visualizador interativo
     fs.writeFileSync(path.join(ticCodeDir, 'dep-graph.json'), JSON.stringify({ nodes: graph.nodes.slice(0, 3000), edges: graph.edges.slice(0, 5000) }), 'utf8');
     markDone('graph');

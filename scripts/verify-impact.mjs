@@ -62,6 +62,14 @@ function cleanupFixture(fixture) {
   check('I4: impacto de table:CLIENTE chega na tela React (TelaCliente.tsx)', ids.some((i) => i.endsWith('TelaCliente.tsx')), ids.join(', '));
   check('I5: resultado agrupa por kind', !!tbl && (tbl.byKind.file ?? 0) > 0 && (tbl.byKind.plsql ?? 0) > 0);
 
+  // Telas .osw (JSON do frontend) entram na cadeia de impacto
+  const ctrl = queryImpactOf(db, 'file:src/pages/KitAssemblyController.tsx');
+  const ctrlIds = ctrl ? ctrl.affected.map((n) => n.id) : [];
+  check('O1: impacto do Controller inclui a tela kitAssembly.osw', ctrlIds.some((i) => i.endsWith('kitAssembly.osw')), ctrlIds.join(', '));
+  check('O2: impacto de table:CLIENTE atravessa até o .osw (coluna→osw)', ids.some((i) => i.endsWith('kitAssembly.osw')), ids.join(', '));
+  const oswLayer = db.prepare("SELECT layer FROM files WHERE rel_path LIKE '%.osw'").get();
+  check('O3: arquivo .osw tem layer frontend', oswLayer?.layer === 'frontend', JSON.stringify(oswLayer));
+
   // Resolução de nomes livres
   const resolved = resolveImpactId(db, 'PKG_CLIENTE.SALVAR');
   check('R1: resolveImpactId("PKG_CLIENTE.SALVAR") → plsql:PKG_CLIENTE.SALVAR', resolved.id === 'plsql:PKG_CLIENTE.SALVAR', String(resolved.id));
