@@ -1,270 +1,219 @@
 # TIC Analyzer
 
-Motor local de análise estática para projetos grandes — zero tokens de IA na fase de análise.
+**Analisador semântico de código para projetos grandes** — estilo CAST Imaging, 100% local, zero tokens de IA na análise.
 
 ```
-código (74k+ arquivos) → engine local → resumo compacto → IA (mínimo de tokens)
+código (74k+ arquivos) → engine local → índice SQLite + resumos compactos → IA consulta o mínimo
 ```
+
+A ideia central: o trabalho pesado (AST, grafos, impacto, métricas) é feito por um engine determinístico na sua máquina. A IA (Claude Code, Copilot) **pergunta primeiro ao MCP** e só lê arquivos quando realmente precisa — gastando uma fração dos tokens.
+
+---
+
+## O que ele responde
+
+- **"Se eu mexer aqui, o que quebra?"** — impacto de *qualquer* entidade: arquivo, método Java, procedure/function PL/SQL, tabela, coluna ou tela `.osw`, atravessando todas as camadas (coluna → trigger → procedure → DAO Java → endpoint → tela React → `.osw`)
+- **"Como esse fluxo funciona?"** — trace ponta-a-ponta tela → endpoint → service → procedure → tabela
+- **"O projeto está saudável?"** — health score 0–100 (grade A–E) com tendência histórica entre análises
+- **"Esse PR é seguro?"** — review automático no GitHub com impacto, riscos novos e quality gates
+
+---
 
 ## Stack
 
 | Camada | Tecnologia |
 |--------|-----------|
-| Desktop | Electron |
-| UI | React + Vite |
-| Linguagem | TypeScript |
-| Protocolo IA | MCP SDK (Model Context Protocol) |
+| Desktop | Electron (.exe / .dmg / .AppImage) |
+| UI | React + Vite (canvas próprio, sem libs de grafo) |
+| Engine | Node.js puro + tree-sitter (WASM, offline) |
+| Índice | SQLite (better-sqlite3) + FTS5 |
+| Protocolo IA | MCP (Model Context Protocol) HTTP/SSE |
+| CI | GitHub Action composite + CLI headless |
 
 ---
 
-## Como usar
+## Os 3 modos de uso
 
-1. Abrir o TIC Analyzer
-2. Selecionar a pasta raiz do projeto
-3. Clicar em **Analisar**
-4. (Opcional) Clicar em **Iniciar MCP** para expor as ferramentas ao Claude Code
-5. Configurar `.claude/settings.json` no projeto analisado:
+### 1. App desktop (dev individual)
+
+1. Abrir o TIC Analyzer → selecionar a pasta raiz do projeto → **Analisar**
+2. Explorar as abas: **Visão Geral · Saúde · Explorador · Impacto · Métricas · Arquivos**
+3. (Opcional) **Iniciar MCP** e configurar no `.claude/settings.json` do projeto analisado:
 
 ```json
-{
-  "mcpServers": {
-    "tic-analyzer": {
-      "url": "http://localhost:7432/mcp"
-    }
-  }
-}
+{ "mcpServers": { "tic-analyzer": { "url": "http://localhost:7432/mcp" } } }
+```
+
+A análise também gera `CLAUDE.md` e `.github/copilot-instructions.md` no projeto analisado, ensinando a IA a usar o MCP antes de ler arquivos.
+
+### 2. Modo servidor (enterprise — máquina dedicada para o time)
+
+```bash
+tic-analyzer serve C:\Git\meu-projeto --host 0.0.0.0 --token segredo-do-time --watch 30
+```
+
+- Analisa o projeto e sobe o MCP headless (sem janela)
+- `--watch 30` re-analisa **incrementalmente** a cada 30 min — índice sempre fresco
+- Em rede, `--token` (ou env `TIC_TOKEN`) é **obrigatório**: toda chamada exige `Authorization: Bearer <token>`; `/health` fica aberto para monitoramento
+- Cada dev aponta o Claude Code para a máquina dedicada — **todo o time consulta o MESMO índice**:
+
+```json
+{ "mcpServers": { "tic-analyzer": { "url": "http://maquina-dedicada:7432/mcp", "headers": { "Authorization": "Bearer segredo-do-time" } } } }
+```
+
+### 3. GitHub Action (PR review automático)
+
+No repositório do **seu projeto**, crie `.github/workflows/tic-review.yml`:
+
+```yaml
+name: TIC PR Review
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  tic:
+    runs-on: ubuntu-latest   # ou self-hosted (recomendado p/ repos grandes)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: LeonardoForbici/tic-coder-lite@main
+        with:
+          gate: new-high-risks,health-drop:5
+```
+
+A cada PR, a Action:
+1. Analisa o **merge-base** (como o main estava) e o **head** (com suas mudanças) — a análise da base é **cacheada** (chaveada pelo SHA do merge-base; em self-hosted persiste em disco) e o engine é incremental, então só o que mudou é re-analisado
+2. Posta **um comentário fixo** (atualizado a cada push, nunca spam) com: impacto cross-tier por arquivo mudado, riscos novos, violações arquiteturais novas e delta do health score
+3. **Reprova o check** se um gate falhar — `new-high-risks`, `new-violations`, `health-drop:N` (ou vazio para só comentar)
+
+---
+
+## CLI
+
+```bash
+tic-analyzer analyze <path> [--json] [--no-ai-files]   # análise completa headless
+tic-analyzer health <path>                              # health score da última análise
+tic-analyzer pr-review --base <dir> --head <dir>        # compara duas análises (usada pela Action)
+           [--out report.md] [--gate new-high-risks,health-drop:5]
+tic-analyzer serve <path> [--port 7432] [--host 0.0.0.0]
+           [--token <segredo>] [--watch <min>] [--no-analyze]
+```
+
+Exit codes do `pr-review`: `0` ok · `1` gate falhou · `2` erro.
+
+---
+
+## O que o engine analisa (pipeline de 32 fases)
+
+| Área | Detalhe |
+|------|---------|
+| **Grafo de dependências** | AST real via tree-sitter (TS/TSX/JS/Java) com resolução de símbolos: aliases de tsconfig (`@/...`), barris (`export ... from`) seguidos até a origem, Java DI (interface → implementador), `extends`/`implements`, method edges Java. Fallback regex p/ Python/Go/C#/Rust/PHP/Kotlin. Cada aresta tem `confidence: resolved \| inferred` — em engenharia reversa, isso diz no que confiar |
+| **Grafo de impacto unificado** | Consolida imports, chamadas de método, HTTP (React→Controller), Java→PL/SQL (`@Procedure`, `{call}`, `SimpleJdbcCall`...), PL/SQL→PL/SQL, triggers (`ON <tabela>`), sinônimos, acesso a tabela/coluna (ORM + SQL parseado) e telas `.osw` num único grafo endereçável: `file:` `method:` `plsql:` `table:` `column:` |
+| **Telas .osw** | JSON de tela do frontend vinculado ao controller por convenção (`kitAssembly.osw` → `KitAssemblyController.tsx`) e por conteúdo (strings do JSON casadas com arquivos/símbolos reais do projeto) |
+| **PL/SQL** | Procedures, functions, packages, triggers, views, sequences, sinônimos; tabelas lidas/escritas por objeto; chamadas inter-procedure; dead PL/SQL; lineage coluna-a-coluna |
+| **Monorepo** | Pastas `<projeto>-backend` / `<projeto>-frontend` lado a lado viram subprojetos automaticamente (nomes curtos: `backend`, `frontend`), com camada frontend/backend/database **por arquivo** |
+| **Health score** | 0–100, grade A–E, 6 dimensões: dívida/KLOC, riscos ponderados (OWASP), violações arquiteturais, dead code, acoplamento, % de arestas heurísticas. Snapshots históricos em `snapshots.json` |
+| **Qualidade** | Complexidade ciclomática, hotspots, dívida técnica, dependências circulares, violações de camada, padrões arquiteturais (Repository, Service, Factory...), hierarquia de herança |
+| **Spring/Angular** | `@Transactional` (propagation/readOnly/rollbackFor), `@Scheduled`/batch jobs, `@NgModule`/lazy routes/NgRx, permissões (roles × rotas), endpoints → OpenAPI 3.0 |
+| **Busca** | FTS5 sempre ativa; embeddings locais opcionais (`TIC_EMBEDDINGS=1`, modelo ONNX ~25MB, 100% offline) |
+| **Incremental** | file-cache por hash: re-análises só tocam o que mudou |
+
+Tudo persistido em `.tic-code/` (gitignored): `index.db` (SQLite — fonte de verdade das queries), `quick-context.md` (~12k tokens), `modules/*/context.md`, `analysis.json`, `snapshots.json` e relatórios markdown.
+
+---
+
+## Dashboard (Electron)
+
+- **Visão Geral** — números da análise + health score + status do MCP + tokens gastos por tool em tempo real
+- **Saúde** — gauge do score, barras de penalidade por dimensão, KPIs com delta vs análise anterior e gráfico de tendência histórica
+- **Explorador** — drill-down hierárquico estilo CAST Imaging: aplicação → camadas → módulos → arquivos → símbolos. Duplo-clique expande, breadcrumb colapsa, raio do nó ∝ nº de filhos, peso da aresta = nº de dependências agregadas, cor verde→âmbar pela fração resolvida por AST. Renderiza só o nível visível (funciona com 74k arquivos) e o layout chega **já assentado** — a física roda invisível antes do primeiro frame
+- **Impacto** — modo Cross-tier (qualquer entidade: procedure, tabela, coluna, arquivo), modo Arquivo e modo Git Diff
+- **Métricas** — complexidade, dívida técnica, hotspots e violações
+
+---
+
+## As 36 ferramentas MCP
+
+**Impacto (o diferencial — use primeiro):**
+
+| Tool | Para quê |
+|------|----------|
+| `get_blast_radius(entity)` | Resumo ultra-compacto (~200 tokens): contagens por tipo/módulo + top críticos. **Use ANTES de tudo** |
+| `get_impact_of(entity)` | Impacto detalhado de arquivo/método/procedure/tabela/coluna, agrupado por profundidade e módulo |
+| `get_table_impact(table[, column])` | Atalho: quem é afetado por mudar a tabela/coluna |
+| `get_diff_impact()` | Impacto cross-tier de tudo que está no git diff (use antes de commitar) |
+| `get_impact(file)` | Dependentes de um arquivo (modo simples, só imports) |
+
+**Navegação e fluxo:** `trace_flow` (cadeia tela→endpoint→service→procedure→tabela) · `find_path` (caminho entre dois arquivos) · `get_graph_level` (grafo hierárquico agregado, mesmo dado do Explorador) · `search_code` (FTS5/vetorial) · `get_concept_map`
+
+**Contexto:** `get_quick_context` (~12k tokens, ponto de partida) · `list_modules` · `get_module(name, detail=summary|full)` · `search_module` · `get_multigraph(detail)` · `get_diagram`
+
+**Qualidade e saúde:** `get_health` (score + delta vs análise anterior) · `get_metrics` · `get_hotspots` · `get_violations` · `get_patterns` · `get_inheritance` · `get_dead_components`
+
+**Banco e PL/SQL:** `get_db_schema` · `get_table_columns` (lineage de coluna) · `get_table_access` · `get_plsql_object` · `get_dead_plsql`
+
+**Specs e regras:** `get_openapi` · `get_permissions` · `get_business_rules` · `get_transactions` · `get_batch_jobs` · `get_angular_modules` · `get_gaps` · `get_analysis_json`
+
+Todas as tools leem o `index.db` e respondem compacto, com truncamento explícito (`truncated` + como pedir mais) — a IA nunca fica cega.
+
+---
+
+## Fluxo enterprise completo
+
+```
+dev commita ──► GitHub Action (runner ou self-hosted, cache incremental da base)
+                  └─► comenta impacto/riscos/health no PR + gate bloqueia regressão
+
+máquina dedicada ──► tic-analyzer serve --host 0.0.0.0 --token ... --watch 30
+                  └─► MCP servindo o MESMO índice para todos os devs/IAs do time
+
+dashboard ──► tendência de health ao longo do tempo (1 snapshot por análise)
 ```
 
 ---
 
-## Análise semântica (AST + resolução de símbolos)
-
-A partir da Fase 1 da evolução rumo a paridade com o CAST Imaging, o grafo de
-dependências deixou de ser regex e passa a usar **parsing AST real**
-(`tree-sitter`, 100% local/offline) com **resolução de símbolos** para
-TypeScript/JS/TSX e Java:
-
-- Imports TS resolvidos com **aliases de tsconfig** (`@/...`) e **barris**
-  (`export ... from`) seguidos até a origem.
-- Java: `extends`/`implements` resolvidos e **chamadas via interface→implementador**
-  (padrão DI) — sabe que `userService.findAll()` chama `UserServiceImpl`.
-- Cada aresta carrega `confidence`: **`resolved`** (alvo único confirmado) ou
-  **`inferred`** (ambíguo — ex.: interface com vários implementadores). Em
-  engenharia reversa, isso diz no que confiar.
-- Linguagens sem grammar (Python/Go/C#/Rust/PHP/Kotlin) continuam via regex como
-  fallback.
-
-Verificação: `npm run verify` roda o resolvedor sobre `test/fixtures/semantic`.
-
----
-
-## Trace cross-tier — impacto end-to-end (React → Java → PL/SQL)
-
-A tool MCP `trace_flow` reconstrói a **cadeia de impacto ininterrupta** entre as
-camadas, unificando dois grafos que vivem no `index.db`: o **intra-código
-resolvido** (Fase 1) e o **cross-tier** (HTTP/DB/PL-SQL), usando os arquivos como
-ponte. Pergunta típica — *"o que quebra se eu mudar `PKG_CLIENTE.SALVAR`?"* —
-devolve:
-
-```
-🖥️ TelaCliente
-  ↓ ☕ ClienteController.salvar
-  ↓ 📄 ClienteServiceImpl.salvar
-  ↓ 📄 ClienteRepository
-  ↓ 🗄️ PKG_CLIENTE
-```
-
-As chamadas Java são **resolvidas no nível de método** (`Classe.metodo`), via
-arestas método→método persistidas em `method_edges` (ex. real do Spring
-PetClinic: `OwnerController.findPaginated… → OwnerRepository#findByLastName…`).
-
-O miolo `Service → Repository`, que o multigrafo antigo pulava, agora aparece —
-porque a query atravessa as arestas `call` resolvidas (Fase 1) e os saltos
-HTTP/DB cross-tier num único espaço de nós. Verificação:
-`test/fixtures/crosstier`.
-
-A cadeia também alcança **tabelas e colunas** (não só procedures): a camada ORM
-(`detectOrmMappings`) liga `@Entity`/`@Table`, repositórios Spring Data
-(`JpaRepository<Entity, Id>`) e SQL de `@Query`/`createNativeQuery` às tabelas.
-O SQL é parseado por um **AST real multi-dialeto** (`node-sql-parser`:
-Postgres/SQL Server/MySQL/Oracle-DML; fallback regex para JPQL/PL-SQL), o que dá
-**lineage coluna-a-coluna**: `get_table_columns("PEDIDO")` lista quais colunas
-são lidas/escritas e por quais arquivos. Assim `trace_flow("PEDIDO")` sobe da
-tabela até a tela. Validado em código real (Spring PetClinic) e em
-`test/fixtures/orm`.
-
----
-
-## Busca semântica local (opt-in)
-
-`search_code` tem dois modos: **FTS5** (léxico, padrão) e **vetorial**
-(embeddings locais, ONNX via `@xenova/transformers`, sem chamada de API). O modo
-vetorial é **opt-in** porque baixa um modelo (~25MB) na 1ª execução — ative com
-`TIC_EMBEDDINGS=1` ao rodar a análise. Os vetores ficam no `index.db`; em runtime
-o MCP embeda a query e ranqueia por cosseno. Onde o host do modelo é bloqueado
-(ex.: sandboxes), a busca cai automaticamente para FTS5. A infraestrutura
-(armazenamento + ranking por cosseno) é verificada em `verify-embeddings`.
-
----
-
-## O que é analisado — 30 fases
-
-| # | Fase | O que produz |
-|---|------|-------------|
-| 1 | Scan de arquivos | Índice de todos os arquivos com linhas e extensões |
-| 2 | Detecção de stack | Linguagens, frameworks, gerenciadores de pacotes |
-| 3 | Grafo de dependências (AST) | `dep-graph.json` — arestas `import`/`call`/`extends`/`implements` com `confidence` (`resolved`/`inferred`) |
-| 4 | Detecção de riscos (OWASP) | A02 Crypto, A03 Injection, A05 Misconfig, A09 Logging |
-| 5 | Endpoints REST | Rotas detectadas em Express, Spring, NestJS, etc. |
-| 6 | Chamadas HTTP frontend | fetch/axios/HttpClient com método e URL |
-| 7 | Objetos PL/SQL | Procedures, functions, packages, triggers, views, sequences, indexes, synonyms + tabelas lidas/escritas |
-| 8 | Chamadas backend→banco | JDBC, oracledb, Spring StoredProcedure, JdbcTemplate |
-| 9 | Módulos | Agrupamento por estrutura de diretório |
-| 10 | Quick-context.md | Resumo ~12k tokens para IA |
-| 11 | Contexto por módulo | `modules/{nome}/context.md` (~75k tokens total) |
-| 12 | Regras de negócio | Validações, enums, guards por módulo |
-| 13 | Permissões e roles | Matriz de acesso com guards e decorators |
-| 14 | index.md | Mapa de navegação do projeto |
-| 15 | Diagrama Mermaid | Dependências entre módulos |
-| 16 | OpenAPI YAML | Especificação dos endpoints detectados |
-| 17 | Relatório de gaps | Módulos sem contexto, endpoints sem docs |
-| 18 | Multi-grafo | Frontend → Endpoint → Backend → PL/SQL (`call-graph.json`) |
-| 19 | Índice de impacto | `impact-index.json` — quem depende de quem |
-| 20 | Métricas de qualidade | Complexidade ciclomática, dívida técnica, hotspots |
-| 21 | Hierarquia de classes | `inheritance.md` — extends, implements, abstract, interface |
-| 22 | Padrões arquiteturais | Repository, Service, Factory, Observer, etc. |
-| 23 | Schema de banco | Tabelas de migrations, ORM models, DDL |
-| 24 | @Transactional | Boundaries Spring: propagation, readOnly, rollbackFor |
-| 25 | Batch jobs | @Scheduled, @Async, Quartz Job, Spring Batch |
-| 26 | Módulos Angular/NgRx | @NgModule, lazy routes, actions, reducers, effects, selectors |
-| 27 | Dead components | React/Angular components com inDegree=0 no grafo |
-| 28 | Índice consultável (SQLite) | `index.db` — grafo/símbolos/busca FTS5 **sem teto de nós**, consultado pelo MCP |
-| 29 | Export JSON | `analysis.json` estruturado com todos os dados |
-| 30 | Arquivos para IA | `CLAUDE.md` e `.github/copilot-instructions.md` |
-
----
-
-## 27 MCP Tools
-
-| Tool | ~Tokens | Descrição |
-|------|---------|-----------|
-| `get_quick_context` | ~12k | Resumo completo do projeto |
-| `list_modules` | ~200 | Lista módulos com contagem de arquivos |
-| `get_module` | ~3k | Contexto detalhado de um módulo |
-| `search_module` | ~1k | Busca módulo por nome parcial |
-| `get_impact` | ~200 | Quem depende de um arquivo |
-| `get_diff_impact` | ~500 | Impacto de arquivos modificados no git |
-| `get_metrics` | ~500 | Complexidade e dívida técnica |
-| `get_hotspots` | ~300 | Top arquivos com maior dívida técnica |
-| `get_patterns` | ~400 | Padrões arquiteturais detectados |
-| `get_violations` | ~300 | Violações de camadas arquiteturais |
-| `get_inheritance` | ~400 | Hierarquia de classes |
-| `get_db_schema` | ~500 | Tabelas, colunas, PKs, FKs |
-| `get_analysis_json` | ~2k | Export completo analysis.json |
-| `get_multigraph` | ~1k | Grafo Frontend→Endpoint→Backend→PL/SQL |
-| `get_diagram` | ~500 | Diagrama Mermaid de módulos |
-| `get_openapi` | ~1k | Especificação OpenAPI dos endpoints |
-| `get_gaps` | ~300 | Gaps e lacunas do projeto |
-| `get_permissions` | ~400 | Matriz de permissões e roles |
-| `get_business_rules` | ~500 | Regras de negócio por módulo |
-| `get_plsql_object` | ~300 | Detalhes de uma procedure/function PL/SQL |
-| `get_table_access` | ~200 | Quais procedures leem/escrevem uma tabela |
-| `get_dead_plsql` | ~300 | Procedures/functions sem referenciadores |
-| `get_transactions` | ~400 | Boundaries @Transactional do Spring |
-| `get_batch_jobs` | ~300 | Jobs @Scheduled, @Async, Quartz, Spring Batch |
-| `get_angular_modules` | ~400 | Módulos Angular, lazy routes e NgRx store |
-| `get_dead_components` | ~200 | Componentes React/Angular sem uso |
-| `find_path` | ~200 | Menor caminho entre dois arquivos no grafo |
-| `get_table_columns` | ~200 | Lineage coluna-a-coluna: colunas lidas/escritas de uma tabela e onde |
-
----
-
-## Arquivos gerados em `.tic-code/`
-
-```
-.tic-code/
-├── quick-context.md          # resumo ~12k tokens
-├── index.md                  # mapa de navegação
-├── index.db                  # índice consultável (SQLite) — fonte do MCP, sem teto de nós
-├── dep-graph.json            # grafo de dependências (subconjunto p/ o visualizador da UI)
-├── call-graph.json           # grafo multi-camada
-├── impact-index.json         # índice de impacto de mudanças
-├── analysis.json             # export estruturado completo
-├── metrics-summary.md        # complexidade + hotspots + violações
-├── patterns.md               # padrões arquiteturais
-├── inheritance.md            # hierarquia de classes
-├── openapi.yaml              # endpoints em OpenAPI 3.0
-├── diagram.md + multigraph.md # diagramas Mermaid
-├── gaps.md                   # lacunas detectadas
-├── permissions.md            # matriz de permissões
-├── db-schema.md              # schema de banco de dados
-├── transactions.md           # @Transactional boundaries (Spring)
-├── batch-jobs.md             # @Scheduled, @Async, Quartz, Spring Batch
-├── angular-modules.md        # NgModule + lazy routes + NgRx
-├── plsql-objects.json        # procedures/functions com tabelas lidas/escritas
-├── dead-plsql.json           # PL/SQL sem referenciadores
-├── dead-components.json      # React/Angular components com inDegree=0
-├── file-cache.json           # cache incremental
-└── modules/
-    └── {nome}/
-        ├── context.md
-        ├── business-rules.md
-        ├── metrics.md
-        └── patterns.md
-```
-
----
-
-## Suporte a linguagens
-
-| Linguagem / Ecossistema | Detecção |
-|-------------------------|---------|
-| **PL/SQL Oracle** | PROCEDURE, FUNCTION, PACKAGE, TRIGGER, VIEW, SEQUENCE, INDEX, SYNONYM + tabelas lidas/escritas por procedure |
-| **Java / Spring** | Endpoints (@GetMapping etc.), @Transactional (propagation, readOnly, rollbackFor), @Scheduled (cron/fixedRate), @Async, Quartz Job, Spring Batch Tasklet/ItemProcessor |
-| **TypeScript / JavaScript** | React (components, hooks), Angular (@NgModule, lazy routes, NgRx), Express/NestJS endpoints, fetch/axios/HttpClient |
-| **HTML** | Chamadas HTTP inline |
-| **Python** | Endpoints Flask/FastAPI, imports, métricas |
-| **Go** | Imports, grafo, métricas |
-| **C# / .NET** | Endpoints, imports, métricas |
-| **Kotlin** | Endpoints Spring, @Transactional |
-| **Ruby / PHP / Rust** | Imports, grafo, métricas |
-
----
-
-## Build
+## Desenvolvimento
 
 ```bash
 npm install
-npm run dev          # desenvolvimento (Electron + Vite hot-reload)
+npm run dev          # Vite (5173) + Electron
 
+npm run verify       # build + 9 suítes de verificação:
+                     # semantic, store, crosstier, orm, impacto,
+                     # health, pr-review, serve, embeddings
+```
+
+> ⚠️ **Nunca rode `rebuild:electron` em CI** — recompila o better-sqlite3 para a ABI do Electron e quebra a execução em Node puro. O `npm ci` usa os prebuilds Node.
+
+## Build de distribuição
+
+```bash
 npm run dist:win     # → release/TIC Analyzer Setup.exe
 npm run dist:mac     # → release/TIC Analyzer.dmg
 npm run dist:linux   # → release/TIC Analyzer.AppImage
 ```
 
-> **Módulo nativo (`better-sqlite3`):** o `index.db` usa um módulo nativo. O
-> empacotamento (`dist:*`) recompila-o para o runtime do Electron
-> automaticamente (electron-builder). Para `npm run dev`, rode
-> `npm run rebuild:electron` uma vez. Os scripts de verificação (`npm run
-> verify`) rodam sob Node e usam o binário Node-ABI.
-
 ---
 
-## TIC Analyzer vs CAST Imaging
+## Arquitetura
 
-| Feature | CAST Imaging | TIC Analyzer |
-|---------|-------------|-------------|
-| Grafo por AST + símbolos resolvidos (TS/Java) | Sim | Sim (Fase 1) |
-| Confiança por aresta (resolved/inferred) | Parcial | Sim |
-| Índice consultável em escala (70k+ arquivos) | Sim | Sim (SQLite, Fase 2) |
-| Trace de impacto cross-tier (React→Java→PL/SQL) | Sim | Sim (Fase 3) |
-| PL/SQL data flow (tabelas por procedure) | Sim | Sim |
-| Dead PL/SQL detection | Sim | Sim |
-| Spring @Transactional mapping | Sim | Sim |
-| Batch jobs (@Scheduled, Quartz) | Sim | Sim |
-| Angular NgRx store analysis | Parcial | Sim |
-| Dead components (React/Angular) | Não | Sim |
-| MCP integration (Claude Code) | Não | Sim |
-| Funciona offline / sem cloud | Não | Sim |
-| Custo | ~$50k/ano | Open source |
-| Token budget para IA | N/A | ~12k tokens (quick-context) |
+```
+electron/            processo principal (janela, IPC, lifecycle do MCP)
+src/
+  analyzer/          engine puro Node (zero IA): pipeline de 32 fases
+    buildDependencyGraph   AST tree-sitter + resolução de símbolos
+    buildImpactGraph       grafo de impacto unificado cross-tier
+    computeHealthScore     score 0-100 em 6 dimensões
+    detectOswLinks         telas .osw → controllers
+    store/
+      indexDb              index.db SQLite (files/edges/symbols/impact_edges/modules/FTS5)
+      impactQueries        BFS reverso cross-tier (queryImpactOf / queryBlastRadius)
+      graphQueries         agregação hierárquica (layer → module → file → symbol)
+      snapshots            histórico de health entre análises
+  cli/               headless: analyze / health / pr-review / serve
+  mcp/               MCP Server HTTP/SSE (36 tools, token tracking, auth Bearer)
+  ui/                React: HealthDashboard, HierGraphViewer, abas
+action.yml           GitHub Action (PR review com cache incremental da base)
+```
