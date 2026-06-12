@@ -114,10 +114,9 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
     if (sim.animFrame) cancelAnimationFrame(sim.animFrame);
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    let frame = 0;
     const n = data.nodes.length;
-    const SIM_FRAMES = Math.min(420, 140 + n * 2);
-    const FIT_FRAME = Math.min(SIM_FRAMES - 1, 90 + n);
+    // Menos iterações quando há muitos nós (custo n² por passo)
+    const SIM_STEPS = n > 250 ? 160 : Math.min(420, 140 + n * 2);
 
     const fitView = () => {
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -135,58 +134,61 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
       sim.pan.y = (H - (minY + maxY) * scale) / 2;
     };
 
-    const tick = () => {
-      // força (Fruchterman-Reingold simplificado) — SEM clamp no canvas: o
-      // grafo abre o quanto precisar e o auto-fit enquadra a câmera.
-      if (frame < SIM_FRAMES) {
-        const k = Math.sqrt((W * H * Math.max(1, n / 40)) / Math.max(n, 1)) * 0.6;
-        for (const ni of data.nodes) {
-          const pi = sim.positions.get(ni.id);
-          if (!pi || sim.dragging === ni.id) continue;
-          let fx = 0, fy = 0;
-          for (const nj of data.nodes) {
-            if (ni.id === nj.id) continue;
-            const pj = sim.positions.get(nj.id);
-            if (!pj) continue;
-            const dx = pi.x - pj.x, dy = pi.y - pj.y;
-            const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
-            const rep = (k * k) / dist;
-            fx += (dx / dist) * rep;
-            fy += (dy / dist) * rep;
-            // anti-sobreposição: empurra forte quando os círculos se tocam
-            const minDist = radiusOf(ni) + radiusOf(nj) + 6;
-            if (dist < minDist) {
-              fx += (dx / dist) * (minDist - dist) * 1.6;
-              fy += (dy / dist) * (minDist - dist) * 1.6;
-            }
+    // Um passo de força (Fruchterman-Reingold simplificado) — SEM clamp no
+    // canvas: o grafo abre o quanto precisar e o auto-fit enquadra a câmera.
+    const stepForces = (step: number) => {
+      const k = Math.sqrt((W * H * Math.max(1, n / 40)) / Math.max(n, 1)) * 0.6;
+      for (const ni of data.nodes) {
+        const pi = sim.positions.get(ni.id);
+        if (!pi || sim.dragging === ni.id) continue;
+        let fx = 0, fy = 0;
+        for (const nj of data.nodes) {
+          if (ni.id === nj.id) continue;
+          const pj = sim.positions.get(nj.id);
+          if (!pj) continue;
+          const dx = pi.x - pj.x, dy = pi.y - pj.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+          const rep = (k * k) / dist;
+          fx += (dx / dist) * rep;
+          fy += (dy / dist) * rep;
+          // anti-sobreposição: empurra forte quando os círculos se tocam
+          const minDist = radiusOf(ni) + radiusOf(nj) + 6;
+          if (dist < minDist) {
+            fx += (dx / dist) * (minDist - dist) * 1.6;
+            fy += (dy / dist) * (minDist - dist) * 1.6;
           }
-          for (const e of data.edges) {
-            let other: string | null = null;
-            if (e.from === ni.id) other = e.to;
-            else if (e.to === ni.id) other = e.from;
-            if (!other) continue;
-            const po = sim.positions.get(other);
-            if (!po) continue;
-            const dx = po.x - pi.x, dy = po.y - pi.y;
-            const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
-            const attr = ((dist * dist) / k) * 0.22;
-            fx += (dx / dist) * attr;
-            fy += (dy / dist) * attr;
-          }
-          fx += (W / 2 - pi.x) * 0.006;
-          fy += (H / 2 - pi.y) * 0.006;
-          pi.vx = (pi.vx + fx) * 0.62;
-          pi.vy = (pi.vy + fy) * 0.62;
-          // resfriamento: passo máximo decai até 0 — o grafo ASSENTA em vez de
-          // ficar vibrando até o último frame
-          const cool = 1 - frame / SIM_FRAMES;
-          const maxV = 18 * cool * cool;
-          pi.x += Math.max(-maxV, Math.min(maxV, pi.vx));
-          pi.y += Math.max(-maxV, Math.min(maxV, pi.vy));
         }
-        if (frame === FIT_FRAME) fitView();
+        for (const e of data.edges) {
+          let other: string | null = null;
+          if (e.from === ni.id) other = e.to;
+          else if (e.to === ni.id) other = e.from;
+          if (!other) continue;
+          const po = sim.positions.get(other);
+          if (!po) continue;
+          const dx = po.x - pi.x, dy = po.y - pi.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+          const attr = ((dist * dist) / k) * 0.22;
+          fx += (dx / dist) * attr;
+          fy += (dy / dist) * attr;
+        }
+        fx += (W / 2 - pi.x) * 0.006;
+        fy += (H / 2 - pi.y) * 0.006;
+        pi.vx = (pi.vx + fx) * 0.62;
+        pi.vy = (pi.vy + fy) * 0.62;
+        // resfriamento: passo máximo decai até 0 — a simulação CONVERGE
+        const cool = 1 - step / SIM_STEPS;
+        const maxV = 18 * cool * cool;
+        pi.x += Math.max(-maxV, Math.min(maxV, pi.vx));
+        pi.y += Math.max(-maxV, Math.min(maxV, pi.vy));
       }
+    };
 
+    // A física roda INVISÍVEL e síncrona (~50-150ms) ANTES do primeiro frame:
+    // o usuário só vê o grafo já assentado e enquadrado — nada de "dançar".
+    for (let step = 0; step < SIM_STEPS; step++) stepForces(step);
+    fitView();
+
+    const tick = () => {
       ctx.clearRect(0, 0, W, H);
       ctx.save();
       ctx.translate(sim.pan.x, sim.pan.y);
@@ -281,7 +283,6 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
       }
 
       ctx.restore();
-      frame++;
       sim.animFrame = requestAnimationFrame(tick);
     };
     sim.animFrame = requestAnimationFrame(tick);
