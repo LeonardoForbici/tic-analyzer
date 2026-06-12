@@ -223,7 +223,9 @@ export function fileLayer(relPath: string, ext: string): 'frontend' | 'backend' 
   if (FRONTEND_EXTS.has(ext)) return 'frontend';
   if (['.ts', '.js', '.json', '.md'].includes(ext)) {
     const segs = relPath.toLowerCase().split('/');
-    if (segs.some((s) => FRONTEND_SEGS.has(s))) return 'frontend';
+    // Segmento exato (pages, components...) OU sufixo de subprojeto no padrão
+    // <projeto>-frontend (ex.: pending-approval-frontend/src/api.ts)
+    if (segs.some((s) => FRONTEND_SEGS.has(s) || /(^|[-_.])(frontend|front|ui|web|client)$/.test(s))) return 'frontend';
   }
   return 'backend';
 }

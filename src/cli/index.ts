@@ -16,6 +16,7 @@ import { execSync } from 'child_process';
 import { runPipeline } from '../analyzer/pipeline';
 import { loadSnapshots } from '../analyzer/store/snapshots';
 import { compareAnalyses, evaluateGates, formatPrComment } from './prReview';
+import { TicAnalyzerMcpServer } from '../mcp/server';
 
 interface Args {
   positional: string[];
@@ -45,7 +46,11 @@ function usage(): never {
   tic-analyzer health <path>                              Mostra o health score (última análise)
   tic-analyzer pr-review --base <dir> --head <dir>        Compara duas análises e gera report.md
                [--out report.md] [--gate new-high-risks,new-violations,health-drop:5]
-               [--changed arquivo1,arquivo2 | --base-ref <ref>]`);
+               [--changed arquivo1,arquivo2 | --base-ref <ref>]
+  tic-analyzer serve <path> [--port 7432] [--host 0.0.0.0] [--token <segredo>]
+               [--no-analyze] [--watch <minutos>]          MCP server headless (máquina dedicada).
+               --host 0.0.0.0 expõe na rede — USE --token (ou TIC_TOKEN).
+               --watch N re-analisa a cada N minutos (índice sempre fresco p/ o time)`);
   process.exit(2);
 }
 
@@ -141,6 +146,53 @@ async function cmdPrReview(args: Args): Promise<number> {
   return 0;
 }
 
+/**
+ * Modo servidor (enterprise): a máquina dedicada analisa o projeto e serve o
+ * MCP para o time inteiro — todos os assistentes consultam o MESMO índice.
+ * Com --watch N, re-analisa periodicamente (incremental via file-cache).
+ */
+async function cmdServe(args: Args): Promise<number> {
+  const target = args.positional[0];
+  if (!target) usage();
+  const projectPath = path.resolve(target);
+  if (!fs.existsSync(projectPath)) {
+    console.error(`Pasta não encontrada: ${projectPath}`);
+    return 2;
+  }
+  const port = Number(args.flags.get('port') ?? 7432);
+  const host = typeof args.flags.get('host') === 'string' ? (args.flags.get('host') as string) : '127.0.0.1';
+  const token = typeof args.flags.get('token') === 'string' ? (args.flags.get('token') as string) : process.env.TIC_TOKEN;
+  if (host !== '127.0.0.1' && host !== 'localhost' && !token) {
+    console.error('⚠️  --host expõe o índice do código na rede. Defina --token <segredo> (ou TIC_TOKEN).');
+    return 2;
+  }
+
+  const analyzeOnce = async (): Promise<boolean> => {
+    const r = await runPipeline(projectPath, (p) => {
+      if (p.percent === 100) process.stderr.write(`[analyze] ${p.phase}: ${p.detail}\n`);
+    }, { skipAiFiles: args.flags.has('no-ai-files') });
+    if (r.success) console.error(`[analyze] ok — health ${r.healthScore}/100, ${r.totalFiles.toLocaleString()} arquivos`);
+    else console.error(`[analyze] falhou: ${r.error}`);
+    return r.success;
+  };
+
+  if (!args.flags.has('no-analyze')) {
+    if (!(await analyzeOnce())) return 2;
+  }
+
+  const server = new TicAnalyzerMcpServer({ projectPath });
+  await server.startHttp(port, host, token);
+
+  const watchMin = Number(args.flags.get('watch') ?? 0);
+  if (watchMin > 0) {
+    console.error(`[watch] re-análise incremental a cada ${watchMin} min`);
+    setInterval(() => { void analyzeOnce(); }, watchMin * 60_000);
+  }
+
+  await new Promise(() => {}); // roda até ser interrompido (Ctrl+C / serviço)
+  return 0;
+}
+
 (async () => {
   const [command, ...rest] = process.argv.slice(2);
   const args = parseArgs(rest);
@@ -148,6 +200,7 @@ async function cmdPrReview(args: Args): Promise<number> {
     case 'analyze': process.exit(await cmdAnalyze(args));
     case 'health': process.exit(cmdHealth(args));
     case 'pr-review': process.exit(await cmdPrReview(args));
+    case 'serve': process.exit(await cmdServe(args));
     default: usage();
   }
 })().catch((err) => {

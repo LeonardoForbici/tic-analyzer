@@ -107,6 +107,28 @@ function cleanupFixture(fixture) {
 
   db.close();
   cleanupFixture(fixture);
+
+  // ── Workspace monorepo: <projeto>-backend / <projeto>-frontend lado a lado ──
+  console.log('\nMonorepo <projeto>-backend / <projeto>-frontend\n');
+  const mono = join(root, 'test', 'fixtures', 'monorepo');
+  cleanupFixture(mono);
+  const rMono = await runPipeline(mono, () => {});
+  check('W0: pipeline concluiu no monorepo', rMono.success, rMono.error ?? '');
+  const mdb = openIndexDb(join(mono, '.tic-code', 'index.db'));
+  if (mdb) {
+    const names = mdb.prepare('SELECT name, layer FROM modules').all();
+    check('W1: subprojetos viram módulos de nome curto (backend/frontend)',
+      names.some((m) => m.name === 'backend' || m.name.startsWith('backend/')) &&
+      names.some((m) => m.name === 'frontend' || m.name.startsWith('frontend/')),
+      JSON.stringify(names));
+    check('W2: nenhum módulo com nome longo pending-approval-*', names.every((m) => !m.name.startsWith('pending-approval-')), JSON.stringify(names));
+    const feTs = mdb.prepare("SELECT layer FROM files WHERE rel_path LIKE 'pending-approval-frontend/%.ts'").all();
+    check('W3: .ts dentro de *-frontend tem layer frontend', feTs.length > 0 && feTs.every((r) => r.layer === 'frontend'), JSON.stringify(feTs));
+    const beJava = mdb.prepare("SELECT layer FROM files WHERE rel_path LIKE 'pending-approval-backend/%.java'").all();
+    check('W4: .java dentro de *-backend tem layer backend', beJava.length > 0 && beJava.every((r) => r.layer === 'backend'), JSON.stringify(beJava));
+    mdb.close();
+  }
+  cleanupFixture(mono);
   console.log('');
   if (failures.length) { console.error(`✗ ${failures.length} verificação(ões) falharam`); process.exit(1); }
   console.log('✓ todas as verificações de impacto passaram');

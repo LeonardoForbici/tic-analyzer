@@ -48,17 +48,46 @@ runs:
         npm ci --no-audit --no-fund
         npm run build:electron
 
-    - name: Analyze base (merge-base) e head
+    - name: Resolve merge-base
+      id: mb
       shell: bash
       env:
         BASE_REF: ${{ inputs.base-ref }}
       run: |
         set -euo pipefail
         git fetch origin "$BASE_REF" --depth=200 || git fetch origin "$BASE_REF"
-        MERGE_BASE=$(git merge-base "origin/$BASE_REF" HEAD)
+        echo "sha=$(git merge-base "origin/$BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
+
+    # Cache da análise da branch base: o engine é incremental (file-cache),
+    # então restaurar QUALQUER análise anterior (restore-keys) já faz a
+    # re-análise tocar só nos arquivos que mudaram desde então. Em runner
+    # self-hosted o mesmo diretório persiste em disco entre execuções.
+    - name: Cache análise base
+      uses: actions/cache@v4
+      with:
+        path: ~/.tic-analyzer-cache/base
+        key: tic-base-${{ runner.os }}-${{ steps.mb.outputs.sha }}
+        restore-keys: |
+          tic-base-${{ runner.os }}-
+
+    - name: Analyze base (merge-base) e head
+      shell: bash
+      env:
+        MERGE_BASE: ${{ steps.mb.outputs.sha }}
+      run: |
+        set -euo pipefail
         echo "merge-base: $MERGE_BASE"
         git worktree add /tmp/tic-base "$MERGE_BASE"
+        CACHE_DIR="$HOME/.tic-analyzer-cache/base"
+        if [ -d "$CACHE_DIR" ]; then
+          echo "cache de análise base encontrado — re-análise será incremental"
+          mkdir -p /tmp/tic-base/.tic-code
+          cp -r "$CACHE_DIR/." /tmp/tic-base/.tic-code/
+        fi
         node .tic-analyzer-tool/dist/src/cli/index.js analyze /tmp/tic-base --no-ai-files
+        mkdir -p "$CACHE_DIR"
+        rm -rf "$CACHE_DIR"
+        cp -r /tmp/tic-base/.tic-code "$CACHE_DIR"
         node .tic-analyzer-tool/dist/src/cli/index.js analyze "$PWD" --no-ai-files
 
     - name: Compare e gera report

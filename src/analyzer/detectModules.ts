@@ -100,6 +100,15 @@ function shortSubProjectName(dirName: string): string {
 }
 
 /**
+ * Workspaces no padrão `<projeto>-backend` / `<projeto>-frontend` lado a lado
+ * (ex.: cci-tws-pending-approval/pending-approval-backend): essas pastas são
+ * SEMPRE subprojetos, independente do nº de arquivos.
+ */
+function looksLikeSubProject(dirName: string): boolean {
+  return /(^|[-_.])(frontend|front|backend|back|api|web|ui|client|server|mobile|bff|gateway|admin)$/i.test(dirName);
+}
+
+/**
  * Detects modules inside a sub-project by finding the meaningful depth
  * where the project has multiple distinct domain groups.
  */
@@ -157,16 +166,23 @@ export function detectModules(files: ScannedFile[], maxModules = 25): ProjectMod
       continue;
     }
 
-    // Sub-project: large top-level dir that is NOT a known source tree directory
-    if (!KNOWN_SRC_DIRS.has(topKey) && topFiles.length >= SUBPROJECT_THRESHOLD) {
+    // Sub-project: pasta de topo grande OU com nome de subprojeto
+    // (<projeto>-backend / <projeto>-frontend) que não é source tree comum
+    if (!KNOWN_SRC_DIRS.has(topKey) && (topFiles.length >= SUBPROJECT_THRESHOLD || looksLikeSubProject(topKey))) {
       const subModules = detectSubProjectModules(topKey, topFiles);
       if (subModules.size > 1) {
         subProjectDirs.add(topKey);
         for (const [k, v] of subModules) moduleMap.set(k, v);
         continue;
       }
-      // Fallback: no meaningful sub-modules — keep entire dir as one module
-      moduleMap.set(topKey, topFiles);
+      // Fallback: sem sub-módulos significativos — a pasta inteira vira um
+      // módulo, com nome curto quando é subprojeto (pending-approval-backend → backend)
+      if (looksLikeSubProject(topKey)) {
+        subProjectDirs.add(topKey);
+        moduleMap.set(`${topKey}/__root__`, topFiles);
+      } else {
+        moduleMap.set(topKey, topFiles);
+      }
       continue;
     }
 
