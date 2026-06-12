@@ -41,6 +41,10 @@ export interface ExportData {
   ngrxItems: NgRxItem[];
   deadComponents: Array<{ file: string; type: 'react' | 'angular' }>;
   health?: HealthScore;
+  /** Governança: violações de regra (.tic-rules.json). */
+  archViolations?: { items: unknown[]; errorCount: number; warnCount: number; ruleCount: number };
+  /** Predição de risco (top 20). */
+  riskPrediction?: unknown[];
 }
 
 export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
@@ -50,6 +54,8 @@ export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
     version: '2.0',
     analyzedAt: new Date().toISOString(),
     health: data.health,
+    archViolations: data.archViolations,
+    riskPrediction: data.riskPrediction,
     project: {
       name: data.projectName,
       totalFiles: data.files.length,

@@ -6,6 +6,8 @@ import { TicAnalyzerMcpServer } from '../src/mcp/server';
 import { openIndexDb, INDEX_DB_FILE } from '../src/analyzer/store/indexDb';
 import { queryImpactOf, queryBlastRadius } from '../src/analyzer/store/impactQueries';
 import { queryGraphLevel } from '../src/analyzer/store/graphQueries';
+import { transitionTriageItem, createManualItem, type TriageState, type TriageCategory, type TriagePriority } from '../src/analyzer/store/triageStore';
+import { renderArchReviewHtml } from '../src/analyzer/checkArchRules';
 
 const isDev = !app.isPackaged;
 
@@ -163,6 +165,30 @@ ipcMain.handle('get-graph-level', async (_event, projectPath: string, expanded: 
     return { error: String(err) };
   } finally {
     db.close();
+  }
+});
+
+ipcMain.handle('update-triage', async (_event, projectPath: string, id: string, changes: { state?: TriageState; category?: TriageCategory; priority?: TriagePriority }) => {
+  return transitionTriageItem(path.join(projectPath, '.tic-code'), id, changes);
+});
+
+ipcMain.handle('create-triage', async (_event, projectPath: string, input: { title: string; category: TriageCategory; priority?: TriagePriority; entity?: string }) => {
+  return createManualItem(path.join(projectPath, '.tic-code'), input);
+});
+
+ipcMain.handle('open-arch-report', async (_event, projectPath: string) => {
+  const fs = await import('fs');
+  const os = await import('os');
+  try {
+    const raw = fs.readFileSync(path.join(projectPath, '.tic-code', 'arch-suggestions.json'), 'utf8');
+    const candidates = JSON.parse(raw);
+    const html = renderArchReviewHtml(candidates, path.basename(projectPath));
+    const out = path.join(os.tmpdir(), `architecture-review-${Date.now()}.html`);
+    fs.writeFileSync(out, html, 'utf8');
+    await shell.openPath(out);
+    return { ok: true, path: out };
+  } catch (err) {
+    return { ok: false, error: String(err) };
   }
 });
 

@@ -40,6 +40,15 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   getGraphLevel: (projectPath: string, expanded: string[]): Promise<unknown> =>
     ipcRenderer.invoke('get-graph-level', projectPath, expanded),
 
+  updateTriage: (projectPath: string, id: string, changes: unknown): Promise<unknown> =>
+    ipcRenderer.invoke('update-triage', projectPath, id, changes),
+
+  createTriage: (projectPath: string, input: unknown): Promise<unknown> =>
+    ipcRenderer.invoke('create-triage', projectPath, input),
+
+  openArchReport: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('open-arch-report', projectPath),
+
   getTokenStats: (): Promise<unknown> =>
     ipcRenderer.invoke('get-token-stats'),
 

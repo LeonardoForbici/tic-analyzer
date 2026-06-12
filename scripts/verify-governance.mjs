@@ -1,0 +1,143 @@
+/**
+ * Verificação do Módulo de Governança — roda contra dist/.
+ *
+ * Cobre: regras de arquitetura (.tic-rules.json), predição de risco (pura +
+ * pipeline), triagem (skill triage: máquina de estados, dedup, brief),
+ * diagnose (6 fases), arch suggestions (+ HTML), zoom-out e PR review
+ * (gate new-rule-violations, grilling, pr-history).
+ */
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { existsSync, rmSync, cpSync, writeFileSync, readFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+
+const require = createRequire(import.meta.url);
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const need = (p) => { if (!existsSync(p)) { console.error(`✗ dist ausente: ${p}. Rode \`npm run build:electron\`.`); process.exit(1); } return p; };
+
+const { runPipeline } = require(need(join(root, 'dist/src/analyzer/pipeline.js')));
+const { openIndexDb } = require(need(join(root, 'dist/src/analyzer/store/indexDb.js')));
+const { predictRisk } = require(need(join(root, 'dist/src/analyzer/computeRiskPrediction.js')));
+const { globMatch, renderArchReviewHtml } = require(need(join(root, 'dist/src/analyzer/checkArchRules.js')));
+const { loadTriage, transitionTriageItem } = require(need(join(root, 'dist/src/analyzer/store/triageStore.js')));
+const { buildAgentBrief, buildDiagnosis } = require(need(join(root, 'dist/src/mcp/agentBrief.js')));
+const { compareAnalyses, evaluateGates, formatPrComment } = require(need(join(root, 'dist/src/cli/prReview.js')));
+
+const failures = [];
+const check = (name, cond, detail = '') => {
+  if (cond) console.log(`  ✓ ${name}`);
+  else { console.log(`  ✗ ${name}${detail ? ` — ${detail}` : ''}`); failures.push(name); }
+};
+
+function cleanup(dir) {
+  for (const p of ['.tic-code', '.github', 'CLAUDE.md']) rmSync(join(dir, p), { recursive: true, force: true });
+}
+
+(async () => {
+  // ── Funções puras ───────────────────────────────────────────────────────────
+  console.log('\n(1) Funções puras — glob, predição\n');
+  check('G1: globMatch ** cruza diretórios', globMatch('backend/controller/**', 'backend/controller/a/b.java') && !globMatch('backend/controller/**', 'backend/service/X.java'));
+  check('G2: globMatch * não cruza /', globMatch('src/*.ts', 'src/a.ts') && !globMatch('src/*.ts', 'src/x/a.ts'));
+
+  const churn = new Map([['hot.ts', { commits: 14, fixes: 8 }], ['cold.ts', { commits: 1, fixes: 0 }]]);
+  const fm = [
+    { file: 'hot.ts', cyclomaticComplexity: 32, linesOfCode: 500, couplingIn: 12, couplingOut: 8, debtScore: 0, hotspot: true },
+    { file: 'cold.ts', cyclomaticComplexity: 2, linesOfCode: 40, couplingIn: 1, couplingOut: 1, debtScore: 0, hotspot: false }
+  ];
+  const pred = predictRisk(churn, fm);
+  check('P1: arquivo quente ranqueia primeiro', pred[0]?.file === 'hot.ts', JSON.stringify(pred));
+  check('P2: score em [0,100] com reasons', pred.every((p) => p.score >= 0 && p.score <= 100) && pred[0].reasons.length >= 3, JSON.stringify(pred[0]));
+
+  // ── Pipeline no fixture crosstier (tem .tic-rules.json) ─────────────────────
+  console.log('\n(2) Pipeline — regras, triagem, zoom-out (fixture crosstier)\n');
+  const fixture = join(root, 'test', 'fixtures', 'crosstier');
+  cleanup(fixture);
+  const r = await runPipeline(fixture, () => {}, { skipAiFiles: true });
+  check('R0: pipeline concluiu', r.success, r.error ?? '');
+
+  const arch = JSON.parse(readFileSync(join(fixture, '.tic-code', 'arch-violations.json'), 'utf8'));
+  check('R1: regra compliant não gera violação (no-frontend-db)', !arch.violations.some((v) => v.ruleId === 'no-frontend-db'), JSON.stringify(arch.violations));
+  check('R2: regra de path viola com ruleId certo (controller→ServiceImpl)', arch.violations.some((v) => v.ruleId === 'controller-nao-importa-service-impl' && v.severity === 'warn'), JSON.stringify(arch.violations));
+  check('R3: outOfScope persistido', Array.isArray(arch.outOfScope) && arch.outOfScope.some((d) => d.id === 'multi-idioma'));
+
+  const zoom = readFileSync(join(fixture, '.tic-code', 'zoom-out.md'), 'utf8');
+  check('Z1: zoom-out.md tem flowchart e módulos', zoom.includes('flowchart') && /pages|backend|db/.test(zoom));
+  check('Z2: zoom-out sem nomes de arquivo', !zoom.includes('.java') && !zoom.includes('.tsx'));
+
+  // Diagnose + brief + suggestions sobre o index.db do fixture
+  const db = openIndexDb(join(fixture, '.tic-code', 'index.db'));
+  const ticDir = join(fixture, '.tic-code');
+
+  const brief = buildAgentBrief(db, ticDir, 'PKG_CLIENTE.SALVAR', { outOfScope: arch.outOfScope });
+  check('B1: brief tem as 7 seções do template da skill',
+    ['**Category:**', '**Summary:**', '**Current behavior:**', '**Desired behavior:**', '**Key interfaces:**', '**Acceptance criteria:**', '**Out of scope:**'].every((s) => brief?.includes(s)), brief?.slice(0, 200));
+  check('B2: brief tem disclaimer de IA', brief?.startsWith('*This was generated by AI during triage.*'));
+  check('B3: acceptance criteria vêm do blast radius', brief?.includes('- [ ]') && brief?.includes('ClienteRepository'));
+  check('B4: out-of-scope registrado entra no brief', brief?.includes('multi-idioma'));
+
+  const diag = buildDiagnosis(db, ticDir, 'TelaCliente.tsx', 'PKG_CLIENTE.SALVAR');
+  check('D1: diagnose tem as 6 fases na ordem', (() => {
+    const idx = ['## 1. Feedback loop', '## 2. Reproduce', '## 3. Hypothesize', '## 4. Instrument', '## 5. Fix', '## 6. Cleanup'].map((s) => diag?.indexOf(s) ?? -1);
+    return idx.every((i) => i >= 0) && idx.every((v, i) => i === 0 || v > idx[i - 1]);
+  })(), diag?.slice(0, 150));
+  check('D2: hipóteses falsificáveis "Se X... então..."', ((diag?.match(/\*\*Se `/g) ?? []).length) >= 3, String(diag?.match(/\*\*Se `/g)?.length));
+  check('D3: instrumentação com prefixo TIC-DIAG', diag?.includes('[TIC-DIAG-'));
+  check('D4: handoff para arch suggestions', diag?.includes('get_arch_suggestions'));
+  db.close();
+
+  const sugg = JSON.parse(readFileSync(join(ticDir, 'arch-suggestions.json'), 'utf8'));
+  const html = renderArchReviewHtml(Array.isArray(sugg) && sugg.length > 0 ? sugg : [{ kind: 'high-coupling', files: ['x.ts'], problem: 'p', solution: 's', benefits: 'b', strength: 'strong' }], 'fixture');
+  check('A1: relatório HTML tem cards e Top recommendation', html.includes('Problem:') && html.includes('Solution:') && html.includes('Top recommendation'));
+
+  // ── Triagem (skill: estados, dedup, transições) ─────────────────────────────
+  console.log('\n(3) Triagem — máquina de estados (fixture mutado com risco)\n');
+  const work = mkdtempSync(join(tmpdir(), 'tic-gov-'));
+  const proj = join(work, 'proj');
+  cpSync(fixture, proj, { recursive: true });
+  rmSync(join(proj, '.tic-code'), { recursive: true, force: true });
+  writeFileSync(join(proj, 'src', 'pages', 'danger.ts'), 'export const run = (s: string) => eval(s);\n', 'utf8');
+
+  const r1 = await runPipeline(proj, () => {}, { skipAiFiles: true });
+  check('T0: pipeline com risco concluiu', r1.success);
+  const items1 = loadTriage(join(proj, '.tic-code'));
+  const riskItem = items1.find((i) => i.source === 'risk' && i.entity?.includes('danger.ts'));
+  check('T1: risco high vira item bug · needs-triage', !!riskItem && riskItem.category === 'bug' && riskItem.state === 'needs-triage', JSON.stringify(items1.map((i) => i.id)));
+
+  const t1 = transitionTriageItem(join(proj, '.tic-code'), riskItem.id, { state: 'ready-for-agent' });
+  check('T2: transição válida needs-triage → ready-for-agent', t1.ok);
+  const t2 = transitionTriageItem(join(proj, '.tic-code'), riskItem.id, { state: 'needs-info' });
+  check('T3: transição inválida ready-for-agent → needs-info é rejeitada', !t2.ok && /inválida/i.test(t2.error ?? ''));
+
+  await runPipeline(proj, () => {}, { skipAiFiles: true });
+  const items2 = loadTriage(join(proj, '.tic-code'));
+  const after = items2.find((i) => i.id === riskItem.id);
+  check('T4: re-análise não duplica e preserva estado', items2.filter((i) => i.id === riskItem.id).length === 1 && after?.state === 'ready-for-agent', JSON.stringify(after));
+
+  // ── PR review: gate de regra + grilling + history ───────────────────────────
+  console.log('\n(4) PR review — gate new-rule-violations, grilling, history\n');
+  const baseDir = join(work, 'base');
+  cpSync(fixture, baseDir, { recursive: true });
+  rmSync(join(baseDir, '.tic-code'), { recursive: true, force: true });
+  rmSync(join(baseDir, '.tic-rules.json'), { force: true }); // base SEM regras
+  await runPipeline(baseDir, () => {}, { skipAiFiles: true });
+  check('PR0: base sem regras gera exemplo', existsSync(join(baseDir, '.tic-code', 'tic-rules.example.json')));
+
+  const result = compareAnalyses(baseDir, fixture, ['backend/repository/ClienteRepository.java', 'backend/controller/ClienteController.java']);
+  check('PR1: violação de regra nova detectada no head', result.newRuleViolations.some((v) => v.ruleId === 'controller-nao-importa-service-impl'), JSON.stringify(result.newRuleViolations));
+  const gateWarn = evaluateGates(result, 'new-rule-violations');
+  check('PR2: gate ignora severity warn', !gateWarn.failed, JSON.stringify(gateWarn));
+  const forced = { ...result, newRuleViolations: result.newRuleViolations.map((v) => ({ ...v, severity: 'error' })) };
+  check('PR3: gate falha com severity error', evaluateGates(forced, 'new-rule-violations').failed);
+
+  check('PR4: grilling pergunta sobre a procedure chamada', result.grilling.some((q) => q.includes('PKG_CLIENTE') || q.includes('SALVAR')), JSON.stringify(result.grilling));
+  const md = formatPrComment(result, gateWarn);
+  check('PR5: comentário tem seção Grilling com disclaimer', md.includes('🔥 Grilling') && md.includes('This was generated by AI during triage'));
+  check('PR6: pr-history registrado pelo CLI (appendPrHistory exportado)', typeof require(join(root, 'dist/src/cli/prReview.js')).appendPrHistory === 'function');
+
+  cleanup(fixture);
+  rmSync(work, { recursive: true, force: true });
+  console.log('');
+  if (failures.length) { console.error(`✗ ${failures.length} verificação(ões) falharam`); process.exit(1); }
+  console.log('✓ módulo de governança verificado');
+})().catch((e) => { console.error('Erro fatal:', e); process.exit(1); });

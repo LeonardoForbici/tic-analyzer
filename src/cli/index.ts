@@ -15,8 +15,10 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 import { runPipeline } from '../analyzer/pipeline';
 import { loadSnapshots } from '../analyzer/store/snapshots';
-import { compareAnalyses, evaluateGates, formatPrComment } from './prReview';
+import { compareAnalyses, evaluateGates, formatPrComment, appendPrHistory } from './prReview';
 import { TicAnalyzerMcpServer } from '../mcp/server';
+import { buildAgentBrief } from '../mcp/agentBrief';
+import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
 
 interface Args {
   positional: string[];
@@ -126,10 +128,29 @@ async function cmdPrReview(args: Args): Promise<number> {
     }
   }
 
-  const result = compareAnalyses(path.resolve(baseDir as string), path.resolve(headDir as string), changedFiles);
+  const resolvedHead = path.resolve(headDir as string);
+  const result = compareAnalyses(path.resolve(baseDir as string), resolvedHead, changedFiles);
   const gateSpec = typeof args.flags.get('gate') === 'string' ? (args.flags.get('gate') as string) : '';
   const gate = gateSpec ? evaluateGates(result, gateSpec) : undefined;
   const markdown = formatPrComment(result, gate);
+  appendPrHistory(resolvedHead, result, gate);
+
+  // --brief-out: AGENT-BRIEF (skill triage) da entidade mais crítica quebrada,
+  // pronto para virar corpo de issue (gate falhou → issue bug/needs-triage)
+  const briefOut = args.flags.get('brief-out');
+  if (typeof briefOut === 'string') {
+    const entity = result.newRuleViolations[0]?.from ?? result.newRisks[0]?.file ?? result.impacts[0]?.file;
+    const db = entity ? openIndexDb(path.join(resolvedHead, '.tic-code', INDEX_DB_FILE)) : null;
+    if (db && entity) {
+      try {
+        const brief = buildAgentBrief(db, path.join(resolvedHead, '.tic-code'), entity, {
+          category: 'bug',
+          summary: gate?.failed ? `Resolver quality gate do PR: ${gate.reasons.join('; ')}` : undefined
+        });
+        if (brief) fs.writeFileSync(path.resolve(briefOut), brief, 'utf8');
+      } finally { db.close(); }
+    }
+  }
 
   const out = args.flags.get('out');
   if (typeof out === 'string') {

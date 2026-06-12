@@ -32,6 +32,8 @@ export interface HealthInput {
   metrics: ProjectMetrics;
   risks: RiskFinding[];
   violations: LayerViolation[];
+  /** Violações extras (regras .tic-rules.json severity error) — mesma dimensão. */
+  extraViolations?: number;
   deadComponents: number;
   deadPlsql: number;
   edges: GraphEdge[];
@@ -59,9 +61,10 @@ export function computeHealthScore(input: HealthInput): HealthScore {
   const riskPerKloc = riskScore / (lines / 1000);
   total += dim('risks', riskScore, riskPerKloc * 2, 25);
 
-  // Violações arquiteturais (circulares, frontend→backend) por 100 arquivos
-  const violPer100 = (input.violations.length / files) * 100;
-  total += dim('violations', input.violations.length, violPer100 * 2, 15);
+  // Violações arquiteturais (circulares, frontend→backend, regras custom) por 100 arquivos
+  const violCount = input.violations.length + (input.extraViolations ?? 0);
+  const violPer100 = (violCount / files) * 100;
+  total += dim('violations', violCount, violPer100 * 2, 15);
 
   // Dead code (componentes + PL/SQL morto) como % dos arquivos
   const dead = input.deadComponents + input.deadPlsql;

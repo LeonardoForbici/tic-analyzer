@@ -40,6 +40,10 @@ import { writeIndexDb, INDEX_DB_FILE } from './store/indexDb';
 import { loadFileCache, computeChangedFiles, saveFileCache } from './buildFileCache';
 import { computeHealthScore } from './computeHealthScore';
 import { appendSnapshot } from './store/snapshots';
+import { loadArchRules, checkArchRules, buildFileInfoLookup, writeRulesExample, findDeepeningCandidates } from './checkArchRules';
+import { collectChurn, predictRisk } from './computeRiskPrediction';
+import { syncTriageItems, type TriageCandidate } from './store/triageStore';
+import { generateZoomOut } from './generateZoomOut';
 
 export type PhaseStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -83,6 +87,10 @@ export interface PipelineResult {
   /** Health score do projeto (0–100) e grade (A–E). */
   healthScore?: number;
   healthGrade?: string;
+  /** Governança: violações de regra (.tic-rules.json) e predição de risco. */
+  archViolations?: number;
+  riskPredictions?: number;
+  triageItems?: number;
   /** Duração (ms) por fase — para identificar gargalos em projetos grandes. */
   phaseTimings?: Record<string, number>;
   error?: string;
@@ -117,6 +125,8 @@ const PHASES: PipelinePhase[] = [
   { id: 'impact', label: 'Construindo índice de impacto', status: 'pending' },
   { id: 'impact-graph', label: 'Consolidando grafo de impacto unificado', status: 'pending' },
   { id: 'metrics', label: 'Computando métricas de qualidade', status: 'pending' },
+  { id: 'arch-rules', label: 'Validando regras de arquitetura (.tic-rules.json)', status: 'pending' },
+  { id: 'predict', label: 'Predição de risco (churn × acoplamento)', status: 'pending' },
   { id: 'inheritance', label: 'Detectando hierarquia de classes', status: 'pending' },
   { id: 'patterns', label: 'Identificando padrões arquiteturais', status: 'pending' },
   { id: 'db-schema', label: 'Detectando schema de banco de dados', status: 'pending' },
@@ -125,6 +135,8 @@ const PHASES: PipelinePhase[] = [
   { id: 'angular-modules', label: 'Detectando módulos Angular e NgRx', status: 'pending' },
   { id: 'dead-components', label: 'Detectando componentes sem uso (dead code)', status: 'pending' },
   { id: 'health', label: 'Computando health score do projeto', status: 'pending' },
+  { id: 'triage', label: 'Sincronizando fila de triagem', status: 'pending' },
+  { id: 'zoom-out', label: 'Gerando visão executiva (zoom-out)', status: 'pending' },
   { id: 'search-index', label: 'Construindo índice de busca por código', status: 'pending' },
   { id: 'persist-index', label: 'Gravando índice consultável (SQLite)', status: 'pending' },
   { id: 'export-json', label: 'Exportando analysis.json', status: 'pending' },
@@ -393,6 +405,41 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('metrics');
     report('metrics', 100, `${metrics.hotspotCount} hotspots, ${violations.length} violações arquiteturais`);
 
+    // ── 17b. REGRAS DE ARQUITETURA (.tic-rules.json) ─────────────────────────────
+    report('arch-rules', 80, 'Validando regras de arquitetura do projeto...');
+    const rulesConfig = loadArchRules(projectPath);
+    const fileInfo = buildFileInfoLookup(files, modules);
+    const archViolations = rulesConfig ? checkArchRules(rulesConfig.rules, graph.edges, fileInfo) : [];
+    if (!rulesConfig) writeRulesExample(ticCodeDir);
+    fs.writeFileSync(path.join(ticCodeDir, 'arch-violations.json'), JSON.stringify({
+      rules: rulesConfig?.rules ?? [],
+      outOfScope: rulesConfig?.outOfScope ?? [],
+      violations: archViolations
+    }), 'utf8');
+    const archErrors = archViolations.filter((v) => v.severity === 'error').length;
+    // Candidatos a deepening (skill improve-codebase-architecture)
+    const deepening = findDeepeningCandidates({
+      fileMetrics: metrics.files,
+      circulars: violations.filter((v) => /circular/i.test(v.type)).map((v) => ({ from: v.from, to: v.to })),
+      totalEdges: graph.edges.length,
+      moduleOf: fileInfo.moduleOf
+    });
+    fs.writeFileSync(path.join(ticCodeDir, 'arch-suggestions.json'), JSON.stringify(deepening), 'utf8');
+    markDone('arch-rules');
+    report('arch-rules', 100, rulesConfig
+      ? `${rulesConfig.rules.length} regra(s): ${archErrors} error, ${archViolations.length - archErrors} warn`
+      : 'sem .tic-rules.json (exemplo gerado em .tic-code/tic-rules.example.json)');
+
+    // ── 17c. PREDIÇÃO DE RISCO (churn × acoplamento) ─────────────────────────────
+    report('predict', 81, 'Cruzando churn do git com complexidade e acoplamento...');
+    const churn = collectChurn(projectPath);
+    const riskPredictions = churn ? predictRisk(churn, metrics.files) : [];
+    fs.writeFileSync(path.join(ticCodeDir, 'risk-prediction.json'), JSON.stringify(riskPredictions), 'utf8');
+    markDone('predict');
+    report('predict', 100, churn
+      ? `${riskPredictions.length} arquivos com risco preditivo mapeado`
+      : 'sem histórico git — predição pulada');
+
     // ── 18. HERANÇA ───────────────────────────────────────────────────────────────
     report('inheritance', 84, 'Detectando hierarquia de classes...');
     const inheritanceTree = detectInheritance(files, graph.semanticClasses);
@@ -475,7 +522,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     // ── 24a. HEALTH SCORE + SNAPSHOT ─────────────────────────────────────────────
     report('health', 94, 'Computando health score do projeto...');
     const health = computeHealthScore({
-      totalFiles: files.length, totalLines, metrics, risks, violations,
+      totalFiles: files.length, totalLines, metrics, risks, violations, extraViolations: archErrors,
       deadComponents: deadComponents.length, deadPlsql: deadPlsql.length, edges: graph.edges
     });
     appendSnapshot(ticCodeDir, projectPath, {
@@ -499,6 +546,41 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     });
     markDone('health');
     report('health', 100, `Health score: ${health.score}/100 (grade ${health.grade})`);
+
+    // ── 24b. TRIAGEM (skill triage: itens automáticos preservando estado) ────────
+    report('triage', 94, 'Sincronizando fila de triagem...');
+    const triageCandidates: TriageCandidate[] = [];
+    for (const r of risks.filter((r) => r.level === 'critical' || r.level === 'high')) {
+      triageCandidates.push({
+        id: `risk::${r.file}::${r.title}`,
+        title: `${r.title} em ${r.file.split('/').pop()}`,
+        category: 'bug',
+        priority: r.level === 'critical' ? 'critical' : 'high',
+        source: 'risk',
+        entity: `file:${r.file}`,
+        detail: r.detail
+      });
+    }
+    for (const v of archViolations.filter((v) => v.severity === 'error')) {
+      triageCandidates.push({
+        id: `arch-rule::${v.ruleId}::${v.from}::${v.to}`,
+        title: `Regra "${v.ruleId}" violada: ${v.from.split('/').pop()} → ${v.to.split('/').pop()}`,
+        category: 'bug',
+        priority: 'high',
+        source: 'arch-rule',
+        entity: `file:${v.from}`,
+        detail: v.description
+      });
+    }
+    const triageStats = syncTriageItems(ticCodeDir, triageCandidates);
+    markDone('triage');
+    report('triage', 100, `${triageStats.created} item(ns) novo(s), ${triageStats.total} na fila`);
+
+    // ── 24c. ZOOM-OUT (visão executiva) ──────────────────────────────────────────
+    report('zoom-out', 94, 'Gerando visão executiva por fronteiras de domínio...');
+    generateZoomOut(ticCodeDir, projectName, modules, graph.edges, files);
+    markDone('zoom-out');
+    report('zoom-out', 100, 'zoom-out.md gerado');
 
     // ── 24b. SEARCH INDEX ─────────────────────────────────────────────────────────
     report('search-index', 95, 'Indexando termos de código para busca semântica...');
@@ -525,6 +607,8 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       projectName, projectPath, files, totalLines, stack, modules, endpoints, graph, risks,
       metrics, fileMetrics: metrics.files, violations, patternMatches, inheritanceTree,
       dbSchema, impactIndex, quickContextTokens, health,
+      archViolations: { items: archViolations, errorCount: archErrors, warnCount: archViolations.length - archErrors, ruleCount: rulesConfig?.rules.length ?? 0 },
+      riskPrediction: riskPredictions.slice(0, 20),
       transactionBoundaries, batchJobs, angularModules, ngrxItems, deadComponents
     });
     markDone('export-json');
@@ -569,6 +653,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       impactEdges: impactEdges.length,
       healthScore: health.score,
       healthGrade: health.grade,
+      archViolations: archViolations.length,
+      riskPredictions: riskPredictions.length,
+      triageItems: triageStats.total,
       phaseTimings
     };
 

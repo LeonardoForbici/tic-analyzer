@@ -18,6 +18,10 @@ inputs:
     description: 'Postar/atualizar comentário sticky no PR (precisa de permissions: pull-requests: write)'
     required: false
     default: 'true'
+  create-issues:
+    description: 'Quando um gate falha, cria issue com labels bug/needs-triage e corpo = AGENT-BRIEF (skill triage). Precisa de permissions: issues: write'
+    required: false
+    default: 'false'
   github-token:
     description: 'Token para o comentário no PR'
     required: false
@@ -102,7 +106,8 @@ runs:
           --base /tmp/tic-base --head "$PWD" \
           --base-ref "origin/$BASE_REF" \
           ${GATE:+--gate "$GATE"} \
-          --out /tmp/tic-report.md
+          --out /tmp/tic-report.md \
+          --brief-out /tmp/tic-brief.md
         echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
     - name: Comentário sticky no PR
@@ -121,6 +126,24 @@ runs:
           gh api -X PATCH "repos/$REPO/issues/comments/$EXISTING" -F body=@/tmp/tic-report.md
         else
           gh api "repos/$REPO/issues/$PR/comments" -F body=@/tmp/tic-report.md
+        fi
+
+    - name: Issue de triagem (skill triage — gate falhou)
+      if: inputs.create-issues == 'true' && steps.review.outputs.exit_code == '1' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        [ -f /tmp/tic-brief.md ] || { echo "sem brief gerado — pulando issue"; exit 0; }
+        TITLE="[TIC] Quality gate falhou no PR #$PR"
+        # Evita duplicar: procura issue aberta com o mesmo título
+        EXISTING=$(gh api "search/issues?q=repo:$REPO+state:open+in:title+%22$TITLE%22" --jq '.items[0].number' 2>/dev/null || true)
+        if [ -z "$EXISTING" ] || [ "$EXISTING" = "null" ]; then
+          gh api "repos/$REPO/issues" -f title="$TITLE" -F body=@/tmp/tic-brief.md \
+            -f "labels[]=bug" -f "labels[]=needs-triage"
         fi
 
     - name: Quality gate

@@ -1,0 +1,24 @@
+{
+  "rules": [
+    {
+      "id": "no-frontend-db",
+      "severity": "error",
+      "description": "Frontend nunca acessa o banco diretamente",
+      "forbid": { "fromLayer": "frontend", "toLayer": "database" }
+    },
+    {
+      "id": "controller-nao-importa-service-impl",
+      "severity": "warn",
+      "description": "Controller depende da interface, não da implementação",
+      "forbid": { "fromPath": "backend/controller/**", "toPath": "**/ClienteServiceImpl.java" }
+    }
+  ],
+  "outOfScope": [
+    {
+      "id": "multi-idioma",
+      "decision": "Internacionalização da TelaCliente fica fora do escopo atual",
+      "reason": "Sem demanda de mercado no momento",
+      "date": "2026-01-15"
+    }
+  ]
+}

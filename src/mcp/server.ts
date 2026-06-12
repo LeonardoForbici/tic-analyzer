@@ -13,6 +13,8 @@ import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
 import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount } from './queries';
 import { queryImpactOf, queryBlastRadius, type ImpactOfResult, type BlastRadiusResult } from '../analyzer/store/impactQueries';
 import { queryGraphLevel } from '../analyzer/store/graphQueries';
+import { buildAgentBrief, buildDiagnosis } from './agentBrief';
+import { loadTriage, transitionTriageItem, type TriageState, type TriageCategory, type TriagePriority } from '../analyzer/store/triageStore';
 import { getEmbedder } from '../analyzer/semantic/embeddings';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
@@ -222,6 +224,77 @@ export class TicAnalyzerMcpServer {
             properties: {
               expanded: { type: 'array', items: { type: 'string' }, description: 'Ids expandidos: layer:<nome>, module:<nome>, file:<rel_path>.' }
             }
+          }
+        },
+        {
+          name: 'get_arch_rules',
+          description: 'Regras de arquitetura do projeto (.tic-rules.json) e violações atuais (architecture drift). ~300 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_arch_suggestions',
+          description: 'Oportunidades de melhoria arquitetural (skill improve-codebase-architecture): módulos pass-through (deletion test), acoplamento alto, god modules e circulares — com sugestão de padrão. ~400 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_risk_prediction',
+          description: 'Manutenção preditiva: onde o próximo bug tende a nascer (churn do git × complexidade × acoplamento), com score 0-100 e motivos. ~300 tokens.',
+          inputSchema: { type: 'object', properties: { limit: { type: 'number', description: 'Top N (default 10).' } } }
+        },
+        {
+          name: 'get_agent_brief',
+          description: 'AGENT-BRIEF (skill triage de mattpocock/skills): brief completo e acionável de uma entidade — Category, Summary, Current/Desired behavior, Key interfaces, Acceptance criteria e Out of scope — preenchido pelo grafo de impacto. Pronto para issue ou para um agente implementar. ~600 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: { entity: { type: 'string', description: 'Arquivo/procedure/tabela/coluna ou id de item de triagem.' } },
+            required: ['entity']
+          }
+        },
+        {
+          name: 'get_diagnosis',
+          description: 'Diagnose disciplinado (skill diagnose): para um sintoma entre duas entidades, devolve as 6 fases — feedback loop primeiro, reprodução pelo caminho do grafo, 3-5 hipóteses falsificáveis ranqueadas por risco preditivo, instrumentação 1-a-1 com prefixo de log, fix+regressão e post-mortem. ~700 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              from: { type: 'string', description: 'Entidade onde o sintoma aparece (ex: tela, endpoint).' },
+              to: { type: 'string', description: 'Entidade suspeita do outro lado (ex: procedure, tabela). Opcional.' }
+            },
+            required: ['from']
+          }
+        },
+        {
+          name: 'get_zoom_out',
+          description: 'Zoom-out (skill zoom-out): visão macro por fronteiras de domínio. Sem parâmetro = sistema inteiro (Mermaid de camadas/módulos). Com entity = onde aquela parte se encaixa: módulo dono, quem a chama (agregado por módulo) e conexões — vocabulário de domínio, sem arquivos soltos. ~400 tokens.',
+          inputSchema: { type: 'object', properties: { entity: { type: 'string', description: 'Entidade para zoom-out focado (opcional).' } } }
+        },
+        {
+          name: 'get_out_of_scope',
+          description: 'Catálogo de decisões out-of-scope registradas (.tic-rules.json) — o que o time já decidiu NÃO fazer, para não rediscutir. ~150 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'list_triage',
+          description: 'Fila de triagem (skill triage): itens com categoria (bug/enhancement), estado (needs-triage/needs-info/ready-for-agent/ready-for-human/wontfix) e prioridade. Filtre por state/category. ~300 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              state: { type: 'string', description: 'Filtrar por estado (opcional).' },
+              category: { type: 'string', description: 'Filtrar por categoria (opcional).' }
+            }
+          }
+        },
+        {
+          name: 'update_triage',
+          description: 'Transiciona um item da fila de triagem (transições validadas pela máquina de estados da skill). Ex: update_triage(id, state="ready-for-agent").',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              state: { type: 'string', description: 'Novo estado (opcional).' },
+              category: { type: 'string', description: 'bug | enhancement (opcional).' },
+              priority: { type: 'string', description: 'critical|high|medium|low (opcional).' }
+            },
+            required: ['id']
           }
         },
         {
@@ -594,6 +667,164 @@ export class TicAnalyzerMcpServer {
             ].filter(Boolean);
             return respond(textResult(lines.join('\n')));
           } finally { db.close(); }
+        }
+
+        case 'get_arch_rules': {
+          const data = this.readJson('arch-violations.json');
+          if (!data) return respond(textResult('arch-violations.json não encontrado. Execute a análise novamente.'));
+          const rules = (data.rules ?? []) as any[];
+          const violations = (data.violations ?? []) as any[];
+          const lines = [
+            `# Regras de Arquitetura (${rules.length} regra(s), ${violations.length} violação(ões))`,
+            '',
+            ...(rules.length === 0
+              ? ['Sem `.tic-rules.json` na raiz do projeto — exemplo disponível em `.tic-code/tic-rules.example.json`.']
+              : rules.map((r: any) => {
+                const v = violations.filter((x: any) => x.ruleId === r.id);
+                return `- ${v.length === 0 ? '✅' : '❌'} **${r.id}** (${r.severity})${r.description ? ` — ${r.description}` : ''}${v.length > 0 ? ` · ${v.length} violação(ões)` : ''}`;
+              })),
+            '',
+            ...(violations.length > 0 ? ['## Violações', ...violations.slice(0, 20).map((v: any) => `- ${v.severity === 'error' ? '🔴' : '🟡'} ${v.ruleId}: \`${v.from}\` → \`${v.to}\``)] : [])
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'get_arch_suggestions': {
+          const data = this.readJson('arch-suggestions.json');
+          if (!data || !Array.isArray(data) || data.length === 0) {
+            return respond(textResult('Nenhum candidato a melhoria arquitetural encontrado (ou análise desatualizada). 🎉'));
+          }
+          const lines = [
+            '# Oportunidades de melhoria arquitetural (deepening)',
+            '',
+            ...data.map((c: any, i: number) => [
+              `## ${i + 1}. [${c.strength}] ${c.kind} — ${c.files.map((f: string) => `\`${f}\``).join(', ')}`,
+              `- **Problema:** ${c.problem}`,
+              `- **Solução:** ${c.solution}`,
+              `- **Benefícios:** ${c.benefits}`
+            ].join('\n')),
+            '',
+            '> Relatório HTML completo: botão "Relatório de arquitetura" no app. Não proponha interfaces ainda — escolha um candidato e faça o grilling.'
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'get_risk_prediction': {
+          const limit = (args as { limit?: number } | undefined)?.limit ?? 10;
+          const data = this.readJson('risk-prediction.json');
+          if (!data || !Array.isArray(data) || data.length === 0) {
+            return respond(textResult('Sem predição de risco (projeto sem histórico git ou análise desatualizada).'));
+          }
+          const lines = [
+            '# Predição de risco — onde o próximo bug tende a nascer',
+            '',
+            '| Arquivo | Score | Motivos |',
+            '| --- | --- | --- |',
+            ...data.slice(0, limit).map((p: any) => `| \`${p.file}\` | ${p.score} | ${(p.reasons ?? []).join(', ')} |`),
+            '',
+            '> Score = churn 90d (40%) + commits de fix (20%) + complexidade (20%) + acoplamento (20%), normalizados.'
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'get_agent_brief': {
+          const { entity } = args as { entity: string };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            // Aceita id de item de triagem (resolve para a entidade dele)
+            const triage = loadTriage(this.ticCodePath).find((t) => t.id === entity);
+            const target = triage?.entity ?? triage?.title ?? entity;
+            const archData = this.readJson('arch-violations.json');
+            const brief = buildAgentBrief(db, this.ticCodePath, target, {
+              category: triage?.category,
+              summary: triage?.title,
+              detail: triage?.detail,
+              outOfScope: archData?.outOfScope ?? []
+            });
+            if (!brief) return respond(textResult(`Entidade "${entity}" não encontrada no grafo de impacto.`));
+            return respond(textResult(brief));
+          } finally { db.close(); }
+        }
+
+        case 'get_diagnosis': {
+          const { from, to } = args as { from: string; to?: string };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const diag = buildDiagnosis(db, this.ticCodePath, from, to);
+            if (!diag) return respond(textResult(`Entidade "${from}" não encontrada no grafo.`));
+            return respond(textResult(diag));
+          } finally { db.close(); }
+        }
+
+        case 'get_zoom_out': {
+          const entity = (args as { entity?: string } | undefined)?.entity;
+          if (!entity) {
+            return respond(textResult(this.readFile('zoom-out.md')));
+          }
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const r = queryImpactOf(db, entity, { maxDepth: 3 });
+            if (!r) return respond(textResult(`Entidade "${entity}" não encontrada.`));
+            const file = r.entity.startsWith('file:') ? r.entity.slice(5) : null;
+            const home = file ? (db.prepare('SELECT module, layer FROM files WHERE rel_path = ?').get(file) as any) : null;
+            const byModule = Object.entries(r.byModule).sort((a, b) => b[1] - a[1]).slice(0, 8);
+            const lines = [
+              `# Zoom-out: \`${r.entity.slice(r.entity.indexOf(':') + 1)}\``,
+              '',
+              home ? `Pertence ao módulo **${home.module ?? '—'}** (camada ${home.layer ?? '—'}).` : `Entidade da camada de dados/banco.`,
+              '',
+              '## Quem depende desta parte (agregado por módulo)',
+              ...(byModule.length > 0 ? byModule.map(([m, c]) => `- **${m}** — ${c} ponto(s) de dependência`) : ['- Ninguém depende diretamente (folha do grafo).']),
+              '',
+              `No total, ${r.totalVisited} entidade(s) em até 3 saltos (${Object.entries(r.byKind).map(([k, v]) => `${k}: ${v}`).join(', ')}).`,
+              '',
+              '> Visão macro do sistema inteiro: get_zoom_out() sem parâmetro. Detalhe: get_blast_radius/get_impact_of.'
+            ];
+            return respond(textResult(lines.join('\n')));
+          } finally { db.close(); }
+        }
+
+        case 'get_out_of_scope': {
+          const data = this.readJson('arch-violations.json');
+          const decisions = (data?.outOfScope ?? []) as any[];
+          if (decisions.length === 0) return respond(textResult('Nenhuma decisão out-of-scope registrada. Adicione em `.tic-rules.json` → `outOfScope`.'));
+          return respond(textResult([
+            '# Decisões out-of-scope registradas (não rediscutir sem motivo novo)',
+            '',
+            ...decisions.map((d: any) => `- **${d.id}**${d.date ? ` (${d.date})` : ''}: ${d.decision}${d.reason ? ` — _${d.reason}_` : ''}`)
+          ].join('\n')));
+        }
+
+        case 'list_triage': {
+          const { state, category } = (args ?? {}) as { state?: string; category?: string };
+          let items = loadTriage(this.ticCodePath);
+          if (state) items = items.filter((i) => i.state === state);
+          if (category) items = items.filter((i) => i.category === category);
+          if (items.length === 0) return respond(textResult('Fila de triagem vazia para esse filtro.'));
+          const lines = [
+            `# Fila de triagem (${items.length} item(ns))`,
+            '',
+            '| Id | Título | Categoria | Estado | Prioridade |',
+            '| --- | --- | --- | --- | --- |',
+            ...items.slice(0, 30).map((i) => `| \`${i.id}\` | ${i.title} | ${i.category} | ${i.state} | ${i.priority} |`),
+            '',
+            '> Brief completo de um item: get_agent_brief(id). Transição: update_triage(id, state=...).'
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'update_triage': {
+          const { id, state, category, priority } = args as { id: string; state?: string; category?: string; priority?: string };
+          const r = transitionTriageItem(this.ticCodePath, id, {
+            state: state as TriageState | undefined,
+            category: category as TriageCategory | undefined,
+            priority: priority as TriagePriority | undefined
+          });
+          if (!r.ok) return respond(textResult(`❌ ${r.error}`));
+          return respond(textResult(`✅ Item \`${id}\` atualizado: estado=${r.item!.state}, categoria=${r.item!.category}, prioridade=${r.item!.priority}`));
         }
 
         case 'get_health': {
@@ -1158,6 +1389,14 @@ export class TicAnalyzerMcpServer {
       return `Arquivo não encontrado: ${fullPath}\nExecute o TIC Analyzer para gerar os artefatos.`;
     }
     return fs.readFileSync(fullPath, 'utf8');
+  }
+
+  private readJson(relativePath: string): any | null {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(this.ticCodePath, relativePath), 'utf8'));
+    } catch {
+      return null;
+    }
   }
 
   private listModuleNames(): string[] {
