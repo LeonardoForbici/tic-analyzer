@@ -1,10 +1,6 @@
-import { useState, useEffect, useCallback, useRef, useMemo, MouseEvent as RMouseEvent } from 'react';
-import mermaid from 'mermaid';
-import { GraphViewer } from './GraphViewer';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { HierGraphViewer } from './HierGraphViewer';
 import { HealthDashboard } from './HealthDashboard';
-
-mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
 
 declare global {
   interface Window {
@@ -55,7 +51,7 @@ interface ImpactOfResponse {
   blast?: { entity: string; totalAffected: number; truncated: boolean; byKind: Record<string, number>; byModule: Record<string, number>; top: Array<{ id: string; kind: string; depth: number; dependents: number; confidence: string }> };
 }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
-type Tab = 'overview' | 'health' | 'explorer' | 'multigraph' | 'modules' | 'impact' | 'metrics' | 'files' | 'docs';
+type Tab = 'overview' | 'health' | 'explorer' | 'impact' | 'metrics' | 'files' | 'docs';
 
 const C = { bg: '#0f0f1a', card: '#16213e', border: '#2a2a4e', accent: '#7c83fd', green: '#56cfad', red: '#ff6b6b', orange: '#f0a500', text: '#e0e0e0', muted: '#888' };
 
@@ -78,54 +74,6 @@ const S = {
   badge: (s: string) => ({ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, background: s === 'done' ? '#1a4a1a' : s === 'running' ? '#1a1a4a' : s === 'error' ? '#4a1a1a' : '#222', color: s === 'done' ? C.green : s === 'running' ? C.accent : s === 'error' ? C.red : '#555' }),
   dot: (on: boolean) => ({ width: '8px', height: '8px', borderRadius: '50%', background: on ? C.green : '#555', flexShrink: 0 }),
 };
-
-// ── MermaidDiagram ────────────────────────────────────────────────────────────
-let mermaidCounter = 0;
-function MermaidDiagram({ code, id }: { code: string; id: string }) {
-  const [svg, setSvg] = useState('');
-  const [scale, setScale] = useState(1);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
-  const drag = useRef({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 });
-  const renderKey = useRef(0);
-  const uniqueId = useMemo(() => `mg-${id}-${++mermaidCounter}`, [id]);
-
-  useEffect(() => {
-    if (!code.trim()) { setSvg(''); return; }
-    const key = ++renderKey.current;
-    mermaid.render(uniqueId, code)
-      .then(({ svg: rendered }) => { if (key === renderKey.current) setSvg(rendered); })
-      .catch(() => { if (key === renderKey.current) setSvg(`<pre style="color:#888;font-size:11px;overflow:auto;white-space:pre-wrap">${code}</pre>`); });
-  }, [code, uniqueId]);
-
-  useEffect(() => { setScale(1); setPos({ x: 0, y: 0 }); }, [svg]);
-
-  const onWheel = useCallback((e: React.WheelEvent) => { e.preventDefault(); setScale((s) => Math.min(4, Math.max(0.3, s - e.deltaY * 0.001))); }, []);
-  const onMouseDown = useCallback((e: RMouseEvent) => { drag.current = { active: true, startX: e.clientX, startY: e.clientY, originX: pos.x, originY: pos.y }; }, [pos]);
-  const onMouseMove = useCallback((e: RMouseEvent) => { if (!drag.current.active) return; setPos({ x: drag.current.originX + e.clientX - drag.current.startX, y: drag.current.originY + e.clientY - drag.current.startY }); }, []);
-  const stopDrag = useCallback(() => { drag.current.active = false; }, []);
-  const reset = useCallback(() => { setScale(1); setPos({ x: 0, y: 0 }); }, []);
-
-  return (
-    <div>
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', alignItems: 'center' }}>
-        <button style={{ padding: '4px 10px', background: '#1a1a3a', border: '1px solid #2a2a4e', borderRadius: '6px', color: '#aaa', cursor: 'pointer', fontSize: '16px' }} onClick={() => setScale((s) => Math.min(4, s + 0.2))}>+</button>
-        <button style={{ padding: '4px 10px', background: '#1a1a3a', border: '1px solid #2a2a4e', borderRadius: '6px', color: '#aaa', cursor: 'pointer', fontSize: '16px' }} onClick={() => setScale((s) => Math.max(0.3, s - 0.2))}>−</button>
-        <button style={{ padding: '4px 10px', background: '#1a1a3a', border: '1px solid #2a2a4e', borderRadius: '6px', color: '#aaa', cursor: 'pointer', fontSize: '12px' }} onClick={reset}>⟳ Reset</button>
-        <span style={{ fontSize: '11px', color: '#666' }}>{Math.round(scale * 100)}% | scroll=zoom | drag=mover</span>
-      </div>
-      <div style={{ overflow: 'hidden', background: '#0d1117', borderRadius: '8px', height: '440px', cursor: drag.current.active ? 'grabbing' : 'grab', userSelect: 'none' }}
-        onWheel={onWheel} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={stopDrag} onMouseLeave={stopDrag}>
-        <div dangerouslySetInnerHTML={{ __html: svg }}
-          style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`, transformOrigin: '0 0', padding: '16px', display: 'inline-block', minWidth: '100%' }} />
-      </div>
-    </div>
-  );
-}
-
-function extractMermaid(md: string): string {
-  const match = md.match(/```mermaid\n([\s\S]*?)```/);
-  return match ? match[1].trim() : '';
-}
 
 type ImpactEntry = { directCount: number; transitiveCount: number; direct: string[]; transitive: string[] };
 
@@ -503,7 +451,6 @@ function CrossTierImpactView({ impact, blast, onSelect }: {
 // ── MetricsTab ─────────────────────────────────────────────────────────────────
 function MetricsTab({ ticCodeDir }: { ticCodeDir: string }) {
   const [content, setContent] = useState('');
-  const [activeSubTab, setActiveSubTab] = useState<'summary' | 'graph'>('summary');
 
   useEffect(() => {
     window.ticAnalyzer.readFile(`${ticCodeDir}/metrics-summary.md`).then((c) => {
@@ -518,21 +465,11 @@ function MetricsTab({ ticCodeDir }: { ticCodeDir: string }) {
           <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>Métricas de Qualidade</div>
           <div style={{ fontSize: '12px', color: C.muted }}>Complexidade Ciclomática · Dívida Técnica · Hotspots · Violações</div>
         </div>
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button style={S.tab(activeSubTab === 'summary')} onClick={() => setActiveSubTab('summary')}>Relatório</button>
-          <button style={S.tab(activeSubTab === 'graph')} onClick={() => setActiveSubTab('graph')}>Grafo de Deps</button>
-        </div>
       </div>
 
-      {activeSubTab === 'summary' && (
-        <div style={{ background: '#0d1117', borderRadius: '8px', padding: '16px', maxHeight: '500px', overflowY: 'auto', fontFamily: 'monospace', fontSize: '12px', color: '#ccc', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-          {content}
-        </div>
-      )}
-
-      {activeSubTab === 'graph' && (
-        <GraphViewer ticCodeDir={ticCodeDir} mode="deps" />
-      )}
+      <div style={{ background: '#0d1117', borderRadius: '8px', padding: '16px', maxHeight: '500px', overflowY: 'auto', fontFamily: 'monospace', fontSize: '12px', color: '#ccc', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+        {content}
+      </div>
     </div>
   );
 }
@@ -1071,8 +1008,6 @@ export function App() {
   const [mcpRunning, setMcpRunning] = useState(false);
   const [mcpPort] = useState(7432);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
-  const [multigraphCode, setMultigraphCode] = useState('');
-  const [diagramCode, setDiagramCode] = useState('');
   const [tokenStats, setTokenStats] = useState<TokenStats | null>(null);
 
   useEffect(() => { window.ticAnalyzer?.getMcpStatus().then((s) => setMcpRunning(s.running)); }, []);
@@ -1094,13 +1029,6 @@ export function App() {
     return () => { cleanup?.(); };
   }, [mcpRunning]);
 
-  useEffect(() => {
-    if (state !== 'done' || !result) return;
-    const ticDir = result.outputPath;
-    window.ticAnalyzer.readFile(`${ticDir}/multigraph.md`).then((c) => { if (c) setMultigraphCode(extractMermaid(c)); });
-    window.ticAnalyzer.readFile(`${ticDir}/diagram.md`).then((c) => { if (c) setDiagramCode(extractMermaid(c)); });
-  }, [state, result]);
-
   const handleSelectFolder = useCallback(async () => {
     const folder = await window.ticAnalyzer.selectFolder();
     if (folder) setProjectPath(folder);
@@ -1109,7 +1037,7 @@ export function App() {
   const handleAnalyze = useCallback(async () => {
     if (!projectPath) return;
     setState('analyzing'); setProgress(null); setResult(null);
-    setMultigraphCode(''); setDiagramCode(''); setActiveTab('overview');
+    setActiveTab('overview');
     const cleanup = window.ticAnalyzer.onProgress((p) => setProgress(p));
     window.ticAnalyzer.onAnalysisDone((r) => {
       cleanup();
@@ -1134,8 +1062,6 @@ export function App() {
     { id: 'explorer', label: 'Explorador' },
     { id: 'impact', label: 'Impacto' },
     { id: 'metrics', label: 'Métricas' },
-    { id: 'multigraph', label: 'Multi-Grafo' },
-    { id: 'modules', label: 'Módulos' },
     { id: 'files', label: 'Arquivos' },
     { id: 'docs', label: 'Docs' },
   ];
@@ -1305,35 +1231,6 @@ export function App() {
 
             {activeTab === 'metrics' && (
               <div style={S.card}><MetricsTab ticCodeDir={result.outputPath} /></div>
-            )}
-
-            {activeTab === 'multigraph' && (
-              <div style={S.card}>
-                <div style={{ marginBottom: '12px' }}>
-                  <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>Multi-Grafo de Chamadas</div>
-                  <div style={{ fontSize: '12px', color: C.muted }}>Frontend → Endpoint REST → Backend → PL/SQL</div>
-                </div>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: C.muted, marginBottom: '8px' }}>Grafo Interativo</div>
-                <GraphViewer ticCodeDir={result.outputPath} mode="call" />
-                {multigraphCode && (
-                  <div style={{ marginTop: '20px' }}>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: C.muted, marginBottom: '8px' }}>Diagrama Estatico (Mermaid)</div>
-                    <MermaidDiagram code={multigraphCode} id="multigraph" />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {activeTab === 'modules' && (
-              <div style={S.card}>
-                <div style={{ marginBottom: '16px' }}>
-                  <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>Diagrama de Modulos</div>
-                  <div style={{ fontSize: '12px', color: C.muted }}>Dependencias entre modulos detectadas por analise de imports</div>
-                </div>
-                {diagramCode ? <MermaidDiagram code={diagramCode} id="diagram" /> : (
-                  <div style={{ color: C.muted, fontSize: '13px', padding: '40px', textAlign: 'center' as const }}>Diagrama nao gerado — menos de 2 modulos detectados.</div>
-                )}
-              </div>
             )}
 
             {activeTab === 'files' && (

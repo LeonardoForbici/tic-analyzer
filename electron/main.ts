@@ -156,7 +156,8 @@ ipcMain.handle('get-graph-level', async (_event, projectPath: string, expanded: 
   if (!db) return { error: 'index.db não encontrado. Execute a análise novamente.' };
   try {
     const hasModules = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='modules'").get();
-    if (!hasModules) return { error: 'index.db antigo (sem agregação por módulo). Execute a análise novamente.' };
+    const hasLayer = hasModules && (db.prepare('PRAGMA table_info(files)').all() as any[]).some((c) => c.name === 'layer');
+    if (!hasLayer) return { error: 'index.db antigo (sem agregação por módulo/camada). Execute a análise novamente.' };
     return queryGraphLevel(db, { expanded: Array.isArray(expanded) ? expanded : [] });
   } catch (err) {
     return { error: String(err) };

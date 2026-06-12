@@ -50,11 +50,12 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
     isPanning: boolean;
     panStart: { x: number; y: number; px: number; py: number };
     lastClick: { id: string | null; time: number };
+    hovered: string | null;
   }>({
     positions: new Map(), dragging: null, dragOffset: { x: 0, y: 0 },
     pan: { x: 0, y: 0 }, scale: 1, animFrame: null,
     isPanning: false, panStart: { x: 0, y: 0, px: 0, py: 0 },
-    lastClick: { id: null, time: 0 }
+    lastClick: { id: null, time: 0 }, hovered: null
   });
 
   // Carrega o nível visível sempre que o estado de expansão muda
@@ -85,24 +86,56 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
     const W = canvas.width, H = canvas.height;
     const sim = simRef.current;
 
-    // mantém posições de nós que continuam visíveis; novos entram perto do layer
+    // mantém posições de nós que continuam visíveis; novos entram em espiral
+    // de ângulo áureo ao redor do centro da sua camada (espalha desde o frame 0)
     const visible = new Set(data.nodes.map((n) => n.id));
     for (const id of [...sim.positions.keys()]) if (!visible.has(id)) sim.positions.delete(id);
-    data.nodes.forEach((node, i) => {
-      if (sim.positions.has(node.id)) return;
-      const xBase = node.layer === 'frontend' ? W * 0.18 : node.layer === 'backend' ? W * 0.5 : node.layer === 'database' ? W * 0.82 : W * 0.5;
-      sim.positions.set(node.id, { x: xBase + (Math.random() - 0.5) * 160, y: 70 + (i % 14) * ((H - 100) / 14), vx: 0, vy: 0 });
-    });
+    const layerCenterX: Record<string, number> = { frontend: W * 0.18, backend: W * 0.5, database: W * 0.82, default: W * 0.5 };
+    const spiralIdx: Record<string, number> = {};
+    const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+    const spread = 16 + Math.sqrt(data.nodes.length) * 6;
+    for (const node of data.nodes) {
+      if (sim.positions.has(node.id)) continue;
+      const layerKey = node.layer ?? 'default';
+      const i = (spiralIdx[layerKey] = (spiralIdx[layerKey] ?? 0) + 1);
+      const r = spread * Math.sqrt(i);
+      const a = i * GOLDEN;
+      sim.positions.set(node.id, {
+        x: layerCenterX[layerKey] + r * Math.cos(a),
+        y: H / 2 + r * Math.sin(a),
+        vx: 0, vy: 0
+      });
+    }
 
     if (sim.animFrame) cancelAnimationFrame(sim.animFrame);
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     let frame = 0;
+    const n = data.nodes.length;
+    const SIM_FRAMES = Math.min(420, 140 + n * 2);
+    const FIT_FRAME = Math.min(SIM_FRAMES - 1, 90 + n);
+
+    const fitView = () => {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const node of data.nodes) {
+        const p = sim.positions.get(node.id);
+        if (!p) continue;
+        const R = radiusOf(node) + 26; // margem p/ label
+        minX = Math.min(minX, p.x - R); maxX = Math.max(maxX, p.x + R);
+        minY = Math.min(minY, p.y - R); maxY = Math.max(maxY, p.y + R);
+      }
+      if (!Number.isFinite(minX)) return;
+      const scale = Math.max(0.15, Math.min(1.6, Math.min(W / (maxX - minX), H / (maxY - minY))));
+      sim.scale = scale;
+      sim.pan.x = (W - (minX + maxX) * scale) / 2;
+      sim.pan.y = (H - (minY + maxY) * scale) / 2;
+    };
 
     const tick = () => {
-      // força (Fruchterman-Reingold simplificado), congela após 180 frames
-      if (frame < 180) {
-        const k = Math.sqrt((W * H) / Math.max(data.nodes.length, 1)) * 0.55;
+      // força (Fruchterman-Reingold simplificado) — SEM clamp no canvas: o
+      // grafo abre o quanto precisar e o auto-fit enquadra a câmera.
+      if (frame < SIM_FRAMES) {
+        const k = Math.sqrt((W * H * Math.max(1, n / 40)) / Math.max(n, 1)) * 0.6;
         for (const ni of data.nodes) {
           const pi = sim.positions.get(ni.id);
           if (!pi || sim.dragging === ni.id) continue;
@@ -116,6 +149,12 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
             const rep = (k * k) / dist;
             fx += (dx / dist) * rep;
             fy += (dy / dist) * rep;
+            // anti-sobreposição: empurra forte quando os círculos se tocam
+            const minDist = radiusOf(ni) + radiusOf(nj) + 6;
+            if (dist < minDist) {
+              fx += (dx / dist) * (minDist - dist) * 1.6;
+              fy += (dy / dist) * (minDist - dist) * 1.6;
+            }
           }
           for (const e of data.edges) {
             let other: string | null = null;
@@ -126,17 +165,19 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
             if (!po) continue;
             const dx = po.x - pi.x, dy = po.y - pi.y;
             const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
-            const attr = ((dist * dist) / k) * 0.25;
+            const attr = ((dist * dist) / k) * 0.22;
             fx += (dx / dist) * attr;
             fy += (dy / dist) * attr;
           }
-          fx += (W / 2 - pi.x) * 0.012;
-          fy += (H / 2 - pi.y) * 0.012;
-          pi.vx = (pi.vx + fx) * 0.68;
-          pi.vy = (pi.vy + fy) * 0.68;
-          pi.x = Math.max(46, Math.min(W - 46, pi.x + pi.vx));
-          pi.y = Math.max(46, Math.min(H - 46, pi.y + pi.vy));
+          fx += (W / 2 - pi.x) * 0.006;
+          fy += (H / 2 - pi.y) * 0.006;
+          pi.vx = (pi.vx + fx) * 0.62;
+          pi.vy = (pi.vy + fy) * 0.62;
+          const maxV = 18;
+          pi.x += Math.max(-maxV, Math.min(maxV, pi.vx));
+          pi.y += Math.max(-maxV, Math.min(maxV, pi.vy));
         }
+        if (frame === FIT_FRAME) fitView();
       }
 
       ctx.clearRect(0, 0, W, H);
@@ -212,11 +253,23 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
           ctx.fillText(String(node.childCount), p.x, p.y);
           ctx.textBaseline = 'alphabetic';
         }
-        if (sim.scale > 0.45) {
-          ctx.fillStyle = isSel ? '#fff' : '#ccc';
-          ctx.font = `${Math.max(9, 11 / sim.scale)}px monospace`;
+        // Labels: containers sempre; folhas só quando há zoom suficiente (evita
+        // sopa de texto com 150 nós) — hover/selecionado sempre aparecem.
+        const isHover = sim.hovered === node.id;
+        const isContainer = node.kind === 'layer' || node.kind === 'module' || node.kind === 'more';
+        const showLabel = isSel || isHover || isContainer || sim.scale * R > 11;
+        if (showLabel) {
+          const label = isHover || isSel ? node.label : node.label.slice(0, 22);
+          ctx.fillStyle = isSel || isHover ? '#fff' : isContainer ? '#ddd' : '#9aa';
+          ctx.font = `${isContainer ? 12 / sim.scale : Math.max(8, 10 / sim.scale)}px monospace`;
           ctx.textAlign = 'center';
-          ctx.fillText(node.label.slice(0, 26), p.x, p.y + R + 13 / sim.scale);
+          if (isHover && !isContainer) {
+            const w = ctx.measureText(label).width;
+            ctx.fillStyle = '#0d1117ee';
+            ctx.fillRect(p.x - w / 2 - 4, p.y + R + 3 / sim.scale, w + 8, 16 / sim.scale);
+            ctx.fillStyle = '#fff';
+          }
+          ctx.fillText(label, p.x, p.y + R + 13 / sim.scale);
         }
       }
 
@@ -240,6 +293,25 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
       if (Math.sqrt((cx - p.x) ** 2 + (cy - p.y) ** 2) < R) return node;
     }
     return null;
+  }, [data, radiusOf]);
+
+  const fitNow = useCallback(() => {
+    if (!data || data.error || !canvasRef.current) return;
+    const sim = simRef.current;
+    const W = canvasRef.current.width, H = canvasRef.current.height;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const node of data.nodes) {
+      const p = sim.positions.get(node.id);
+      if (!p) continue;
+      const R = radiusOf(node) + 26;
+      minX = Math.min(minX, p.x - R); maxX = Math.max(maxX, p.x + R);
+      minY = Math.min(minY, p.y - R); maxY = Math.max(maxY, p.y + R);
+    }
+    if (!Number.isFinite(minX)) return;
+    const scale = Math.max(0.15, Math.min(1.6, Math.min(W / (maxX - minX), H / (maxY - minY))));
+    sim.scale = scale;
+    sim.pan.x = (W - (minX + maxX) * scale) / 2;
+    sim.pan.y = (H - (minY + maxY) * scale) / 2;
   }, [data, radiusOf]);
 
   const expand = useCallback((node: AggNode) => {
@@ -288,8 +360,13 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
     } else if (sim.isPanning) {
       sim.pan.x = sim.panStart.px + e.clientX - sim.panStart.x;
       sim.pan.y = sim.panStart.py + e.clientY - sim.panStart.y;
+    } else {
+      const rect = canvasRef.current!.getBoundingClientRect();
+      const node = nodeAt(e.clientX - rect.left, e.clientY - rect.top);
+      sim.hovered = node?.id ?? null;
+      canvasRef.current!.style.cursor = node ? 'pointer' : 'grab';
     }
-  }, []);
+  }, [nodeAt]);
 
   const handleMouseUp = useCallback(() => {
     const sim = simRef.current;
@@ -330,7 +407,8 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
             </button>
           </span>
         ))}
-        <span style={{ fontSize: '11px', color: '#666', marginLeft: 'auto' }}>
+        <button onClick={fitNow} style={{ marginLeft: 'auto', padding: '4px 10px', background: '#1a1a3a', border: '1px solid #2a2a4e', borderRadius: '6px', color: '#aaa', cursor: 'pointer', fontSize: '12px' }}>⛶ Enquadrar</button>
+        <span style={{ fontSize: '11px', color: '#666' }}>
           {data && !data.error ? `${data.nodes.length} nós · ${data.edges.length} arestas` : ''} · 2×clique = expandir · scroll = zoom
         </span>
       </div>
@@ -339,7 +417,7 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
 
       <div style={{ position: 'relative', opacity: loading ? 0.5 : 1, transition: 'opacity 0.2s' }}>
         <canvas
-          ref={canvasRef} width={900} height={500}
+          ref={canvasRef} width={900} height={560}
           style={{ background: '#0d1117', borderRadius: '8px', cursor: 'grab', display: 'block', maxWidth: '100%' }}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onWheel={handleWheel}
