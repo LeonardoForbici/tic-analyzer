@@ -13,6 +13,7 @@ A ideia central: o trabalho pesado (AST, grafos, impacto, métricas, regras) é 
 ## O que ele responde
 
 - **"Se eu mexer aqui, o que quebra?"** — impacto de *qualquer* entidade: arquivo, método, procedure/function PL/SQL, tabela ou coluna, atravessando todas as camadas (coluna → trigger → procedure → DAO → endpoint → tela)
+- **"Como esse fluxo funciona?"** — trace ponta-a-ponta tela → endpoint → service → procedure → tabela
 - **"Esse PR é seguro?"** — review automático no GitHub com impacto, riscos novos, violações de regras de arquitetura e quality gates
 - **"A arquitetura está derivando?"** — regras escritas pelo arquiteto validadas a cada análise e a cada PR (architecture drift)
 - **"Onde nasce o próximo bug?"** — predição por churn do git × complexidade × acoplamento
@@ -168,13 +169,15 @@ Exit codes do `pr-review`: `0` ok · `1` gate falhou · `2` erro. Cada execuçã
 
 | Área | Detalhe |
 |------|---------|
-| **Grafo de dependências** | AST real via tree-sitter (TS/TSX/JS/Java) com resolução de símbolos: aliases de tsconfig, barris seguidos até a origem, DI (interface → implementador), `extends`/`implements`, method edges. Fallback regex p/ Python/Go/C#/Rust/PHP/Kotlin. Cada aresta tem `confidence: resolved \| inferred` |
-| **Grafo de impacto unificado** | Imports, chamadas de método, HTTP (frontend→controller), backend→PL/SQL (`@Procedure`, `{call}`, `SimpleJdbcCall`...), PL/SQL→PL/SQL, triggers (`ON <tabela>`), sinônimos e acesso a tabela/coluna num único grafo endereçável: `file:` `method:` `plsql:` `table:` `column:` |
-| **PL/SQL** | Procedures, functions, packages, triggers, views, sinônimos; tabelas lidas/escritas; chamadas inter-procedure; dead PL/SQL; lineage coluna-a-coluna |
-| **Monorepo** | Pastas `<projeto>-backend` / `<projeto>-frontend` lado a lado viram subprojetos automaticamente, com camada por arquivo |
-| **Governança** | Regras `.tic-rules.json` (drift), predição de risco, triagem, candidatos a deepening, zoom-out executivo |
-| **Health score** | 0–100, 6 dimensões (dívida/KLOC, riscos OWASP, violações + drift, dead code, acoplamento, % heurístico), snapshots históricos |
-| **Spring/Angular** | `@Transactional`, batch jobs, `@NgModule`/NgRx, permissões, endpoints → OpenAPI 3.0 |
+| **Grafo de dependências** | AST real via tree-sitter (TS/TSX/JS/Java) com resolução de símbolos: aliases de tsconfig (`@/...`), barris (`export ... from`) seguidos até a origem, DI (interface → implementador), `extends`/`implements`, method edges. Fallback regex p/ Python/Go/C#/Rust/PHP/Kotlin. Cada aresta tem `confidence: resolved \| inferred` — em engenharia reversa, isso diz no que confiar |
+| **Grafo de impacto unificado** | Consolida imports, chamadas de método, HTTP (frontend→controller), backend→PL/SQL (`@Procedure`, `{call}`, `SimpleJdbcCall`...), PL/SQL→PL/SQL, triggers (`ON <tabela>`), sinônimos e acesso a tabela/coluna (ORM + SQL parseado) num único grafo endereçável: `file:` `method:` `plsql:` `table:` `column:` |
+| **PL/SQL** | Procedures, functions, packages, triggers, views, sequences, sinônimos; tabelas lidas/escritas por objeto; chamadas inter-procedure; dead PL/SQL; lineage coluna-a-coluna |
+| **Monorepo** | Pastas `<projeto>-backend` / `<projeto>-frontend` lado a lado viram subprojetos automaticamente (nomes curtos: `backend`, `frontend`), com camada frontend/backend/database **por arquivo** |
+| **Governança** | Regras `.tic-rules.json` (drift), predição de risco, triagem (máquina de estados), candidatos a deepening, zoom-out executivo |
+| **Health score** | 0–100, grade A–E, 6 dimensões: dívida/KLOC, riscos ponderados (OWASP), violações + drift, dead code, acoplamento, % de arestas heurísticas. Snapshots históricos |
+| **Qualidade** | Complexidade ciclomática, hotspots, dívida técnica, dependências circulares, padrões arquiteturais, hierarquia de herança |
+| **Spring/Angular** | `@Transactional`, `@Scheduled`/batch jobs, `@NgModule`/NgRx, permissões (roles × rotas), endpoints → OpenAPI 3.0 |
+| **Busca** | FTS5 sempre ativa; embeddings locais opcionais (`TIC_EMBEDDINGS=1`, modelo ONNX ~25MB, 100% offline) |
 | **Incremental** | file-cache por hash: re-análises só tocam o que mudou |
 
 Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `snapshots.json`, `triage.json`, `pr-history.json`, `arch-violations.json`, `risk-prediction.json`, `zoom-out.md`, contextos por módulo e relatórios.
