@@ -42,7 +42,7 @@ src/
       graphQueries.ts         ← agregação hierárquica (layer→module→file→symbol)
       snapshots.ts            ← snapshots.json (histórico de health entre análises)
   cli/
-    index.ts            ← CLI headless: analyze / health / pr-review (usada pelo Action)
+    index.ts            ← CLI headless: analyze / health / pr-review / serve (usada pelo Action)
     prReview.ts         ← comparação base vs head + quality gates + markdown sticky
   mcp/
     server.ts           ← MCP Server HTTP/SSE (localhost:7432)
@@ -67,6 +67,19 @@ do Electron e quebra a execução em Node puro.
 `action.yml` na raiz — composite action que analisa merge-base vs head e
 comenta no PR (sticky) o impacto cross-tier, riscos novos, violações e delta
 de health. Gates: `new-high-risks`, `new-violations`, `health-drop:N`.
+A análise da base é cacheada (actions/cache + disco em self-hosted) e o engine
+é incremental — PRs seguintes só re-analisam o que mudou.
+
+## Modo servidor (enterprise)
+
+```bash
+tic-analyzer serve /caminho/projeto --host 0.0.0.0 --token <segredo> --watch 30
+```
+
+Máquina dedicada analisa o projeto (re-análise incremental a cada N min) e
+serve o MCP para o time inteiro — todos consultam o MESMO índice. Em rede,
+`--token` é obrigatório (`Authorization: Bearer`); `/health` fica aberto para
+monitoramento.
 
 ## Desenvolvimento
 

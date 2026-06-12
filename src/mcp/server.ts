@@ -1702,12 +1702,26 @@ export class TicAnalyzerMcpServer {
     return lines.join('\n');
   }
 
-  async startHttp(port = 7432): Promise<void> {
+  /**
+   * @param host '127.0.0.1' (padrão, app local) ou '0.0.0.0' (modo servidor —
+   *             máquina dedicada servindo o time). Em rede, exija `authToken`.
+   * @param authToken se definido, toda chamada precisa de
+   *                  `Authorization: Bearer <token>` (exceto /health).
+   */
+  async startHttp(port = 7432, host = '127.0.0.1', authToken?: string): Promise<void> {
     const app = http.createServer(async (req, res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, Authorization');
       if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+      if (authToken && req.url !== '/health') {
+        const auth = req.headers.authorization ?? '';
+        if (auth !== `Bearer ${authToken}`) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'unauthorized: use Authorization: Bearer <token>' }));
+          return;
+        }
+      }
       if (req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok', projectPath: this.projectPath, version: '2.0.0' }));
@@ -1738,8 +1752,9 @@ export class TicAnalyzerMcpServer {
     });
     this.httpServer = app;
     return new Promise((resolve, reject) => {
-      app.listen(port, '127.0.0.1', () => {
-        console.log(`TIC Analyzer MCP Server v2.0.0 em http://localhost:${port}/mcp`);
+      app.listen(port, host, () => {
+        const where = host === '127.0.0.1' ? 'localhost' : host;
+        console.log(`TIC Analyzer MCP Server v2.0.0 em http://${where}:${port}/mcp${authToken ? ' (auth: Bearer token)' : ''}`);
         resolve();
       });
       app.on('error', reject);
