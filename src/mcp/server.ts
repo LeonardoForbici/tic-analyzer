@@ -17,6 +17,7 @@ import { buildAgentBrief, buildDiagnosis } from './agentBrief';
 import { loadTriage, transitionTriageItem, type TriageState, type TriageCategory, type TriagePriority } from '../analyzer/store/triageStore';
 import { loadActivity } from '../analyzer/store/activityLog';
 import { suggestReviewers } from '../analyzer/computeOwnership';
+import { loadPortfolio } from '../analyzer/store/portfolioStore';
 import { getEmbedder } from '../analyzer/semantic/embeddings';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
@@ -299,6 +300,11 @@ export class TicAnalyzerMcpServer {
             },
             required: ['id']
           }
+        },
+        {
+          name: 'get_portfolio',
+          description: 'Portfólio: compara TODOS os projetos analisados (saúde, riscos, drift, custo da dívida), pior saúde primeiro. Responde "qual repositório está pior?" numa visão executiva. ~300 tokens.',
+          inputSchema: { type: 'object', properties: {} }
         },
         {
           name: 'get_roi',
@@ -848,6 +854,19 @@ export class TicAnalyzerMcpServer {
           });
           if (!r.ok) return respond(textResult(`❌ ${r.error}`));
           return respond(textResult(`✅ Item \`${id}\` atualizado: estado=${r.item!.state}, categoria=${r.item!.category}, prioridade=${r.item!.priority}`));
+        }
+
+        case 'get_portfolio': {
+          const projects = loadPortfolio();
+          if (projects.length === 0) return respond(textResult('Portfólio vazio. Analise um ou mais projetos para popular a visão executiva.'));
+          const lines = [
+            `# Portfólio — ${projects.length} projeto(s) (pior saúde primeiro)`,
+            '',
+            '| Projeto | Health | Arquivos | Críticos/Altos | Drift | Custo dívida |',
+            '| --- | --- | --- | --- | --- | --- |',
+            ...projects.map((p) => `| ${p.name} | ${p.healthScore ?? '—'}${p.healthGrade ? ` ${p.healthGrade}` : ''} | ${p.totalFiles.toLocaleString()} | ${p.risks.critical}/${p.risks.high} | ${p.archErrors} | ${p.debtCost !== null ? `${p.currency} ${p.debtCost.toLocaleString()}` : '—'} |`)
+          ];
+          return respond(textResult(lines.join('\n')));
         }
 
         case 'get_roi': {

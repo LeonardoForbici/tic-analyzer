@@ -48,6 +48,7 @@ src/
       snapshots.ts            ← snapshots.json (histórico de health entre análises)
       triageStore.ts          ← triage.json (máquina de estados da skill triage)
       activityLog.ts          ← activity.json (timeline do sistema vivo)
+      portfolioStore.ts       ← registro global multi-projeto (~/.tic-analyzer)
   cli/
     index.ts            ← CLI headless: analyze / health / pr-review / serve (usada pelo Action)
     prReview.ts         ← comparação base vs head + quality gates + markdown sticky
@@ -63,7 +64,7 @@ src/
 ## Verificação
 
 ```bash
-npm run verify   # build + 12 suítes (semantic, store, crosstier, orm, impacto, health, pr-review, serve, governança, vivo, valor, embeddings)
+npm run verify   # build + 13 suítes (semantic, store, crosstier, orm, impacto, health, pr-review, serve, governança, vivo, valor, portfólio, embeddings)
 ```
 
 NUNCA rodar `rebuild:electron` em CI — recompila o better-sqlite3 para a ABI
@@ -114,7 +115,7 @@ Configure em `.claude/settings.json` do projeto analisado:
 { "mcpServers": { "tic-analyzer": { "url": "http://localhost:7432/mcp" } } }
 ```
 
-Ferramentas-chave (49 no total): `get_blast_radius` (resumo de impacto ~200
+Ferramentas-chave (50 no total): `get_blast_radius` (resumo de impacto ~200
 tokens — use PRIMEIRO), `get_impact_of` (impacto de arquivo/método/procedure/
 tabela/coluna), `get_table_impact`, `get_diff_impact` (cross-tier), `get_health`,
 `get_graph_level` (drill-down hierárquico), `trace_flow`, `search_code`,

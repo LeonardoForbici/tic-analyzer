@@ -3,6 +3,7 @@ import { HierGraphViewer } from './HierGraphViewer';
 import { HealthDashboard } from './HealthDashboard';
 import { ActivityFeed, type ActivityEvent } from './ActivityFeed';
 import { ValueDashboard } from './ValueDashboard';
+import { PortfolioDashboard } from './PortfolioDashboard';
 import { GovernanceDashboard } from './GovernanceDashboard';
 
 declare global {
@@ -25,6 +26,9 @@ declare global {
       getActivity: (projectPath: string, limit?: number) => Promise<ActivityEvent[]>;
       onActivity: (cb: (e: ActivityEvent) => void) => () => void;
       exportExecutiveReport: (projectPath: string, format: 'pdf' | 'html') => Promise<{ ok: boolean; path?: string; error?: string }>;
+      getPortfolio: () => Promise<unknown>;
+      removePortfolioProject: (id: string) => Promise<unknown>;
+      analyzePortfolioProject: (projectPath: string) => Promise<unknown>;
       getTokenStats: () => Promise<TokenStats | null>;
       clearTokenStats: () => Promise<void>;
       onTokenUpdate: (cb: (entry: TokenEntry) => void) => () => void;
@@ -61,7 +65,7 @@ interface ImpactOfResponse {
   blast?: { entity: string; totalAffected: number; truncated: boolean; byKind: Record<string, number>; byModule: Record<string, number>; top: Array<{ id: string; kind: string; depth: number; dependents: number; confidence: string }> };
 }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
-type Tab = 'overview' | 'health' | 'value' | 'governance' | 'activity' | 'explorer' | 'impact' | 'metrics' | 'files' | 'docs';
+type Tab = 'overview' | 'health' | 'value' | 'governance' | 'activity' | 'explorer' | 'impact' | 'metrics' | 'files' | 'portfolio' | 'docs';
 
 const C = { bg: '#0f0f1a', card: '#16213e', border: '#2a2a4e', accent: '#7c83fd', green: '#56cfad', red: '#ff6b6b', orange: '#f0a500', text: '#e0e0e0', muted: '#888' };
 
@@ -832,6 +836,11 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
                 dica: 'Riscos critical/high e violações de regra viram itens de triagem automaticamente — mova para ready-for-agent e peça o brief via MCP get_agent_brief(id).'
               },
               {
+                name: 'Portfólio',
+                desc: 'Visão executiva cross-repositório: compara saúde, riscos, drift e custo da dívida de TODOS os projetos analisados (registro global em ~/.tic-analyzer), com o pior no topo. Adicione projetos pelo app ou rodando a análise/Action em cada repo — em CI vários repos populam o mesmo painel.',
+                dica: 'É a visão de CTO: onde colocar tempo e dinheiro primeiro. Disponível mesmo sem um projeto aberto.'
+              },
+              {
                 name: 'Valor',
                 desc: 'O argumento de tempo & custo para liderança: custo da dívida técnica em dinheiro, dev-days para sanear, horas economizadas pelos PRs, matriz de ownership/bus-factor (quem domina o quê), risco de conhecimento (arquivo crítico com 1 só autor) e onboarding por módulo. Botão para gerar o Relatório Executivo em PDF.',
                 dica: 'O custo é uma estimativa transparente: débito × taxa-hora (.tic-rules.json → roi). Bus-factor 1 ⚠️ = se a pessoa sair, o conhecimento vai junto.'
@@ -892,6 +901,7 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
               { tool: 'get_roi()', tokens: '~250', desc: 'ROI: custo da dívida técnica em tempo (dev-days) e dinheiro, horas economizadas pelos PRs, top módulos por custo. O argumento de tempo&custo para liderança.' },
               { tool: 'get_ownership(entity)', tokens: '~300', desc: 'Quem domina cada módulo, bus-factor, conhecimento em risco (arquivo com 1 só autor) e onboarding. Com entity: dono do arquivo/módulo.' },
               { tool: 'suggest_reviewers(files)', tokens: '~150', desc: 'Roteamento de revisor: dado os arquivos mudados, sugere quem deve revisar (dono provável por autoria git).' },
+              { tool: 'get_portfolio()', tokens: '~300', desc: 'Compara TODOS os projetos analisados (saúde, riscos, drift, custo), pior primeiro. Responde "qual repositório está pior?".' },
               { tool: 'get_arch_rules()', tokens: '~300', desc: 'Regras de arquitetura do .tic-rules.json com status de compliance e violações atuais (architecture drift).' },
               { tool: 'get_arch_suggestions()', tokens: '~400', desc: 'Oportunidades de melhoria arquitetural (skill improve-codebase-architecture): módulos pass-through (deletion test), acoplamento alto, god modules e circulares — com sugestão de padrão.' },
               { tool: 'get_risk_prediction()', tokens: '~300', desc: 'Manutenção preditiva: onde o próximo bug tende a nascer (churn git × complexidade × acoplamento), com score 0–100 e motivos.' },
@@ -1141,6 +1151,7 @@ export function App() {
     { id: 'impact', label: 'Impacto' },
     { id: 'metrics', label: 'Métricas' },
     { id: 'files', label: 'Arquivos' },
+    { id: 'portfolio', label: 'Portfólio' },
     { id: 'docs', label: 'Docs' },
   ];
 
@@ -1161,9 +1172,10 @@ export function App() {
           </button>
         )}
         <div style={{ marginLeft: state === 'done' && result ? '0' : 'auto', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          {state === 'done' && result && TABS.filter((t) => t.id !== 'docs').map((t) => (
+          {state === 'done' && result && TABS.filter((t) => t.id !== 'docs' && t.id !== 'portfolio').map((t) => (
             <button key={t.id} style={S.tab(activeTab === t.id)} onClick={() => setActiveTab(t.id)}>{t.label}</button>
           ))}
+          <button style={S.tab(activeTab === 'portfolio')} onClick={() => setActiveTab('portfolio')}>Portfólio</button>
           <button style={S.tab(activeTab === 'docs')} onClick={() => setActiveTab('docs')}>Docs</button>
         </div>
       </div>
@@ -1218,13 +1230,16 @@ export function App() {
           </div>
         )}
 
-        {/* Docs — always visible, regardless of analysis state */}
+        {/* Docs e Portfólio — sempre visíveis, independem da análise de um projeto */}
         {activeTab === 'docs' && (
           <div style={S.card}><DocsTab /></div>
         )}
+        {activeTab === 'portfolio' && (
+          <div style={S.card}><PortfolioDashboard /></div>
+        )}
 
         {/* Results */}
-        {state === 'done' && result && activeTab !== 'docs' && (
+        {state === 'done' && result && activeTab !== 'docs' && activeTab !== 'portfolio' && (
           <>
             {activeTab === 'overview' && (
               <>
@@ -1280,7 +1295,7 @@ export function App() {
                         {`{"mcpServers":{"tic-analyzer":{"url":"http://localhost:${mcpPort}/mcp"}}}`}
                       </div>
                       <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_impact_of','get_blast_radius','get_table_impact','get_diff_impact','get_health','get_graph_level','get_arch_rules','get_arch_suggestions','get_risk_prediction','get_agent_brief','get_diagnosis','get_zoom_out','get_out_of_scope','list_triage','update_triage','get_activity','get_roi','get_ownership','suggest_reviewers','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
+                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_impact_of','get_blast_radius','get_table_impact','get_diff_impact','get_health','get_graph_level','get_arch_rules','get_arch_suggestions','get_risk_prediction','get_agent_brief','get_diagnosis','get_zoom_out','get_out_of_scope','list_triage','update_triage','get_activity','get_roi','get_ownership','suggest_reviewers','get_portfolio','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
                           <span key={tool} style={{ padding: '2px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '4px', fontSize: '11px', color: C.accent, fontFamily: 'monospace' }}>{tool}</span>
                         ))}
                       </div>

@@ -40,7 +40,7 @@ A ideia central: o trabalho pesado (AST, grafos, impacto, métricas, regras) é 
 ### 1. App desktop (dev individual)
 
 1. Abrir o TIC Analyzer → selecionar a pasta raiz do projeto → **Analisar**
-2. Explorar as abas: **Visão Geral · Saúde · Valor · Governança · Atividade · Explorador · Impacto · Métricas · Arquivos**
+2. Explorar as abas: **Visão Geral · Saúde · Valor · Governança · Atividade · Explorador · Impacto · Métricas · Arquivos · Portfólio**
 3. (Opcional) **Iniciar MCP** e configurar no `.claude/settings.json` do projeto analisado:
 
 ```json
@@ -147,6 +147,10 @@ Traduz a análise técnica em **tempo e dinheiro** para a liderança (aba **Valo
 
 > Valores de tempo/custo são **estimativas transparentes** ancoradas no débito e na taxa-hora — não promessa contábil.
 
+### Portfólio multi-projeto
+
+Visão executiva **cross-repositório** (aba **Portfólio**): um registro global (`~/.tic-analyzer/portfolio.json`, ou `TIC_PORTFOLIO_DIR`) que cada análise — pelo app, CLI ou Action em CI — alimenta com um resumo compacto. O painel compara **saúde, riscos, drift e custo da dívida de todos os repositórios**, pior saúde no topo, com custo por projeto e ações de re-analisar/remover. Em CI, analisar N repositórios popula o mesmo painel; a tool MCP `get_portfolio` responde "qual repositório está pior?". `tic-analyzer portfolio [--json]` lista pela CLI.
+
 ### Skills de engenharia (fiéis a [mattpocock/skills](https://github.com/mattpocock/skills))
 
 | Skill | Implementação no TIC |
@@ -193,6 +197,7 @@ tic-analyzer pr-review --base <dir> --head <dir> [--out report.md]
            [--gate new-high-risks,new-rule-violations,health-drop:5] [--brief-out brief.md]
 tic-analyzer serve <path> [--port 7432] [--host 0.0.0.0] [--token <segredo>] [--watch <min>] [--debounce <seg>]
 tic-analyzer report <path> [--out report.html]                                          # relatório executivo (HTML)
+tic-analyzer portfolio [--json]                                                          # portfólio (todos os projetos analisados)
 ```
 
 Exit codes do `pr-review`: `0` ok · `1` gate falhou · `2` erro. Cada execução registra em `.tic-code/pr-history.json` (alimenta o dashboard).
@@ -218,7 +223,7 @@ Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `snapshots.
 
 ---
 
-## As 49 ferramentas MCP
+## As 50 ferramentas MCP
 
 **Impacto (use primeiro):** `get_blast_radius` (resumo ~200 tokens — **comece por ele**) · `get_impact_of` · `get_table_impact` · `get_diff_impact` · `get_impact`
 
@@ -228,7 +233,7 @@ Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `snapshots.
 
 **Contexto:** `get_quick_context` · `list_modules` · `get_module(detail)` · `search_module` · `get_multigraph(detail)` · `get_diagram`
 
-**Valor & custo:** `get_roi` · `get_ownership` · `suggest_reviewers`
+**Valor & custo:** `get_roi` · `get_ownership` · `suggest_reviewers` · `get_portfolio`
 
 **Qualidade e saúde:** `get_health` · `get_activity` (timeline do sistema vivo) · `get_metrics` · `get_hotspots` · `get_violations` · `get_patterns` · `get_inheritance` · `get_dead_components`
 
@@ -300,7 +305,7 @@ src/
       snapshots            histórico de health
       triageStore          fila de triagem (máquina de estados da skill)
   cli/               headless: analyze / health / pr-review / serve
-  mcp/               MCP Server HTTP/SSE (49 tools, auth Bearer, push SSE /events, agent briefs)
+  mcp/               MCP Server HTTP/SSE (50 tools, auth Bearer, push SSE /events, agent briefs)
   ui/                React: Health, Governança, Explorador, Impacto
 action.yml           GitHub Action (PR review, cache incremental, issues de triagem)
 ```

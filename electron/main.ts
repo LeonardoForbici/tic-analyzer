@@ -11,6 +11,7 @@ import { renderArchReviewHtml, loadArchRules } from '../src/analyzer/checkArchRu
 import { loadActivity } from '../src/analyzer/store/activityLog';
 import { dispatchAlerts } from '../src/analyzer/notify';
 import { renderExecutiveHtml, buildExecReportData } from '../src/analyzer/generateExecutiveReport';
+import { loadPortfolio, upsertProject, removeProject } from '../src/analyzer/store/portfolioStore';
 
 const isDev = !app.isPackaged;
 
@@ -65,6 +66,7 @@ async function runAndBroadcast(projectPath: string): Promise<PipelineResult> {
     mainWindow?.webContents.send('analysis-progress', progress);
   });
   mainWindow?.webContents.send('analysis-done', result);
+  if (result.success) upsertProject(projectPath); // registra/atualiza no portfólio global
 
   // Sistema vivo: empurra eventos novos ao renderer, notificação nativa p/
   // críticos e alertas outbound (mesma config .tic-rules.json do servidor).
@@ -121,6 +123,14 @@ ipcMain.handle('set-live-mode', async (_event, projectPath: string, on: boolean)
 
 ipcMain.handle('get-activity', async (_event, projectPath: string, limit?: number) => {
   return loadActivity(path.join(projectPath, '.tic-code'), limit);
+});
+
+// ── Portfólio multi-projeto ──────────────────────────────────────────────────
+ipcMain.handle('get-portfolio', async () => loadPortfolio());
+ipcMain.handle('remove-portfolio-project', async (_event, id: string) => { removeProject(id); return loadPortfolio(); });
+ipcMain.handle('analyze-portfolio-project', async (_event, projectPath: string) => {
+  const r = await runAndBroadcast(projectPath);
+  return { ok: r.success, portfolio: loadPortfolio() };
 });
 
 // Relatório executivo: HTML → PDF via printToPDF (Electron nativo) ou HTML standalone

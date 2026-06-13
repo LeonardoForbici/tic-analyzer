@@ -58,6 +58,15 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   exportExecutiveReport: (projectPath: string, format: 'pdf' | 'html'): Promise<{ ok: boolean; path?: string; error?: string }> =>
     ipcRenderer.invoke('export-executive-report', projectPath, format),
 
+  getPortfolio: (): Promise<unknown> =>
+    ipcRenderer.invoke('get-portfolio'),
+
+  removePortfolioProject: (id: string): Promise<unknown> =>
+    ipcRenderer.invoke('remove-portfolio-project', id),
+
+  analyzePortfolioProject: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('analyze-portfolio-project', projectPath),
+
   onActivity: (callback: (event: unknown) => void) => {
     const handler = (_event: unknown, e: unknown) => callback(e);
     ipcRenderer.on('activity-event', handler);

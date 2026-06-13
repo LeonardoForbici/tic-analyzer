@@ -23,6 +23,7 @@ import { loadActivity } from '../analyzer/store/activityLog';
 import { loadArchRules } from '../analyzer/checkArchRules';
 import { dispatchAlerts } from '../analyzer/notify';
 import { renderExecutiveHtml, buildExecReportData } from '../analyzer/generateExecutiveReport';
+import { upsertProject, loadPortfolio } from '../analyzer/store/portfolioStore';
 
 interface Args {
   positional: string[];
@@ -58,7 +59,8 @@ function usage(): never {
                --host 0.0.0.0 expõe na rede — USE --token (ou TIC_TOKEN).
                File-watch reativo + push SSE em /events + alertas (.tic-rules.json → alerts).
                --debounce N (default 15s) espera N s após o último save; --watch N = rede de segurança periódica
-  tic-analyzer report <path> [--out report.html]          Relatório executivo (HTML) para liderança`);
+  tic-analyzer report <path> [--out report.html]          Relatório executivo (HTML) para liderança
+  tic-analyzer portfolio [--json]                          Lista o portfólio (todos os projetos analisados)`);
   process.exit(2);
 }
 
@@ -92,7 +94,21 @@ async function cmdAnalyze(args: Args): Promise<number> {
   } else {
     console.error(`✗ Análise falhou: ${result.error}`);
   }
+  if (result.success) upsertProject(projectPath); // registra no portfólio global
   return result.success ? 0 : 2;
+}
+
+/** Lista o portfólio global (todos os projetos analisados). */
+function cmdPortfolio(args: Args): number {
+  const projects = loadPortfolio();
+  if (args.flags.has('json')) { console.log(JSON.stringify(projects, null, 2)); return 0; }
+  if (projects.length === 0) { console.log('Portfólio vazio. Rode `tic-analyzer analyze <path>` em um ou mais projetos.'); return 0; }
+  console.log(`\nPortfólio — ${projects.length} projeto(s) (pior saúde primeiro):\n`);
+  for (const p of projects) {
+    const cost = p.debtCost !== null ? ` · dívida ${p.currency} ${p.debtCost.toLocaleString()}` : '';
+    console.log(`  ${(p.healthScore ?? '—')}/100 ${p.healthGrade ?? ''}  ${p.name}  (${p.totalFiles.toLocaleString()} arq · ${p.risks.critical}🔴/${p.risks.high}🟠 · drift ${p.archErrors}${cost})`);
+  }
+  return 0;
 }
 
 function cmdHealth(args: Args): number {
@@ -289,6 +305,7 @@ function cmdReport(args: Args): number {
     case 'pr-review': process.exit(await cmdPrReview(args));
     case 'serve': process.exit(await cmdServe(args));
     case 'report': process.exit(cmdReport(args));
+    case 'portfolio': process.exit(cmdPortfolio(args));
     default: usage();
   }
 })().catch((err) => {
