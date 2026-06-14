@@ -173,7 +173,7 @@ Em vez de só responder quando perguntado, o TIC observa, lembra e avisa:
 - **Voz interna** — push **SSE em `GET /events`**: a aba Atividade e os dashboards atualizam ao vivo; a IA assina via `get_activity` ("o que mudou recentemente?")
 - **Voz externa** — alertas outbound (Slack + webhook JSON genérico + notificação desktop nativa) quando um limiar de `alerts` é cruzado
 
-> A re-análise é debounced e opt-in: em projetos de 74k arquivos as fases percorrem o projeto (incremental no cache de contexto), então não é instantânea.
+> A re-análise é **incremental**: arquivos não alterados reusam os símbolos AST cacheados (`symbol-cache.json`), pulando o tree-sitter — a fase mais cara. A resolução de referências roda sempre (é barata e cruza arquivos), então o grafo incremental é **idêntico** ao completo. No `serve`/Ao Vivo isso reduz a re-análise de minutos para segundos em repositórios grandes.
 
 ---
 

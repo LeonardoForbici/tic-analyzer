@@ -64,7 +64,7 @@ src/
 ## Verificação
 
 ```bash
-npm run verify   # build + 13 suítes (semantic, store, crosstier, orm, impacto, health, pr-review, serve, governança, vivo, valor, portfólio, embeddings)
+npm run verify   # build + 14 suítes (semantic, store, crosstier, orm, impacto, health, pr-review, serve, governança, vivo, valor, portfólio, incremental, embeddings)
 ```
 
 NUNCA rodar `rebuild:electron` em CI — recompila o better-sqlite3 para a ABI

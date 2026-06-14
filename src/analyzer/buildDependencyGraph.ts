@@ -30,6 +30,8 @@ export interface DependencyGraph {
   semanticClasses?: ClassInfoLite[];
   /** Arestas método→método resolvidas (Java) — granularidade de método no trace. */
   methodEdges?: MethodEdge[];
+  /** Arquivos que reusaram símbolos do cache AST (re-análise incremental). */
+  astCacheHits?: number;
 }
 
 /**
@@ -37,7 +39,12 @@ export interface DependencyGraph {
  * (TS/JS/TSX/Java) e cai para extração por regex apenas em linguagens sem
  * grammar (Python/Go/C#/Rust/PHP) ou em arquivos que falharam o parse.
  */
-export async function buildDependencyGraph(files: ScannedFile[], rootPath: string): Promise<DependencyGraph> {
+export interface DependencyGraphOptions {
+  /** Arquivos alterados (mtime) — habilita reuso do cache de símbolos AST. */
+  changedFiles?: Set<string>;
+}
+
+export async function buildDependencyGraph(files: ScannedFile[], rootPath: string, opts: DependencyGraphOptions = {}): Promise<DependencyGraph> {
   const fileSet = new Set(files.map((f) => f.relativePath));
   const edgeMap = new Map<string, GraphEdge>();
   const externalDepsSet = new Set<string>();
@@ -51,7 +58,7 @@ export async function buildDependencyGraph(files: ScannedFile[], rootPath: strin
   };
 
   // ── 1. Camada semântica (AST) ──────────────────────────────────────────────
-  const semantic = await buildSemanticGraph(files, rootPath);
+  const semantic = await buildSemanticGraph(files, rootPath, { changedFiles: opts.changedFiles });
   for (const e of semantic.edges) addEdge(e.from, e.to, e.kind, e.confidence);
   for (const dep of semantic.externalDeps) externalDepsSet.add(dep);
 
@@ -116,7 +123,8 @@ export async function buildDependencyGraph(files: ScannedFile[], rootPath: strin
     centralFiles,
     externalDeps: [...externalDepsSet].sort().slice(0, 100),
     semanticClasses: semantic.classes,
-    methodEdges: semantic.methodEdges
+    methodEdges: semantic.methodEdges,
+    astCacheHits: semantic.cacheHits
   };
 }
 

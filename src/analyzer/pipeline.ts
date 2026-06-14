@@ -96,6 +96,8 @@ export interface PipelineResult {
   riskPredictions?: number;
   roiDebtCost?: number;
   roiHoursSaved?: number;
+  /** Arquivos que reusaram símbolos do cache AST na re-análise incremental. */
+  astCacheHits?: number;
   triageItems?: number;
   activityEvents?: number;
   /** Duração (ms) por fase — para identificar gargalos em projetos grandes. */
@@ -227,7 +229,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
 
     // ── 3. GRAFO ─────────────────────────────────────────────────────────────────
     report('graph', 18, 'Construindo grafo de dependências (AST + símbolos)...');
-    const graph = await buildDependencyGraph(files, projectPath);
+    // Incremental: na re-análise, arquivos não alterados reusam os símbolos AST
+    // cacheados (pula o tree-sitter, a fase mais cara). 1ª análise = completa.
+    const graph = await buildDependencyGraph(files, projectPath, isIncremental ? { changedFiles } : {});
 
     // Telas .osw (JSON do frontend) → controller de código (kitAssembly.osw →
     // KitAssemblyController.tsx). Mescladas no grafo para fluírem ao impacto.
@@ -246,7 +250,8 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     fs.writeFileSync(path.join(ticCodeDir, 'dep-graph.json'), JSON.stringify({ nodes: graph.nodes.slice(0, 3000), edges: graph.edges.slice(0, 5000) }), 'utf8');
     markDone('graph');
     const resolvedEdges = graph.edges.filter((e) => e.confidence === 'resolved').length;
-    report('graph', 100, `${graph.nodes.length.toLocaleString()} nós, ${graph.edges.length.toLocaleString()} arestas (${resolvedEdges.toLocaleString()} resolvidas)`);
+    const astNote = graph.astCacheHits ? ` · ${graph.astCacheHits.toLocaleString()} do cache AST` : '';
+    report('graph', 100, `${graph.nodes.length.toLocaleString()} nós, ${graph.edges.length.toLocaleString()} arestas (${resolvedEdges.toLocaleString()} resolvidas)${astNote}`);
 
     // ── 4. RISCOS ────────────────────────────────────────────────────────────────
     report('risks', 26, 'Detectando riscos técnicos...');
@@ -728,6 +733,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       riskPredictions: riskPredictions.length,
       roiDebtCost: roi.debtCost,
       roiHoursSaved: roi.hoursSaved,
+      astCacheHits: graph.astCacheHits ?? 0,
       triageItems: triageStats.total,
       activityEvents: allEvents.length,
       phaseTimings

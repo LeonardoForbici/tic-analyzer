@@ -19,34 +19,87 @@ export interface SemanticGraph extends SemanticResult {
   /** Arquivos que foram parseados com sucesso (relativePath). */
   parsedFiles: Set<string>;
   available: boolean;
+  /** Quantos arquivos reusaram símbolos do cache (não re-parsearam). */
+  cacheHits: number;
 }
 
-export async function buildSemanticGraph(files: ScannedFile[], projectPath: string): Promise<SemanticGraph> {
+const SYMBOL_CACHE_VERSION = 2;
+const SYMBOL_CACHE_FILE = 'symbol-cache.json';
+
+interface SymbolCache { version: number; files: Record<string, FileSymbols>; }
+
+function loadSymbolCache(projectPath: string): SymbolCache {
+  try {
+    const p = path.join(projectPath, '.tic-code', SYMBOL_CACHE_FILE);
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf8')) as SymbolCache;
+    if (parsed.version === SYMBOL_CACHE_VERSION && parsed.files) return parsed;
+  } catch { /* sem cache */ }
+  return { version: SYMBOL_CACHE_VERSION, files: {} };
+}
+
+function saveSymbolCache(projectPath: string, files: Record<string, FileSymbols>): void {
+  try {
+    const dir = path.join(projectPath, '.tic-code');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, SYMBOL_CACHE_FILE), JSON.stringify({ version: SYMBOL_CACHE_VERSION, files }), 'utf8');
+  } catch { /* best-effort */ }
+}
+
+export interface SemanticOptions {
+  /**
+   * Arquivos alterados desde a última análise (por mtime). Quando fornecido,
+   * arquivos NÃO alterados que estão no cache de símbolos reusam o resultado do
+   * tree-sitter (a fase mais cara) sem re-parsear — re-análise incremental.
+   * A RESOLUÇÃO de referências roda sempre (é barata e cruza arquivos).
+   */
+  changedFiles?: Set<string>;
+}
+
+export async function buildSemanticGraph(files: ScannedFile[], projectPath: string, opts: SemanticOptions = {}): Promise<SemanticGraph> {
   if (!grammarsAvailable()) {
-    return { edges: [], externalDeps: [], classes: [], methodEdges: [], parsedFiles: new Set(), available: false };
+    return { edges: [], externalDeps: [], classes: [], methodEdges: [], parsedFiles: new Set(), available: false, cacheHits: 0 };
   }
 
   const fileSet = new Set(files.map((f) => f.relativePath));
   const supported = files.filter((f) => langForExtension(f.extension) !== null);
 
+  const prevCache = loadSymbolCache(projectPath);
+  const nextCache: Record<string, FileSymbols> = {};
+  const { changedFiles } = opts;
+
   const allSymbols: FileSymbols[] = [];
   const parsedFiles = new Set<string>();
+  let cacheHits = 0;
+
   for (const file of supported) {
+    const rel = file.relativePath;
+    // Reuso incremental: arquivo não alterado + presente no cache → pula o parse.
+    const cached = prevCache.files[rel];
+    if (changedFiles && !changedFiles.has(rel) && cached) {
+      allSymbols.push(cached);
+      nextCache[rel] = cached;
+      if (!cached.failed) parsedFiles.add(rel);
+      cacheHits++;
+      continue;
+    }
     let content: string;
     try {
       content = fs.readFileSync(file.absolutePath, 'utf8');
     } catch {
       continue;
     }
-    const sym = await extractFileSymbols(file.absolutePath, file.relativePath, file.extension, content);
+    const sym = await extractFileSymbols(file.absolutePath, rel, file.extension, content);
     if (!sym) continue;
     allSymbols.push(sym);
-    if (!sym.failed) parsedFiles.add(file.relativePath);
+    nextCache[rel] = sym;
+    if (!sym.failed) parsedFiles.add(rel);
   }
+
+  saveSymbolCache(projectPath, nextCache);
 
   const resolver = makeTsResolver(projectPath, fileSet);
   const result = resolveReferences(allSymbols, resolver, fileSet);
-  return { ...result, parsedFiles, available: true };
+  return { ...result, parsedFiles, available: true, cacheHits };
 }
 
 /** Resolve módulos TS (relativos + aliases de tsconfig) para relativePaths. */
