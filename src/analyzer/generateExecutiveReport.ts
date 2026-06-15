@@ -21,7 +21,7 @@ const gradeColor = (s: number) => (s >= 90 ? '#16a34a' : s >= 75 ? '#65a30d' : s
 export function renderExecutiveHtml(d: ExecReportData): string {
   const h = d.health;
   const roi = d.roi;
-  const money = (n: number) => `${roi?.currency ?? 'US$'} ${n.toLocaleString()}`;
+  const money = (n: number) => `${roi?.currency ?? 'R$'} ${n.toLocaleString()}`;
   const now = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
 
   const trend = (d.snapshots ?? []).slice(-20);

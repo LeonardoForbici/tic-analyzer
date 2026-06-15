@@ -136,13 +136,13 @@ Cruza o churn do git (90 dias) com as métricas estáticas: **score 0–100 por 
 ### Valor & Custo (ROI) — o argumento que reduz tempo e dinheiro
 
 Traduz a análise técnica em **tempo e dinheiro** para a liderança (aba **Valor**):
-- **Custo da dívida**: débito técnico → horas → dev-days → moeda (`debtScore × hoursPerDebtPoint × hourlyRate`). Taxa-hora e moeda configuráveis em `.tic-rules.json` → `roi`.
+- **Custo da dívida**: débito técnico → horas → dev-days → moeda (`debtScore × hoursPerDebtPoint × hourlyRate`). A aba **Valor** explica de onde vem cada ponto de dívida (complexidade, tamanho, acoplamento) e mostra **drill-down por arquivo** ("comece por estes N que concentram X% da dívida"). A **taxa-hora e moeda** (default **R$ 90/h**) podem ser ajustadas **direto no app** — os números recalculam na hora.
 - **Horas economizadas**: cada entidade cross-tier que um PR impactou e que não precisou ser rastreada à mão (estimativa conservadora) → horas/custo poupados.
 - **Ownership & bus-factor** (autoria git): quem domina cada módulo, **conhecimento em risco** (arquivo crítico com 1 só autor — se a pessoa sair, dói), dificuldade de **onboarding** por módulo e **roteamento de revisor** de PR.
 - **Relatório Executivo**: um clique gera um **PDF** (ou HTML) para a diretoria — saúde, tendência, custo da dívida, riscos e risco de conhecimento, em vocabulário de negócio.
 
 ```json
-"roi": { "hourlyRate": 50, "currency": "US$", "hoursPerDebtPoint": 0.5 }
+"roi": { "hourlyRate": 90, "currency": "R$", "hoursPerDebtPoint": 0.5 }
 ```
 
 > Valores de tempo/custo são **estimativas transparentes** ancoradas no débito e na taxa-hora — não promessa contábil.

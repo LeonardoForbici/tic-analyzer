@@ -67,6 +67,21 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   analyzePortfolioProject: (projectPath: string): Promise<unknown> =>
     ipcRenderer.invoke('analyze-portfolio-project', projectPath),
 
+  setRoiConfig: (projectPath: string, cfg: { hourlyRate: number; currency: string }): Promise<unknown> =>
+    ipcRenderer.invoke('set-roi-config', projectPath, cfg),
+
+  getGithubStatus: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('get-github-status', projectPath),
+
+  installGithubWorkflow: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('install-github-workflow', projectPath),
+
+  onLiveStatus: (callback: (s: unknown) => void) => {
+    const handler = (_event: unknown, s: unknown) => callback(s);
+    ipcRenderer.on('live-status', handler);
+    return () => ipcRenderer.removeListener('live-status', handler);
+  },
+
   onActivity: (callback: (event: unknown) => void) => {
     const handler = (_event: unknown, e: unknown) => callback(e);
     ipcRenderer.on('activity-event', handler);

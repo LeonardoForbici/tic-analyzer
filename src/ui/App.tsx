@@ -29,6 +29,10 @@ declare global {
       getPortfolio: () => Promise<unknown>;
       removePortfolioProject: (id: string) => Promise<unknown>;
       analyzePortfolioProject: (projectPath: string) => Promise<unknown>;
+      setRoiConfig: (projectPath: string, cfg: { hourlyRate: number; currency: string }) => Promise<unknown>;
+      getGithubStatus: (projectPath: string) => Promise<unknown>;
+      installGithubWorkflow: (projectPath: string) => Promise<unknown>;
+      onLiveStatus: (cb: (s: { watching?: boolean; analyzing?: boolean; lastRun?: string }) => void) => () => void;
       getTokenStats: () => Promise<TokenStats | null>;
       clearTokenStats: () => Promise<void>;
       onTokenUpdate: (cb: (entry: TokenEntry) => void) => () => void;
@@ -1076,6 +1080,7 @@ export function App() {
   const [mcpRunning, setMcpRunning] = useState(false);
   const [mcpPort] = useState(7432);
   const [liveMode, setLiveMode] = useState(false);
+  const [liveStatus, setLiveStatus] = useState<{ analyzing: boolean; lastRun?: string; runs: number }>({ analyzing: false, runs: 0 });
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [tokenStats, setTokenStats] = useState<TokenStats | null>(null);
 
@@ -1120,7 +1125,20 @@ export function App() {
     const next = !liveMode;
     const r = await window.ticAnalyzer.setLiveMode(projectPath, next);
     setLiveMode(r.ok && r.live);
+    if (!(r.ok && r.live)) setLiveStatus({ analyzing: false, runs: 0 });
   }, [liveMode, projectPath]);
+
+  // Faixa de status do Ao Vivo: vigiando / analisando / última análise / nº re-análises
+  useEffect(() => {
+    const off = window.ticAnalyzer.onLiveStatus?.((s) => {
+      setLiveStatus((prev) => ({
+        analyzing: s.analyzing ?? prev.analyzing,
+        lastRun: s.lastRun ?? prev.lastRun,
+        runs: s.analyzing === false ? prev.runs + 1 : prev.runs
+      }));
+    });
+    return off;
+  }, []);
 
   // Modo Ao Vivo: quando o main re-analisa sozinho, atualiza o resultado na UI
   useEffect(() => {
@@ -1165,10 +1183,10 @@ export function App() {
           <div style={{ fontSize: '11px', color: C.muted }}>Motor local de análise — zero tokens de IA</div>
         </div>
         {state === 'done' && result && (
-          <button onClick={toggleLive} title="Re-analisa sozinho quando você salva um arquivo"
+          <button onClick={toggleLive} title="Re-analisa sozinho ~15s depois que você salva um arquivo do projeto"
             style={{ ...S.tab(liveMode), borderColor: liveMode ? C.red : C.border, color: liveMode ? '#fff' : C.muted, background: liveMode ? C.red : 'transparent', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: liveMode ? '#fff' : C.muted, animation: liveMode ? 'pulse 1.5s infinite' : 'none' }} />
-            {liveMode ? 'Ao Vivo' : 'Ao Vivo'}
+            Ao Vivo
           </button>
         )}
         <div style={{ marginLeft: state === 'done' && result ? '0' : 'auto', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -1179,6 +1197,21 @@ export function App() {
           <button style={S.tab(activeTab === 'docs')} onClick={() => setActiveTab('docs')}>Docs</button>
         </div>
       </div>
+
+      {/* Faixa de status do Modo Ao Vivo */}
+      {liveMode && state === 'done' && result && (
+        <div style={{ padding: '8px 24px', background: '#1a0d0d', borderBottom: `1px solid ${C.border}`, fontSize: '12px', color: '#ddd', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: C.red, animation: 'pulse 1.5s infinite', flexShrink: 0 }} />
+          <strong style={{ color: '#fff' }}>Ao Vivo</strong>
+          <span style={{ color: C.muted }}>vigiando ~{result.totalFiles.toLocaleString('pt-BR')} arquivos</span>
+          <span style={{ color: C.muted }}>·</span>
+          <span style={{ color: liveStatus.analyzing ? C.orange : C.muted }}>
+            {liveStatus.analyzing ? '⟳ analisando…' : 'aguardando você salvar'}
+          </span>
+          {liveStatus.lastRun && <><span style={{ color: C.muted }}>·</span><span style={{ color: C.muted }}>última análise {new Date(liveStatus.lastRun).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span></>}
+          {liveStatus.runs > 0 && <><span style={{ color: C.muted }}>·</span><span style={{ color: C.green }}>{liveStatus.runs} re-análise(s)</span></>}
+        </div>
+      )}
 
       <div style={S.body}>
         {/* Folder picker */}
