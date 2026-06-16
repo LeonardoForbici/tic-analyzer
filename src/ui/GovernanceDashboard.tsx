@@ -65,6 +65,8 @@ export function GovernanceDashboard({ ticCodeDir, projectPath }: { ticCodeDir: s
   const [snaps, setSnaps] = useState<Snapshot[]>([]);
   const [triageFilter, setTriageFilter] = useState<string>('all');
   const [msg, setMsg] = useState('');
+  const [gh, setGh] = useState<{ installed: boolean; workflowFile: string | null; hasGit: boolean; yaml: string } | null>(null);
+  const [ghMsg, setGhMsg] = useState('');
 
   const loadAll = useCallback(() => {
     const readJson = async (file: string) => {
@@ -76,7 +78,14 @@ export function GovernanceDashboard({ ticCodeDir, projectPath }: { ticCodeDir: s
     readJson('triage.json').then((d) => Array.isArray(d) && setTriage(d));
     readJson('pr-history.json').then((d) => Array.isArray(d) && setPrHistory(d));
     readJson('snapshots.json').then((d) => Array.isArray(d) && setSnaps(d));
-  }, [ticCodeDir]);
+    window.ticAnalyzer.getGithubStatus?.(projectPath).then((s) => setGh(s as any));
+  }, [ticCodeDir, projectPath]);
+
+  const installWorkflow = useCallback(async () => {
+    const r = (await window.ticAnalyzer.installGithubWorkflow(projectPath)) as { ok: boolean; existed?: boolean; path?: string; error?: string };
+    setGhMsg(r.ok ? (r.existed ? `Já existia: ${r.path}` : `Workflow criado: ${r.path} — commit e push para ativar`) : `Erro: ${r.error}`);
+    window.ticAnalyzer.getGithubStatus?.(projectPath).then((s) => setGh(s as any));
+  }, [projectPath]);
 
   useEffect(loadAll, [loadAll]);
 
@@ -210,11 +219,42 @@ export function GovernanceDashboard({ ticCodeDir, projectPath }: { ticCodeDir: s
         })}
       </SectionCard>
 
-      {/* 📈 Recent PRs */}
-      <SectionCard title="📈 RECENT PRs — blast radius e status de risco">
+      {/* 🔗 GitHub / CI */}
+      <SectionCard title="🔗 GITHUB / CI — a Action está rodando?">
+        {!gh ? (
+          <div style={{ fontSize: '12px', color: C.muted }}>Verificando…</div>
+        ) : (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+              {gh.installed ? (
+                <span style={{ color: C.green, fontWeight: 600, fontSize: '13px' }}>✅ Action configurada</span>
+              ) : (
+                <span style={{ color: C.orange, fontWeight: 600, fontSize: '13px' }}>⚠️ Action não detectada neste projeto</span>
+              )}
+              {gh.installed && gh.workflowFile && <code style={{ fontSize: '11px', color: C.muted }}>{gh.workflowFile}</code>}
+              {!gh.installed && (
+                <button onClick={installWorkflow}
+                  style={{ padding: '5px 12px', background: C.accent, border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '11px' }}>
+                  Instalar workflow
+                </button>
+              )}
+            </div>
+            {!gh.hasGit && <div style={{ fontSize: '11px', color: C.orange, marginBottom: '6px' }}>Este projeto não é um repositório git.</div>}
+            {ghMsg && <div style={{ fontSize: '11px', color: ghMsg.startsWith('Erro') ? C.red : C.green, marginBottom: '6px' }}>{ghMsg}</div>}
+            <div style={{ fontSize: '11px', color: C.muted }}>
+              {gh.installed
+                ? 'A cada PR, a Action analisa as mudanças e comenta impacto/riscos/health. Os PRs revisados aparecem abaixo.'
+                : 'Sem a Action, os PRs não são revisados automaticamente. Instale o workflow, faça commit/push, e abra um PR — a primeira revisão aparecerá abaixo.'}
+            </div>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* 📈 PRs analisados pela Action */}
+      <SectionCard title="📈 PRs ANALISADOS PELA ACTION — cada linha = um PR revisado">
         {prHistory.length === 0 ? (
           <div style={{ fontSize: '12px', color: C.muted }}>
-            Sem histórico ainda — cada execução de <code>tic-analyzer pr-review</code> registra aqui (persiste em runner self-hosted e uso local).
+            Nenhum PR analisado ainda. Quando a Action rodar no 1º PR (ou você usar <code>tic-analyzer pr-review</code> localmente), o histórico aparece aqui.
           </div>
         ) : (
           <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>

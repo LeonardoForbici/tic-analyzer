@@ -9,7 +9,8 @@ import { SvgLineChart } from './charts/SvgLineChart';
 
 const C = { card: '#16213e', border: '#2a2a4e', accent: '#7c83fd', green: '#56cfad', red: '#ff6b6b', orange: '#f0a500', text: '#e0e0e0', muted: '#888' };
 
-interface Roi { currency: string; hourlyRate: number; remediationHours: number; devDays: number; debtCost: number; hoursSaved: number; savedCost: number; net: number; byModule: Array<{ module: string; cost: number; hours: number }>; }
+interface RoiFile { file: string; debtScore: number; hours: number; cost: number; reasons: string[]; }
+interface Roi { currency: string; hourlyRate: number; hoursPerDebtPoint: number; remediationHours: number; devDays: number; debtCost: number; totalDebtScore: number; hoursSaved: number; savedCost: number; net: number; byModule: Array<{ module: string; cost: number; hours: number }>; topFiles: RoiFile[]; }
 interface ModuleOwn { module: string; primaryOwner: string; ownershipPct: number; authorCount: number; busFactor: number; onboardingHours: number; difficulty: string; }
 interface Ownership { modules: ModuleOwn[]; knowledgeRisk: Array<{ file: string; author: string; reason: string }>; startHere: string[]; }
 interface Snapshot { counts?: { debtCost?: number; remediationHours?: number } }
@@ -41,13 +42,26 @@ export function ValueDashboard({ ticCodeDir, projectPath }: { ticCodeDir: string
   const [snaps, setSnaps] = useState<Snapshot[]>([]);
   const [exporting, setExporting] = useState(false);
   const [msg, setMsg] = useState('');
+  const [rateInput, setRateInput] = useState('');
+  const [curInput, setCurInput] = useState('R$');
+  const [savingCfg, setSavingCfg] = useState(false);
 
   const load = useCallback(() => {
     const readJson = async (f: string) => { const c = await window.ticAnalyzer.readFile(`${ticCodeDir}/${f}`); try { return c ? JSON.parse(c) : null; } catch { return null; } };
-    readJson('roi.json').then(setRoi);
+    readJson('roi.json').then((r) => { setRoi(r); if (r) { setRateInput(String(r.hourlyRate)); setCurInput(r.currency); } });
     readJson('ownership.json').then(setOwn);
     readJson('snapshots.json').then((d) => Array.isArray(d) && setSnaps(d));
   }, [ticCodeDir]);
+
+  const applyRoiConfig = useCallback(async () => {
+    const rate = Number(rateInput);
+    if (!rate || rate <= 0) { setMsg('Erro: taxa-hora inválida'); return; }
+    setSavingCfg(true); setMsg('');
+    const r = await window.ticAnalyzer.setRoiConfig(projectPath, { hourlyRate: rate, currency: curInput }) as { ok: boolean; roi?: Roi; error?: string };
+    setSavingCfg(false);
+    if (r.ok && r.roi) { setRoi(r.roi); setMsg(`Taxa atualizada para ${curInput} ${rate}/h`); }
+    else setMsg(`Erro: ${r.error ?? 'falhou'}`);
+  }, [rateInput, curInput, projectPath]);
 
   useEffect(() => {
     load();
@@ -62,7 +76,7 @@ export function ValueDashboard({ ticCodeDir, projectPath }: { ticCodeDir: string
     setMsg(r.ok ? `Relatório gerado: ${r.path}` : `Erro: ${r.error}`);
   }, [projectPath]);
 
-  const money = (n: number) => `${roi?.currency ?? 'US$'} ${n.toLocaleString()}`;
+  const money = (n: number) => `${roi?.currency ?? 'R$'} ${n.toLocaleString()}`;
   const trend = snaps.filter((s) => typeof s.counts?.debtCost === 'number');
 
   return (
@@ -94,11 +108,65 @@ export function ValueDashboard({ ticCodeDir, projectPath }: { ticCodeDir: string
             <Kpi label="🧠 CONHECIMENTO EM RISCO" value={String(own?.knowledgeRisk.length ?? 0)} sub="arquivos críticos com 1 só autor" color={C.orange} />
           </div>
 
+          {/* Como calculamos + ajuste de taxa-hora */}
+          <Section title="ℹ️ Como calculamos a dívida — e ajuste a taxa">
+            <div style={{ fontSize: '12px', color: C.muted, lineHeight: 1.6, marginBottom: '12px' }}>
+              A dívida sai de <strong style={{ color: C.text }}>3 sinais</strong> medidos no código:
+              <span style={{ color: C.red }}> complexidade alta</span> (lógica difícil de mexer),
+              <span style={{ color: C.red }}> arquivos muito grandes</span> e
+              <span style={{ color: C.red }}> acoplamento excessivo</span> (muita coisa depende dele).
+              Isso vira um <strong style={{ color: C.text }}>score de débito</strong> por arquivo ({roi.totalDebtScore.toLocaleString('pt-BR')} pontos no total),
+              convertido em horas de refatoração (≈ {Math.round(roi.hoursPerDebtPoint * 60)} min por ponto) × a taxa-hora abaixo.
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' as const }}>
+              <span style={{ fontSize: '12px', color: C.muted }}>Taxa-hora do dev:</span>
+              <select value={curInput} onChange={(e) => setCurInput(e.target.value)} style={{ padding: '6px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '6px', color: C.text, fontSize: '12px' }}>
+                <option value="R$">R$</option><option value="US$">US$</option><option value="€">€</option>
+              </select>
+              <input type="number" value={rateInput} onChange={(e) => setRateInput(e.target.value)} placeholder="90"
+                style={{ width: '90px', padding: '6px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '6px', color: C.text, fontSize: '12px' }} />
+              <span style={{ fontSize: '12px', color: C.muted }}>/hora</span>
+              <button onClick={applyRoiConfig} disabled={savingCfg}
+                style={{ padding: '6px 14px', background: C.accent, border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '12px' }}>
+                {savingCfg ? '...' : 'Aplicar'}
+              </button>
+              <span style={{ fontSize: '11px', color: '#666' }}>atualiza os números na hora, sem re-analisar</span>
+            </div>
+          </Section>
+
           {roi.byModule.length > 0 && (
             <Section title="💰 Custo da dívida por módulo">
               <SvgBarChart items={roi.byModule.slice(0, 10).map((m) => ({ label: m.module, value: m.cost }))} color={C.orange} formatValue={(v) => money(v)} />
             </Section>
           )}
+
+          {roi.topFiles.length > 0 && (() => {
+            const top = roi.topFiles.slice(0, 12);
+            const topCost = top.reduce((s, f) => s + f.cost, 0);
+            const pct = roi.debtCost > 0 ? Math.round((topCost / roi.debtCost) * 100) : 0;
+            return (
+              <Section title="🔎 De onde vem a dívida — comece por estes arquivos">
+                <div style={{ fontSize: '11px', color: C.muted, marginBottom: '10px' }}>
+                  Estes <strong style={{ color: C.text }}>{top.length} arquivos</strong> concentram <strong style={{ color: C.orange }}>{pct}%</strong> da dívida ({money(topCost)}). Atacá-los primeiro dá o maior retorno.
+                </div>
+                <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
+                  <thead><tr style={{ color: C.muted, textAlign: 'left' as const }}>
+                    <th style={{ padding: '4px' }}>Arquivo</th><th>Por quê</th><th style={{ textAlign: 'right' as const }}>Horas</th><th style={{ textAlign: 'right' as const }}>Custo</th>
+                  </tr></thead>
+                  <tbody>
+                    {top.map((f) => (
+                      <tr key={f.file} style={{ borderTop: `1px solid ${C.border}` }}>
+                        <td style={{ padding: '6px 4px', fontFamily: 'monospace', color: C.accent, maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }} title={f.file}>{f.file.split('/').pop()}</td>
+                        <td style={{ color: C.muted }}>{f.reasons.join(' · ') || 'débito acumulado'}</td>
+                        <td style={{ textAlign: 'right' as const }}>{f.hours}h</td>
+                        <td style={{ textAlign: 'right' as const, color: C.orange, fontWeight: 600 }}>{money(f.cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Section>
+            );
+          })()}
 
           {trend.length >= 2 && (
             <Section title="Tendência do custo da dívida">

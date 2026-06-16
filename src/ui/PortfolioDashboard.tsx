@@ -51,7 +51,7 @@ export function PortfolioDashboard() {
   const totalDebt = projects.reduce((s, p) => s + (p.debtCost ?? 0), 0);
   const totalCritical = projects.reduce((s, p) => s + p.risks.critical, 0);
   const avgHealth = projects.length ? Math.round(projects.reduce((s, p) => s + (p.healthScore ?? 0), 0) / projects.length) : 0;
-  const currency = projects[0]?.currency ?? 'US$';
+  const currency = projects[0]?.currency ?? 'R$';
 
   return (
     <div>

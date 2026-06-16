@@ -12,6 +12,7 @@ import { loadActivity } from '../src/analyzer/store/activityLog';
 import { dispatchAlerts } from '../src/analyzer/notify';
 import { renderExecutiveHtml, buildExecReportData } from '../src/analyzer/generateExecutiveReport';
 import { loadPortfolio, upsertProject, removeProject } from '../src/analyzer/store/portfolioStore';
+import { rescaleRoi } from '../src/analyzer/computeRoi';
 
 const isDev = !app.isPackaged;
 
@@ -108,16 +109,91 @@ ipcMain.handle('set-live-mode', async (_event, projectPath: string, on: boolean)
     liveTimer = setTimeout(() => {
       if (liveAnalyzing) { trigger(); return; }
       liveAnalyzing = true;
-      void runAndBroadcast(projectPath).finally(() => { liveAnalyzing = false; });
+      mainWindow?.webContents.send('live-status', { analyzing: true });
+      void runAndBroadcast(projectPath).finally(() => {
+        liveAnalyzing = false;
+        mainWindow?.webContents.send('live-status', { analyzing: false, lastRun: new Date().toISOString() });
+      });
     }, 15_000);
   };
   try {
     liveWatcher = fs.watch(projectPath, { recursive: true }, (_e, filename) => {
       if (filename && !IGNORE.test(String(filename))) trigger();
     });
+    mainWindow?.webContents.send('live-status', { watching: true });
     return { ok: true, live: true };
   } catch (err) {
     return { ok: false, live: false, error: String(err) };
+  }
+});
+
+// ── Config de ROI no app (taxa-hora/moeda) — recompute instantâneo ───────────
+ipcMain.handle('set-roi-config', async (_event, projectPath: string, cfg: { hourlyRate: number; currency: string }) => {
+  const fs = await import('fs');
+  try {
+    // 1. persiste em .tic-rules.json (cria/mescla) para valer na próxima análise
+    const rulesPath = path.join(projectPath, '.tic-rules.json');
+    let rules: any = {};
+    try { rules = JSON.parse(fs.readFileSync(rulesPath, 'utf8')); } catch { /* novo */ }
+    rules.roi = { ...(rules.roi ?? {}), hourlyRate: cfg.hourlyRate, currency: cfg.currency };
+    fs.writeFileSync(rulesPath, JSON.stringify(rules, null, 2), 'utf8');
+
+    // 2. recompute instantâneo do roi.json atual (horas não mudam)
+    const roiPath = path.join(projectPath, '.tic-code', 'roi.json');
+    const roi = JSON.parse(fs.readFileSync(roiPath, 'utf8'));
+    const updated = rescaleRoi(roi, cfg.hourlyRate, cfg.currency);
+    fs.writeFileSync(roiPath, JSON.stringify(updated), 'utf8');
+    return { ok: true, roi: updated };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+// ── GitHub / CI: status e setup do workflow ──────────────────────────────────
+const TIC_WORKFLOW = `name: TIC PR Review
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+jobs:
+  tic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: LeonardoForbici/tic-coder-lite@main
+        with:
+          gate: new-high-risks,new-rule-violations,health-drop:5
+`;
+
+ipcMain.handle('get-github-status', async (_event, projectPath: string) => {
+  const fs = await import('fs');
+  const result = { installed: false, workflowFile: null as string | null, hasGit: false, yaml: TIC_WORKFLOW };
+  result.hasGit = fs.existsSync(path.join(projectPath, '.git'));
+  const wfDir = path.join(projectPath, '.github', 'workflows');
+  try {
+    for (const f of fs.readdirSync(wfDir)) {
+      if (!/\.ya?ml$/.test(f)) continue;
+      const content = fs.readFileSync(path.join(wfDir, f), 'utf8');
+      if (/tic-coder-lite|tic-analyzer/i.test(content)) { result.installed = true; result.workflowFile = `.github/workflows/${f}`; break; }
+    }
+  } catch { /* sem .github/workflows */ }
+  return result;
+});
+
+ipcMain.handle('install-github-workflow', async (_event, projectPath: string) => {
+  const fs = await import('fs');
+  try {
+    const wfDir = path.join(projectPath, '.github', 'workflows');
+    const target = path.join(wfDir, 'tic-review.yml');
+    if (fs.existsSync(target)) return { ok: true, existed: true, path: '.github/workflows/tic-review.yml' };
+    fs.mkdirSync(wfDir, { recursive: true });
+    fs.writeFileSync(target, TIC_WORKFLOW, 'utf8');
+    return { ok: true, existed: false, path: '.github/workflows/tic-review.yml' };
+  } catch (err) {
+    return { ok: false, error: String(err) };
   }
 });
 
