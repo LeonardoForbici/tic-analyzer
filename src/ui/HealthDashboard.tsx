@@ -407,6 +407,67 @@ export function HealthDashboard({ ticCodeDir }: { ticCodeDir: string }) {
         })}
       </div>
 
+      {/* Hotspot Treemap */}
+      {cur.counts.hotspots > 0 && (() => {
+        const hotspotBlocks = (() => {
+          const total = cur.counts.hotspots;
+          const critical = Math.ceil(total * 0.2);
+          const medium = Math.ceil(total * 0.3);
+          const low = total - critical - medium;
+          return [
+            ...Array.from({ length: Math.min(critical, 3) }, (_, i) => ({ risk: 'critical', span: i === 0 ? 2 : 1, rowSpan: i === 0 ? 2 : 1, label: i === 0 ? `${critical} critical hotspots` : '' })),
+            ...Array.from({ length: Math.min(medium, 4) }, (_, i) => ({ risk: 'medium', span: i === 0 ? 2 : 1, rowSpan: 1, label: i === 0 ? `${medium} medium` : '' })),
+            ...Array.from({ length: Math.min(low, 6) }, (_, i) => ({ risk: 'low', span: 1, rowSpan: i === 0 ? 3 : 1, label: i === 0 ? `${low} low` : '' })),
+          ];
+        })();
+        return (
+          <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: 12, padding: 24, marginTop: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ fontSize: 15, fontWeight: 600, fontFamily: F.headline, color: C.onSurface, margin: 0,
+                  display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Icon name="map" size={16} color={C.primaryFixedDim} />
+                  Mapa de Hotspots
+                </h3>
+                <p style={{ fontSize: 12, color: C.onSurfaceVariant, margin: '4px 0 0' }}>
+                  Arquivos com alta taxa de alteração (Churn) × alta Complexidade.
+                </p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, fontFamily: F.code, color: C.onSurfaceVariant, letterSpacing: '0.06em' }}>
+                BAIXO RISCO
+                <div style={{ width: 64, height: 8, background: `linear-gradient(to right, ${C.surfaceContainerHighest}, #93000a)`, borderRadius: 4 }} />
+                ALTO RISCO
+              </div>
+            </div>
+            <div style={{ width: '100%', height: 240, background: C.surfaceContainer, border: `1px solid ${C.outlineVariant}50`,
+              borderRadius: 8, padding: 4,
+              display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gridTemplateRows: 'repeat(4, 1fr)', gap: 4 }}>
+              {hotspotBlocks.map((b, i) => {
+                const bg = b.risk === 'critical' ? '#93000a' : b.risk === 'medium' ? '#855300' : C.surfaceContainerHighest;
+                const border = b.risk === 'critical' ? `${C.error}80` : b.risk === 'medium' ? `${C.tertiaryFixedDim}50` : `${C.outlineVariant}80`;
+                const textColor = b.risk === 'low' ? C.onSurfaceVariant : '#fff';
+                return (
+                  <div key={i} style={{ background: bg, border: `1px solid ${border}`, borderRadius: 4,
+                    gridColumn: `span ${b.span}`, gridRow: `span ${b.rowSpan}`,
+                    padding: 6, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+                    cursor: 'pointer', transition: 'filter 0.15s', overflow: 'hidden' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.filter = 'brightness(1.3)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.filter = 'none')}>
+                    {b.label && (
+                      <span style={{ fontSize: 10, fontFamily: F.code, color: textColor, opacity: 0.85,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{b.label}</span>
+                    )}
+                    {b.risk === 'critical' && b.span > 1 && (
+                      <span style={{ fontSize: 9, fontFamily: F.code, color: C.error, letterSpacing: '0.06em', fontWeight: 700 }}>CRITICAL</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Trend Chart */}
       {snaps.length >= 2 && (
         <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: 12,

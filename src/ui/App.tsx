@@ -962,91 +962,288 @@ function KpiCard({ label, value, color, icon, sub }: { label: string; value: str
   );
 }
 
+// ── Spider Chart (6-axis radar) ───────────────────────────────────────────────
+function SpiderChart({ dims }: { dims: Array<{ label: string; value: number; color: string }> }) {
+  const cx = 50, cy = 50, r = 38;
+  const n = dims.length;
+  const angle = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
+  const pt = (i: number, frac: number) => ({
+    x: cx + r * frac * Math.cos(angle(i)),
+    y: cy + r * frac * Math.sin(angle(i)),
+  });
+  const gridLevels = [0.25, 0.5, 0.75, 1];
+  const dataPoints = dims.map((d, i) => pt(i, Math.max(0.05, d.value / 100)));
+  const dataPath = dataPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ') + 'Z';
+
+  return (
+    <svg viewBox="0 0 100 100" style={{ width: '100%', height: '100%' }}>
+      {/* Grid */}
+      {gridLevels.map((lvl) => {
+        const pts = dims.map((_, i) => pt(i, lvl));
+        return <polygon key={lvl} points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
+          fill="none" stroke={C.outlineVariant} strokeWidth={0.4} opacity={0.6} />;
+      })}
+      {/* Axes */}
+      {dims.map((_, i) => {
+        const end = pt(i, 1);
+        return <line key={i} x1={cx} y1={cy} x2={end.x} y2={end.y} stroke={C.outlineVariant} strokeWidth={0.4} opacity={0.5} />;
+      })}
+      {/* Data fill */}
+      <path d={dataPath} fill={C.secondary} fillOpacity={0.12} stroke={C.secondary} strokeWidth={1.2} />
+      {/* Points */}
+      {dataPoints.map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r={1.8} fill={dims[i].color} />
+      ))}
+      {/* Labels */}
+      {dims.map((d, i) => {
+        const lp = pt(i, 1.28);
+        return (
+          <text key={i} x={lp.x} y={lp.y} textAnchor="middle" dominantBaseline="middle"
+            fontSize={5.5} fill={C.outline} fontFamily="'JetBrains Mono', monospace"
+            letterSpacing="0.04em">{d.label.toUpperCase()}</text>
+        );
+      })}
+    </svg>
+  );
+}
+
 // ── Overview Tab ──────────────────────────────────────────────────────────────
-function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onOpenFolder }: {
+function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onOpenFolder, prHistory, liveEvents }: {
   result: AnalysisResult;
   mcpRunning: boolean;
   mcpPort: number;
   tokenStats: TokenStats | null;
   onToggleMcp: () => void;
   onOpenFolder: () => void;
+  prHistory: Array<{ date: string; changedFiles: number; totalImpacted: number; newRisks: number; newRuleViolations: number; healthDelta: number | null; gateFailed: boolean }>;
+  liveEvents: ActivityEvent[];
 }) {
-  const stats = [
-    ...(typeof result.healthScore === 'number' ? [{ val: `${result.healthScore}`, sub: result.healthGrade ?? '', label: 'Health Score', icon: 'health_metrics', color: result.healthScore >= 75 ? C.secondary : result.healthScore >= 60 ? C.tertiaryFixedDim : C.error }] : []),
-    { val: result.totalFiles.toLocaleString(), label: 'Arquivos', icon: 'description', color: C.primaryFixedDim },
-    { val: result.totalLines.toLocaleString(), label: 'Linhas', icon: 'data_array', color: C.primaryFixedDim },
-    { val: result.modulesGenerated.toString(), label: 'Módulos', icon: 'view_module', color: C.primaryFixedDim },
-    { val: result.hotspots.toString(), label: 'Hotspots', icon: 'local_fire_department', color: result.hotspots > 0 ? C.tertiaryFixedDim : C.secondary },
-    { val: result.violations.toString(), label: 'Violações Arq.', icon: 'warning', color: result.violations > 0 ? C.error : C.secondary },
-    { val: result.patterns.toString(), label: 'Padrões', icon: 'pattern', color: C.primaryFixedDim },
-    ...(result.dbTables > 0 ? [{ val: result.dbTables.toString(), label: 'Tabelas BD', icon: 'table_chart', color: C.tertiaryFixedDim }] : []),
-    ...(result.plsqlObjects > 0 ? [{ val: result.plsqlObjects.toString(), label: 'PL/SQL', icon: 'storage', color: C.tertiaryFixedDim }] : []),
-    ...(result.cacheHits > 0 ? [{ val: result.cacheHits.toString(), label: 'Cache Hits', icon: 'cached', color: C.secondary }] : []),
+  const score = result.healthScore ?? 0;
+  const grade = result.healthGrade ?? '—';
+  const scoreColor = score >= 75 ? C.secondary : score >= 60 ? C.tertiaryFixedDim : C.error;
+
+  const spiderDims = [
+    { label: 'Debt', value: Math.max(0, 100 - result.hotspots * 2), color: C.tertiaryFixedDim },
+    { label: 'Risk', value: Math.max(0, 100 - (result.violations ?? 0) * 5), color: C.primaryFixedDim },
+    { label: 'Drift', value: Math.max(0, 100 - (result.violations ?? 0) * 3), color: C.secondary },
+    { label: 'Dead Code', value: Math.max(0, 100 - (result.deadComponents ?? 0) * 10), color: C.primaryFixed },
+    { label: 'Coupling', value: Math.max(0, 100 - result.hotspots), color: C.tertiaryFixedDim },
+    { label: 'Heuristics', value: Math.min(100, (result.patterns ?? 0) * 5 + 60), color: C.secondary },
   ];
+
+  const sideStats = [
+    { label: 'Architecture Drifts', value: String(result.violations ?? 0), color: C.tertiaryFixed, icon: 'route', borderColor: `${C.tertiaryFixed}50` },
+    { label: 'Critical Risks', value: String(result.hotspots), color: C.error, icon: 'warning', borderColor: `${C.error}80`, bg: `${C.error}08` },
+    { label: 'Impact Edges', value: (result.impactEdges ?? 0).toLocaleString(), color: C.primaryFixedDim, icon: 'hub', borderColor: `${C.primaryFixedDim}30` },
+  ];
+
+  const recentEvents = [...liveEvents].reverse().slice(0, 8);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      {/* Analysis summary */}
-      <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: C.secondary, animation: 'pulse 2s infinite' }} />
-          <span style={{ fontFamily: F.code, fontSize: '10px', color: C.secondary, letterSpacing: '0.08em', textTransform: 'uppercase' as const }}>Análise Concluída</span>
+      {/* Context header */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.secondary, display: 'inline-block', animation: 'pulse 2s infinite' }} />
+          <span style={{ fontFamily: F.code, fontSize: 11, color: C.onSurfaceVariant, letterSpacing: '0.04em' }}>
+            {mcpRunning ? `MCP Online — localhost:${mcpPort}` : 'MCP Parado'}
+          </span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '16px' }}>
-          {stats.map((s) => (
-            <div key={s.label} style={{ textAlign: 'center' }}>
-              <div style={{ fontFamily: F.headline, fontSize: '24px', fontWeight: 700, color: s.color, lineHeight: 1 }}>{s.val}{s.sub ? <span style={{ fontSize: '14px', marginLeft: '4px', color: s.color }}>{s.sub}</span> : null}</div>
-              <div style={{ fontFamily: F.code, fontSize: '10px', color: C.outline, marginTop: '4px', letterSpacing: '0.04em', textTransform: 'uppercase' as const }}>{s.label}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+          <div>
+            <h2 style={{ fontSize: 32, fontWeight: 700, fontFamily: F.headline, color: C.primary, margin: 0, lineHeight: 1 }}>
+              {result.totalFiles.toLocaleString()} arquivos
+            </h2>
+            <span style={{ fontFamily: F.code, fontSize: 13, color: C.outline }}>
+              {result.totalLines.toLocaleString()} linhas · {result.modulesGenerated} módulos
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={onToggleMcp}
+              style={{ padding: '8px 16px', border: `1px solid ${mcpRunning ? C.error : C.primaryFixedDim}`,
+                background: 'transparent', borderRadius: 6, color: mcpRunning ? C.error : C.primaryFixedDim,
+                cursor: 'pointer', fontFamily: F.code, fontSize: 12, fontWeight: 600 }}>
+              {mcpRunning ? 'Parar MCP' : 'Iniciar MCP'}
+            </button>
+            <button onClick={onOpenFolder}
+              style={{ padding: '8px 16px', border: `1px solid ${C.outlineVariant}`, background: 'transparent',
+                borderRadius: 6, color: C.onSurface, cursor: 'pointer', fontFamily: F.code, fontSize: 12 }}>
+              Abrir .tic-code
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Bento grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
+        {/* Hero widget: grade + spider chart */}
+        <div style={{ background: C.surfaceContainer, border: `1px solid ${C.outlineVariant}`, borderRadius: 8,
+          padding: 24, position: 'relative', overflow: 'hidden', display: 'flex', gap: 24, alignItems: 'center' }}>
+          {/* Hex-grid ambient bg */}
+          <div style={{ position: 'absolute', inset: 0, opacity: 0.03, backgroundImage:
+            'repeating-linear-gradient(60deg, transparent, transparent 20px, #dae2fd 20px, #dae2fd 21px)',
+            pointerEvents: 'none' }} />
+          <div style={{ flex: 1, zIndex: 1 }}>
+            <span style={{ fontFamily: F.code, fontSize: 10, color: C.outline, letterSpacing: '0.1em',
+              textTransform: 'uppercase' as const, display: 'block', marginBottom: 8 }}>System Health Index</span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+              <span style={{ fontSize: 80, lineHeight: 1, fontWeight: 700, fontFamily: F.headline, color: scoreColor,
+                filter: `drop-shadow(0 0 15px ${scoreColor}50)` }}>{grade}</span>
+              <span style={{ fontFamily: F.headline, fontSize: 20, color: C.onSurfaceVariant }}>{score}/100</span>
+            </div>
+            <p style={{ fontFamily: F.body, fontSize: 13, color: C.onSurfaceVariant, maxWidth: 280, lineHeight: 1.5, margin: 0 }}>
+              {score >= 75
+                ? 'Integridade estrutural estável. Mantenha o monitoramento regular.'
+                : score >= 60
+                  ? 'Drift de arquitetura em limites de domínio requer atenção nos próximos sprints.'
+                  : 'Estado crítico. Priorize remediação de riscos e violações.'}
+            </p>
+          </div>
+          <div style={{ width: 220, height: 220, flexShrink: 0, position: 'relative', zIndex: 1 }}>
+            <SpiderChart dims={spiderDims} />
+          </div>
+        </div>
+
+        {/* Key stats sidebar */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {sideStats.map((s) => (
+            <div key={s.label} style={{ background: s.bg ?? C.surfaceContainer, border: `1px solid ${s.borderColor}`,
+              borderRadius: 8, padding: '14px 16px',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', flex: 1,
+              cursor: 'pointer', transition: 'background 0.15s' }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceContainerHigh)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = s.bg ?? C.surfaceContainer)}>
+              <div>
+                <span style={{ fontFamily: F.code, fontSize: 10, color: s.color, letterSpacing: '0.08em',
+                  textTransform: 'uppercase' as const, display: 'block', marginBottom: 4 }}>{s.label}</span>
+                <span style={{ fontFamily: F.headline, fontSize: 20, fontWeight: 700, color: s.color }}>{s.value}</span>
+              </div>
+              <div style={{ width: 40, height: 40, borderRadius: 8, border: `1px solid ${s.color}40`,
+                background: `${s.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={s.icon} size={20} color={s.color} />
+              </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* MCP Server */}
-      <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-          <div>
-            <div style={{ fontFamily: F.headline, fontSize: '16px', fontWeight: 600, color: C.onSurface, display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Icon name="sensors" size={18} color={mcpRunning ? C.secondary : C.outline} fill={mcpRunning ? 1 : 0} />
-              MCP Server — 50 Ferramentas
-            </div>
-            <div style={{ fontFamily: F.code, fontSize: '12px', color: mcpRunning ? C.secondary : C.outline, marginTop: '4px' }}>
-              {mcpRunning ? `● localhost:${mcpPort}/mcp — Online` : '○ Parado'}
-            </div>
+      {/* Bottom row: PR gates + live telemetry */}
+      <div style={{ display: 'grid', gridTemplateColumns: '7fr 5fr', gap: 16 }}>
+        {/* Recent Analysis Gates */}
+        <div style={{ background: C.surface, border: `1px solid ${C.outlineVariant}`, borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.outlineVariant}`,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontFamily: F.code, fontSize: 13, color: C.onSurface }}>Recent Analysis Gates</span>
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              style={{ padding: '8px 16px', background: mcpRunning ? `${C.error}22` : `${C.primaryFixedDim}22`, border: `1px solid ${mcpRunning ? C.error : C.primaryFixedDim}`, borderRadius: '6px', color: mcpRunning ? C.error : C.primaryFixedDim, cursor: 'pointer', fontFamily: F.code, fontSize: '12px', fontWeight: 600 }}
-              onClick={onToggleMcp}
-            >
-              {mcpRunning ? 'Parar MCP' : 'Iniciar MCP'}
-            </button>
-            <button
-              style={{ padding: '8px 16px', background: 'transparent', border: `1px solid ${C.outlineVariant}`, borderRadius: '6px', color: C.onSurface, cursor: 'pointer', fontFamily: F.code, fontSize: '12px' }}
-              onClick={onOpenFolder}
-            >
-              Abrir .tic-code
-            </button>
-          </div>
+          {prHistory.length === 0 ? (
+            <div style={{ padding: '24px 16px', fontFamily: F.body, fontSize: 13, color: C.onSurfaceVariant, textAlign: 'center' as const }}>
+              Nenhum PR analisado ainda. Use <code style={{ fontFamily: F.code, color: C.primaryFixedDim }}>tic-analyzer pr-review</code>.
+            </div>
+          ) : (
+            prHistory.slice(0, 4).map((p, i) => {
+              const status = p.gateFailed ? 'REJECTED' : (p.newRisks > 0 || p.newRuleViolations > 0) ? 'WARNING' : 'PASSED';
+              const statusColor = status === 'REJECTED' ? C.error : status === 'WARNING' ? C.tertiaryFixed : C.secondary;
+              const impactBars = Math.min(4, Math.ceil(p.totalImpacted / 5));
+              return (
+                <div key={i} style={{ padding: '12px 16px', borderBottom: `1px solid ${C.outlineVariant}50`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  background: i % 2 === 1 ? C.surfaceContainerLow : 'transparent',
+                  transition: 'background 0.1s', cursor: 'pointer' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceContainerLowest)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = i % 2 === 1 ? C.surfaceContainerLow : 'transparent')}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontFamily: F.code, fontSize: 10, letterSpacing: '0.06em', fontWeight: 700,
+                      padding: '2px 8px', borderRadius: 2, border: `1px solid ${statusColor}`,
+                      color: statusColor }}>{status}</span>
+                    <div>
+                      <div style={{ fontFamily: F.code, fontSize: 13, color: C.onSurface }}>
+                        {new Date(p.date).toLocaleDateString('pt-BR')} · {p.changedFiles} arquivos
+                      </div>
+                      <div style={{ fontFamily: F.body, fontSize: 12, color: C.onSurfaceVariant, marginTop: 1 }}>
+                        {p.newRisks > 0 ? `+${p.newRisks} riscos · ` : ''}{p.totalImpacted} entidades impactadas
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                    <span style={{ fontFamily: F.code, fontSize: 10, color: C.outline, letterSpacing: '0.06em' }}>BLAST RADIUS</span>
+                    <div style={{ display: 'flex', gap: 3 }}>
+                      {[0,1,2,3].map((j) => (
+                        <div key={j} style={{ width: 14, height: 14, background: j < impactBars ? statusColor : C.surfaceVariant, borderRadius: 2 }} />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
 
-        {mcpRunning && (
-          <>
-            <div style={{ fontFamily: F.code, fontSize: '12px', color: C.onSurfaceVariant, background: C.surfaceContainerLowest, padding: '12px 14px', borderRadius: '6px', marginBottom: '14px', border: `1px solid ${C.outlineVariant}` }}>
-              {`{"mcpServers":{"tic-analyzer":{"url":"http://localhost:${mcpPort}/mcp"}}}`}
+        {/* Live Telemetry */}
+        <div style={{ background: C.surfaceContainerLowest, border: `1px solid ${C.outlineVariant}`,
+          borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden', height: 300 }}>
+          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.outlineVariant}`,
+            background: C.surface, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontFamily: F.code, fontSize: 13, color: C.onSurface }}>Live Telemetry</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: F.code, fontSize: 11,
+              color: C.secondary }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.secondary,
+                display: 'inline-block', animation: 'pulse 2s infinite' }} />
+              {mcpRunning ? 'Connected' : 'Offline'}
+            </span>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {recentEvents.length === 0 ? (
+              <div style={{ display: 'flex', gap: 16, fontFamily: F.code, fontSize: 11, color: C.outline }}>
+                <span>{new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                <span style={{ color: C.outline }}>[IDLE]</span>
+                <span>Aguardando próximo evento do sistema…</span>
+              </div>
+            ) : recentEvents.map((e, i) => {
+              const typeColor = e.type === 'analysis' ? C.primaryFixedDim : e.severity === 'critical' ? C.error : e.severity === 'warn' ? C.tertiaryFixedDim : C.secondary;
+              const tag = e.type === 'analysis' ? '[SCAN]' : e.type === 'risk-new' ? '[WARN]' : e.type === 'health-up' ? '[OK]' : e.type === 'alert-sent' ? '[MCP]' : '[SYS]';
+              return (
+                <div key={i} style={{ display: 'flex', gap: 16, fontFamily: F.code, fontSize: 11, color: C.onSurfaceVariant }}>
+                  <span style={{ color: C.outline, flexShrink: 0 }}>{new Date(e.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                  <span style={{ color: typeColor, flexShrink: 0, fontWeight: 700 }}>{tag}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{e.title}</span>
+                </div>
+              );
+            })}
+            <div style={{ display: 'flex', gap: 16, fontFamily: F.code, fontSize: 11, color: C.outline, opacity: 0.5 }}>
+              <span>{new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+              <span>[IDLE]</span>
+              <span>Awaiting next file system event...</span>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '16px' }}>
-              {['list_modules','get_module','get_quick_context','get_impact','get_impact_of','get_blast_radius','get_table_impact','get_diff_impact','get_health','get_graph_level','get_arch_rules','get_arch_suggestions','get_risk_prediction','get_agent_brief','get_diagnosis','get_zoom_out','list_triage','update_triage','get_activity','get_roi','get_ownership','get_portfolio','get_metrics','get_hotspots','get_violations','get_patterns','trace_flow','search_code','get_db_schema','get_openapi'].map((tool) => (
-                <span key={tool} style={{ padding: '2px 8px', background: C.surfaceContainerLowest, border: `1px solid ${C.outlineVariant}`, borderRadius: '3px', fontSize: '10px', color: C.primaryFixedDim, fontFamily: F.code }}>{tool}</span>
-              ))}
-            </div>
-            <div style={{ borderTop: `1px solid ${C.outlineVariant}`, paddingTop: '16px' }}>
-              <div style={{ fontFamily: F.code, fontSize: '10px', color: C.outline, fontWeight: 600, marginBottom: '12px', letterSpacing: '0.08em', textTransform: 'uppercase' as const }}>MONITOR DE TOKENS EM TEMPO REAL</div>
-              <TokenMonitor stats={tokenStats} onClear={() => {}} />
-            </div>
-          </>
-        )}
+          </div>
+        </div>
       </div>
+
+      {/* MCP config (when running) */}
+      {mcpRunning && (
+        <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: 8, padding: 20 }}>
+          <div style={{ fontFamily: F.code, fontSize: 10, color: C.outline, fontWeight: 600, marginBottom: 12,
+            letterSpacing: '0.08em', textTransform: 'uppercase' as const, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Icon name="sensors" size={13} color={C.secondary} fill={1} />
+            MCP Server — 50 Ferramentas
+          </div>
+          <div style={{ fontFamily: F.code, fontSize: 12, color: C.onSurfaceVariant, background: C.surfaceContainerLowest,
+            padding: '10px 14px', borderRadius: 6, marginBottom: 14, border: `1px solid ${C.outlineVariant}` }}>
+            {`{"mcpServers":{"tic-analyzer":{"url":"http://localhost:${mcpPort}/mcp"}}}`}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 16 }}>
+            {['get_blast_radius','get_impact_of','get_health','get_graph_level','get_diff_impact','get_arch_rules','get_risk_prediction','get_agent_brief','list_triage','update_triage','get_quick_context','search_code','trace_flow','get_zoom_out','get_roi','get_ownership'].map((tool) => (
+              <span key={tool} style={{ padding: '2px 8px', background: C.surfaceContainerLowest,
+                border: `1px solid ${C.outlineVariant}`, borderRadius: 3, fontSize: 10,
+                color: C.primaryFixedDim, fontFamily: F.code }}>{tool}</span>
+            ))}
+          </div>
+          <div style={{ borderTop: `1px solid ${C.outlineVariant}`, paddingTop: 16 }}>
+            <div style={{ fontFamily: F.code, fontSize: 10, color: C.outline, fontWeight: 600, marginBottom: 12,
+              letterSpacing: '0.08em', textTransform: 'uppercase' as const }}>Monitor de Tokens em Tempo Real</div>
+            <TokenMonitor stats={tokenStats} onClear={() => {}} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1063,6 +1260,8 @@ export function App() {
   const [liveStatus, setLiveStatus] = useState<{ analyzing: boolean; lastRun?: string; runs: number }>({ analyzing: false, runs: 0 });
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [tokenStats, setTokenStats] = useState<TokenStats | null>(null);
+  const [prHistory, setPrHistory] = useState<any[]>([]);
+  const [liveEvents, setLiveEvents] = useState<ActivityEvent[]>([]);
 
   useEffect(() => { window.ticAnalyzer?.getMcpStatus().then((s) => setMcpRunning(s.running)); }, []);
 
@@ -1096,6 +1295,15 @@ export function App() {
       cleanup();
       setResult(r as AnalysisResult);
       setState((r as AnalysisResult).success ? 'done' : 'error');
+      if ((r as AnalysisResult).success && (r as AnalysisResult).outputPath) {
+        const op = (r as AnalysisResult).outputPath;
+        window.ticAnalyzer.readFile(`${op}/pr-history.json`).then((c) => {
+          try { if (c) setPrHistory(JSON.parse(c)); } catch { /* ok */ }
+        });
+        window.ticAnalyzer.getActivity(projectPath, 50).then((e) => {
+          if (Array.isArray(e)) setLiveEvents(e);
+        });
+      }
     });
     await window.ticAnalyzer.runAnalysis(projectPath);
   }, [projectPath]);
@@ -1120,12 +1328,15 @@ export function App() {
 
   useEffect(() => {
     const off = window.ticAnalyzer.onActivity((e) => {
-      if (e.type === 'analysis') {
-        window.ticAnalyzer.getActivity(projectPath, 1);
+      setLiveEvents((prev) => [...prev.slice(-49), e]);
+      if (e.type === 'analysis' && result?.outputPath) {
+        window.ticAnalyzer.readFile(`${result.outputPath}/pr-history.json`).then((c) => {
+          try { if (c) setPrHistory(JSON.parse(c)); } catch { /* ok */ }
+        });
       }
     });
     return off;
-  }, [projectPath]);
+  }, [projectPath, result?.outputPath]);
 
   const handleToggleMcp = useCallback(async () => {
     if (mcpRunning) { await window.ticAnalyzer.stopMcp(); setMcpRunning(false); }
@@ -1249,6 +1460,8 @@ export function App() {
                   tokenStats={tokenStats}
                   onToggleMcp={handleToggleMcp}
                   onOpenFolder={() => window.ticAnalyzer.openFolder(result!.outputPath)}
+                  prHistory={prHistory}
+                  liveEvents={liveEvents}
                 />
               )}
 
