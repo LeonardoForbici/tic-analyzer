@@ -10,6 +10,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { ImpactIndex } from '../analyzer/buildImpactIndex';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
+import { getFileSummary } from '../analyzer/store/fileSummary';
 import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount } from './queries';
 import { queryImpactOf, queryBlastRadius, type ImpactOfResult, type BlastRadiusResult } from '../analyzer/store/impactQueries';
 import { queryGraphLevel } from '../analyzer/store/graphQueries';
@@ -488,6 +489,22 @@ export class TicAnalyzerMcpServer {
             },
             required: ['concept']
           }
+        },
+        {
+          name: 'explain_file',
+          description: 'Perfil estruturado de um arquivo: responsabilidade inferida, arquivos que ele chama, quem o chama, símbolos exportados e nível de risco — tudo sem IA. ~150 tokens. Use antes de ler o arquivo.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'Caminho relativo do arquivo (ex: "src/payment/PaymentService.ts")' }
+            },
+            required: ['path']
+          }
+        },
+        {
+          name: 'get_entry_points',
+          description: 'Lista todos os pontos de entrada detectados: endpoints REST, batch jobs (@Scheduled/@Async/Quartz) e componentes raiz de frontend (inDegree=0). ~300 tokens.',
+          inputSchema: { type: 'object', properties: {} }
         }
       ]
     }));
@@ -1488,6 +1505,77 @@ export class TicAnalyzerMcpServer {
         case 'get_concept_map': {
           const concept = ((args as { concept: string }).concept ?? '').trim();
           return respond({ content: [{ type: 'text', text: this.getConceptMapTool(concept) }] });
+        }
+
+        case 'explain_file': {
+          const filePath = ((args as { path: string }).path ?? '').trim();
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(textResult('index.db não encontrado. Execute a análise primeiro.'));
+          try {
+            const summary = getFileSummary(db, filePath);
+            if (!summary) {
+              return respond(textResult(`Arquivo "${filePath}" não encontrado no índice. Verifique o caminho relativo.`));
+            }
+            return respond(textResult(JSON.stringify(summary, null, 2)));
+          } finally {
+            db.close();
+          }
+        }
+
+        case 'get_entry_points': {
+          const lines: string[] = ['# Entry Points\n'];
+
+          // REST endpoints from analysis.json
+          const analysisPath = path.join(this.ticCodePath, 'analysis.json');
+          if (fs.existsSync(analysisPath)) {
+            type Ep = { method: string; path: string; file: string; line: number; controller?: string };
+            type Bj = { file: string; line: number; className?: string; methodName?: string; type: string; cron?: string; fixedRate?: string };
+            const analysis = JSON.parse(fs.readFileSync(analysisPath, 'utf8')) as { endpoints?: Ep[]; batchJobs?: Bj[] };
+
+            const endpoints: Ep[] = analysis.endpoints ?? [];
+            if (endpoints.length > 0) {
+              lines.push(`## REST Endpoints (${endpoints.length})\n`);
+              for (const ep of endpoints.slice(0, 40)) {
+                lines.push(`- \`${ep.method} ${ep.path}\` → ${ep.file}:${ep.line}${ep.controller ? ` (${ep.controller})` : ''}`);
+              }
+              if (endpoints.length > 40) lines.push(`… e mais ${endpoints.length - 40}`);
+              lines.push('');
+            }
+
+            const jobs: Bj[] = analysis.batchJobs ?? [];
+            if (jobs.length > 0) {
+              lines.push(`## Batch Jobs (${jobs.length})\n`);
+              for (const j of jobs.slice(0, 20)) {
+                const label = j.methodName ? `${j.className ?? '?'}.${j.methodName}` : (j.className ?? path.basename(j.file));
+                const detail = j.cron ? ` cron="${j.cron}"` : j.fixedRate ? ` fixedRate=${j.fixedRate}ms` : '';
+                lines.push(`- \`${j.type}\` ${label}${detail} → ${j.file}:${j.line}`);
+              }
+              lines.push('');
+            }
+          }
+
+          // Frontend root components from SQLite (inDegree=0, frontend layer)
+          const db = openIndexDb(this.indexDbPath);
+          if (db) {
+            try {
+              const roots = db.prepare(
+                `SELECT rel_path FROM files WHERE layer = 'frontend' AND in_degree = 0 AND ext IN ('.tsx','.ts','.vue','.svelte') ORDER BY out_degree DESC LIMIT 30`
+              ).all() as Array<{ rel_path: string }>;
+              if (roots.length > 0) {
+                lines.push(`## Frontend Root Components (${roots.length})\n`);
+                for (const r of roots) lines.push(`- ${r.rel_path}`);
+                lines.push('');
+              }
+            } finally {
+              db.close();
+            }
+          }
+
+          if (lines.length === 1) {
+            lines.push('Nenhum entry point detectado. Execute a análise primeiro.');
+          }
+
+          return respond(textResult(lines.join('\n')));
         }
 
         default:
