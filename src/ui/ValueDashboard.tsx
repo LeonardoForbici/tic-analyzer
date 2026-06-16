@@ -1,40 +1,82 @@
-/**
- * Aba Valor — o argumento de tempo & custo para liderança:
- * custo da dívida em dinheiro, dev-days para sanear, horas economizadas,
- * matriz de ownership/bus-factor, onboarding e o botão de Relatório Executivo.
- */
 import { useCallback, useEffect, useState } from 'react';
 import { SvgBarChart } from './charts/SvgBarChart';
 import { SvgLineChart } from './charts/SvgLineChart';
 
-const C = { card: '#16213e', border: '#2a2a4e', accent: '#7c83fd', green: '#56cfad', red: '#ff6b6b', orange: '#f0a500', text: '#e0e0e0', muted: '#888' };
+const C = {
+  bg: '#0b1326', surfaceContainer: '#171f33', surfaceContainerLow: '#131b2e',
+  surfaceContainerHigh: '#222a3d', surfaceContainerHighest: '#2d3449',
+  primary: '#dbfcff', primaryFixedDim: '#00dbe9', primaryFixed: '#7df4ff',
+  secondary: '#4edea3', error: '#ffb4ab',
+  tertiaryFixedDim: '#ffb95f',
+  onSurface: '#dae2fd', onSurfaceVariant: '#b9cacb',
+  outline: '#849495', outlineVariant: '#3b494b',
+};
+const F = {
+  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  body: "'Inter', system-ui, sans-serif",
+  code: "'JetBrains Mono', monospace",
+};
 
 interface RoiFile { file: string; debtScore: number; hours: number; cost: number; reasons: string[]; }
-interface Roi { currency: string; hourlyRate: number; hoursPerDebtPoint: number; remediationHours: number; devDays: number; debtCost: number; totalDebtScore: number; hoursSaved: number; savedCost: number; net: number; byModule: Array<{ module: string; cost: number; hours: number }>; topFiles: RoiFile[]; }
+interface Roi {
+  currency: string; hourlyRate: number; hoursPerDebtPoint: number;
+  remediationHours: number; devDays: number; debtCost: number; totalDebtScore: number;
+  hoursSaved: number; savedCost: number; net: number;
+  byModule: Array<{ module: string; cost: number; hours: number }>;
+  topFiles: RoiFile[];
+}
 interface ModuleOwn { module: string; primaryOwner: string; ownershipPct: number; authorCount: number; busFactor: number; onboardingHours: number; difficulty: string; }
 interface Ownership { modules: ModuleOwn[]; knowledgeRisk: Array<{ file: string; author: string; reason: string }>; startHere: string[]; }
 interface Snapshot { counts?: { debtCost?: number; remediationHours?: number } }
 
-const DIFF_COLOR: Record<string, string> = { baixa: C.green, média: C.orange, alta: C.red };
-
-function Kpi({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
+function Icon({ name, size = 20, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
   return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: '12px', padding: '16px', flex: '1 1 170px' }}>
-      <div style={{ fontSize: '11px', color: C.muted, fontWeight: 600, marginBottom: '6px' }}>{label}</div>
-      <div style={{ fontSize: '24px', fontWeight: 800, color }}>{value}</div>
-      {sub && <div style={{ fontSize: '11px', color: C.muted, marginTop: '4px' }}>{sub}</div>}
+    <span className="material-symbols-outlined" style={{
+      fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center',
+      fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
+    }}>{name}</span>
+  );
+}
+
+function KpiCard({ label, value, sub, unit, color, icon, accentBg = false }: {
+  label: string; value: string; sub?: string; unit?: string; color: string; icon: string; accentBg?: boolean;
+}) {
+  return (
+    <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`,
+      borderRadius: 12, padding: 20, flex: '1 1 170px', position: 'relative', overflow: 'hidden' }}>
+      {accentBg && (
+        <div style={{ position: 'absolute', top: 0, right: 0, width: 96, height: 96,
+          background: color, borderRadius: '50%', filter: 'blur(40px)', opacity: 0.1, pointerEvents: 'none' }} />
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+        <Icon name={icon} size={16} color={color} />
+        <span style={{ fontSize: 10, fontFamily: F.code, letterSpacing: '0.08em', fontWeight: 700,
+          color: C.onSurfaceVariant, textTransform: 'uppercase' as const }}>{label}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, position: 'relative' }}>
+        <span style={{ fontSize: 30, fontWeight: 900, fontFamily: F.headline, lineHeight: 1, color }}>{value}</span>
+        {unit && <span style={{ fontSize: 13, color: C.onSurfaceVariant, fontFamily: F.code }}>{unit}</span>}
+      </div>
+      {sub && <div style={{ fontSize: 12, color: `${color}cc`, marginTop: 8, position: 'relative' }}>{sub}</div>}
     </div>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, icon, children }: { title: string; icon?: string; children: React.ReactNode }) {
   return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: '12px', padding: '16px', marginTop: '16px' }}>
-      <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '12px' }}>{title}</div>
+    <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`,
+      borderRadius: 12, padding: 20, marginTop: 16 }}>
+      <h3 style={{ fontSize: 15, fontWeight: 600, fontFamily: F.headline, color: C.onSurface, margin: '0 0 16px',
+        display: 'flex', alignItems: 'center', gap: 8 }}>
+        {icon && <Icon name={icon} size={16} color={C.onSurfaceVariant} />}
+        {title}
+      </h3>
       {children}
     </div>
   );
 }
+
+const DIFF_COLOR: Record<string, string> = { baixa: C.secondary, média: C.tertiaryFixedDim, alta: C.error };
 
 export function ValueDashboard({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPath: string }) {
   const [roi, setRoi] = useState<Roi | null>(null);
@@ -80,133 +122,208 @@ export function ValueDashboard({ ticCodeDir, projectPath }: { ticCodeDir: string
   const trend = snaps.filter((s) => typeof s.counts?.debtCost === 'number');
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' }}>
+    <div style={{ fontFamily: F.body, color: C.onSurface }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: '15px' }}>Valor & Custo</div>
-          <div style={{ fontSize: '12px', color: C.muted }}>Dívida técnica em tempo e dinheiro, risco de conhecimento e onboarding. Estimativas baseadas no débito e na taxa-hora (.tic-rules.json → roi).</div>
+          <h2 style={{ fontSize: 24, fontWeight: 700, fontFamily: F.headline, color: C.onSurface, margin: 0, lineHeight: 1.2 }}>
+            Valor & ROI
+          </h2>
+          <p style={{ fontSize: 13, color: C.onSurfaceVariant, margin: '4px 0 0' }}>
+            Dívida técnica em tempo e dinheiro, risco de conhecimento e onboarding.
+          </p>
         </div>
-        <div style={{ display: 'flex', gap: '6px' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => exportReport('pdf')} disabled={exporting}
-            style={{ padding: '7px 14px', background: C.accent, border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '12px' }}>
-            {exporting ? '...' : '📄 Relatório Executivo (PDF)'}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+              background: C.primaryFixedDim, border: 'none', borderRadius: 8,
+              color: '#00363a', cursor: 'pointer', fontFamily: F.code, fontSize: 12, fontWeight: 700 }}>
+            <Icon name="picture_as_pdf" size={15} color="#00363a" />
+            {exporting ? '…' : 'Relatório Executivo'}
           </button>
           <button onClick={() => exportReport('html')} disabled={exporting}
-            style={{ padding: '7px 10px', background: 'transparent', border: `1px solid ${C.border}`, borderRadius: '8px', color: C.muted, cursor: 'pointer', fontSize: '12px' }}>HTML</button>
+            style={{ padding: '8px 14px', background: 'transparent', border: `1px solid ${C.outlineVariant}`,
+              borderRadius: 8, color: C.onSurfaceVariant, cursor: 'pointer', fontFamily: F.code, fontSize: 12 }}>
+            HTML
+          </button>
         </div>
       </div>
-      {msg && <div style={{ fontSize: '11px', color: msg.startsWith('Erro') ? C.red : C.green, marginBottom: '10px' }}>{msg}</div>}
+
+      {msg && (
+        <div style={{ fontSize: 12, color: msg.startsWith('Erro') ? C.error : C.secondary, marginBottom: 12,
+          fontFamily: F.code, padding: '8px 12px', background: C.surfaceContainerHigh, borderRadius: 6 }}>
+          {msg}
+        </div>
+      )}
 
       {!roi ? (
-        <div style={{ fontSize: '12px', color: C.muted, padding: '20px' }}>roi.json não encontrado — rode a análise novamente.</div>
+        <div style={{ fontSize: 13, color: C.onSurfaceVariant, padding: '40px', textAlign: 'center' as const,
+          background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: 12 }}>
+          <Icon name="receipt_long" size={32} color={C.outline} />
+          <div style={{ marginTop: 12 }}>roi.json não encontrado — rode a análise novamente.</div>
+        </div>
       ) : (
         <>
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            <Kpi label="💰 CUSTO DA DÍVIDA" value={money(roi.debtCost)} sub={`${roi.devDays} dev-days para sanear`} color={C.red} />
-            <Kpi label="📉 ECONOMIZADO (PRs)" value={`${roi.hoursSaved} h`} sub={`${money(roi.savedCost)} de investigação evitada`} color={C.green} />
-            <Kpi label="⚖️ SALDO" value={money(roi.net)} sub={roi.net >= 0 ? 'a ferramenta já se pagou' : 'investir em saneamento'} color={roi.net >= 0 ? C.green : C.orange} />
-            <Kpi label="🧠 CONHECIMENTO EM RISCO" value={String(own?.knowledgeRisk.length ?? 0)} sub="arquivos críticos com 1 só autor" color={C.orange} />
+          {/* KPI cards */}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <KpiCard label="Custo da Dívida" value={money(roi.debtCost)} unit={`${roi.devDays} dev-days`}
+              sub="para sanear completamente" color={C.error} icon="account_balance_wallet" />
+            <KpiCard label="Economizado (PRs)" value={`${roi.hoursSaved}h`} unit="/semana"
+              sub={money(roi.savedCost)} color={C.secondary} icon="savings" accentBg />
+            <KpiCard label="Saldo" value={money(Math.abs(roi.net))}
+              sub={roi.net >= 0 ? 'ferramenta já se pagou' : 'investir em saneamento'}
+              color={roi.net >= 0 ? C.secondary : C.tertiaryFixedDim} icon="balance" accentBg />
+            <KpiCard label="Conhecimento em Risco" value={String(own?.knowledgeRisk.length ?? 0)}
+              unit="arquivos" sub="com 1 só autor" color={C.tertiaryFixedDim} icon="person_alert" />
           </div>
 
-          {/* Como calculamos + ajuste de taxa-hora */}
-          <Section title="ℹ️ Como calculamos a dívida — e ajuste a taxa">
-            <div style={{ fontSize: '12px', color: C.muted, lineHeight: 1.6, marginBottom: '12px' }}>
-              A dívida sai de <strong style={{ color: C.text }}>3 sinais</strong> medidos no código:
-              <span style={{ color: C.red }}> complexidade alta</span> (lógica difícil de mexer),
-              <span style={{ color: C.red }}> arquivos muito grandes</span> e
-              <span style={{ color: C.red }}> acoplamento excessivo</span> (muita coisa depende dele).
-              Isso vira um <strong style={{ color: C.text }}>score de débito</strong> por arquivo ({roi.totalDebtScore.toLocaleString('pt-BR')} pontos no total),
-              convertido em horas de refatoração (≈ {Math.round(roi.hoursPerDebtPoint * 60)} min por ponto) × a taxa-hora abaixo.
-            </div>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' as const }}>
-              <span style={{ fontSize: '12px', color: C.muted }}>Taxa-hora do dev:</span>
-              <select value={curInput} onChange={(e) => setCurInput(e.target.value)} style={{ padding: '6px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '6px', color: C.text, fontSize: '12px' }}>
+          {/* ROI Config */}
+          <Section title="Como calculamos a dívida" icon="info">
+            <p style={{ fontSize: 13, color: C.onSurfaceVariant, lineHeight: 1.6, margin: '0 0 16px' }}>
+              A dívida sai de <strong style={{ color: C.onSurface }}>3 sinais</strong>:{' '}
+              <span style={{ color: C.error }}>complexidade alta</span>,{' '}
+              <span style={{ color: C.error }}>arquivos muito grandes</span> e{' '}
+              <span style={{ color: C.error }}>acoplamento excessivo</span>.
+              Score total: <strong style={{ color: C.onSurface, fontFamily: F.code }}>{roi.totalDebtScore.toLocaleString('pt-BR')}</strong> pontos
+              (≈ {Math.round(roi.hoursPerDebtPoint * 60)} min por ponto × taxa-hora abaixo).
+            </p>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' as const }}>
+              <span style={{ fontSize: 13, color: C.onSurfaceVariant }}>Taxa-hora do dev:</span>
+              <select value={curInput} onChange={(e) => setCurInput(e.target.value)}
+                style={{ padding: '7px 10px', background: C.surfaceContainerHigh, border: `1px solid ${C.outlineVariant}`,
+                  borderRadius: 6, color: C.onSurface, fontSize: 13, fontFamily: F.code, cursor: 'pointer' }}>
                 <option value="R$">R$</option><option value="US$">US$</option><option value="€">€</option>
               </select>
               <input type="number" value={rateInput} onChange={(e) => setRateInput(e.target.value)} placeholder="90"
-                style={{ width: '90px', padding: '6px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '6px', color: C.text, fontSize: '12px' }} />
-              <span style={{ fontSize: '12px', color: C.muted }}>/hora</span>
+                style={{ width: 90, padding: '7px 10px', background: C.surfaceContainerHigh, border: `1px solid ${C.outlineVariant}`,
+                  borderRadius: 6, color: C.onSurface, fontSize: 13, fontFamily: F.code }} />
+              <span style={{ fontSize: 13, color: C.onSurfaceVariant }}>/hora</span>
               <button onClick={applyRoiConfig} disabled={savingCfg}
-                style={{ padding: '6px 14px', background: C.accent, border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '12px' }}>
-                {savingCfg ? '...' : 'Aplicar'}
+                style={{ padding: '7px 16px', background: C.primaryFixedDim, border: 'none', borderRadius: 6,
+                  color: '#00363a', cursor: 'pointer', fontWeight: 700, fontSize: 12, fontFamily: F.code }}>
+                {savingCfg ? '…' : 'Aplicar'}
               </button>
-              <span style={{ fontSize: '11px', color: '#666' }}>atualiza os números na hora, sem re-analisar</span>
             </div>
           </Section>
 
+          {/* Cost by module bar chart */}
           {roi.byModule.length > 0 && (
-            <Section title="💰 Custo da dívida por módulo">
-              <SvgBarChart items={roi.byModule.slice(0, 10).map((m) => ({ label: m.module, value: m.cost }))} color={C.orange} formatValue={(v) => money(v)} />
+            <Section title="Custo da dívida por módulo" icon="bar_chart">
+              <SvgBarChart items={roi.byModule.slice(0, 10).map((m) => ({ label: m.module, value: m.cost }))} color={C.tertiaryFixedDim} formatValue={(v) => money(v)} />
             </Section>
           )}
 
+          {/* Top files table */}
           {roi.topFiles.length > 0 && (() => {
             const top = roi.topFiles.slice(0, 12);
             const topCost = top.reduce((s, f) => s + f.cost, 0);
             const pct = roi.debtCost > 0 ? Math.round((topCost / roi.debtCost) * 100) : 0;
             return (
-              <Section title="🔎 De onde vem a dívida — comece por estes arquivos">
-                <div style={{ fontSize: '11px', color: C.muted, marginBottom: '10px' }}>
-                  Estes <strong style={{ color: C.text }}>{top.length} arquivos</strong> concentram <strong style={{ color: C.orange }}>{pct}%</strong> da dívida ({money(topCost)}). Atacá-los primeiro dá o maior retorno.
+              <Section title="De onde vem a dívida — comece por estes arquivos" icon="search">
+                <div style={{ fontSize: 13, color: C.onSurfaceVariant, marginBottom: 12 }}>
+                  Estes <strong style={{ color: C.onSurface }}>{top.length} arquivos</strong> concentram{' '}
+                  <strong style={{ color: C.tertiaryFixedDim }}>{pct}%</strong> da dívida ({money(topCost)}).
                 </div>
-                <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
-                  <thead><tr style={{ color: C.muted, textAlign: 'left' as const }}>
-                    <th style={{ padding: '4px' }}>Arquivo</th><th>Por quê</th><th style={{ textAlign: 'right' as const }}>Horas</th><th style={{ textAlign: 'right' as const }}>Custo</th>
-                  </tr></thead>
-                  <tbody>
-                    {top.map((f) => (
-                      <tr key={f.file} style={{ borderTop: `1px solid ${C.border}` }}>
-                        <td style={{ padding: '6px 4px', fontFamily: 'monospace', color: C.accent, maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }} title={f.file}>{f.file.split('/').pop()}</td>
-                        <td style={{ color: C.muted }}>{f.reasons.join(' · ') || 'débito acumulado'}</td>
-                        <td style={{ textAlign: 'right' as const }}>{f.hours}h</td>
-                        <td style={{ textAlign: 'right' as const, color: C.orange, fontWeight: 600 }}>{money(f.cost)}</td>
+                <div style={{ overflowX: 'auto' as const }}>
+                  <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', fontFamily: F.body }}>
+                    <thead>
+                      <tr style={{ fontSize: 10, fontFamily: F.code, letterSpacing: '0.06em', color: C.onSurfaceVariant,
+                        borderBottom: `1px solid ${C.outlineVariant}`, textAlign: 'left' as const }}>
+                        <th style={{ padding: '6px 8px' }}>ARQUIVO</th>
+                        <th style={{ padding: '6px 8px' }}>POR QUÊ</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'right' as const }}>HORAS</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'right' as const }}>CUSTO</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {top.map((f) => (
+                        <tr key={f.file} style={{ borderBottom: `1px solid ${C.outlineVariant}40` }}>
+                          <td style={{ padding: '10px 8px', fontFamily: F.code, color: C.primaryFixedDim, fontSize: 12,
+                            maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}
+                            title={f.file}>{f.file.split('/').pop()}</td>
+                          <td style={{ padding: '10px 8px', color: C.onSurfaceVariant, maxWidth: 280,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                            {f.reasons.join(' · ') || 'débito acumulado'}
+                          </td>
+                          <td style={{ padding: '10px 8px', textAlign: 'right' as const, fontFamily: F.code }}>{f.hours}h</td>
+                          <td style={{ padding: '10px 8px', textAlign: 'right' as const, color: C.tertiaryFixedDim, fontWeight: 700, fontFamily: F.code }}>
+                            {money(f.cost)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </Section>
             );
           })()}
 
+          {/* Debt trend */}
           {trend.length >= 2 && (
-            <Section title="Tendência do custo da dívida">
-              <SvgLineChart points={trend.map((s, i) => ({ x: i, y: s.counts!.debtCost! }))} color={C.red} height={140} formatY={(v) => money(Math.round(v))} />
+            <Section title="Tendência do custo da dívida" icon="trending_up">
+              <SvgLineChart points={trend.map((s, i) => ({ x: i, y: s.counts!.debtCost! }))}
+                color={C.error} height={140} formatY={(v) => money(Math.round(v))} />
             </Section>
           )}
         </>
       )}
 
+      {/* Ownership table */}
       {own && own.modules.length > 0 && (
-        <Section title="👥 Ownership & onboarding por módulo">
-          <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
-            <thead><tr style={{ color: C.muted, textAlign: 'left' }}>
-              <th style={{ padding: '4px' }}>Módulo</th><th>Dono</th><th>Cobertura</th><th>Autores</th><th>Bus-factor</th><th>Onboarding</th>
-            </tr></thead>
-            <tbody>
-              {own.modules.slice(0, 12).map((m) => (
-                <tr key={m.module} style={{ borderTop: `1px solid ${C.border}` }}>
-                  <td style={{ padding: '6px 4px' }}>{m.module}</td>
-                  <td>{m.primaryOwner}</td>
-                  <td>{m.ownershipPct}%</td>
-                  <td>{m.authorCount}</td>
-                  <td style={{ color: m.busFactor <= 1 ? C.red : C.text, fontWeight: m.busFactor <= 1 ? 700 : 400 }}>{m.busFactor}{m.busFactor <= 1 ? ' ⚠️' : ''}</td>
-                  <td style={{ color: DIFF_COLOR[m.difficulty] ?? C.text }}>~{m.onboardingHours}h ({m.difficulty})</td>
+        <Section title="Ownership & Onboarding por Módulo" icon="group">
+          <div style={{ overflowX: 'auto' as const }}>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', fontFamily: F.body }}>
+              <thead>
+                <tr style={{ fontSize: 10, fontFamily: F.code, letterSpacing: '0.06em', color: C.onSurfaceVariant,
+                  borderBottom: `1px solid ${C.outlineVariant}`, textAlign: 'left' as const }}>
+                  <th style={{ padding: '6px 8px' }}>MÓDULO</th><th style={{ padding: '6px 8px' }}>DONO</th>
+                  <th style={{ padding: '6px 8px' }}>COB.</th><th style={{ padding: '6px 8px' }}>AUTORES</th>
+                  <th style={{ padding: '6px 8px' }}>BUS FACTOR</th><th style={{ padding: '6px 8px' }}>ONBOARDING</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {own.startHere.length > 0 && <div style={{ fontSize: '11px', color: C.muted, marginTop: '10px' }}>🚀 Comece por aqui (onboarding): <strong style={{ color: C.green }}>{own.startHere.join(', ')}</strong></div>}
+              </thead>
+              <tbody>
+                {own.modules.slice(0, 12).map((m) => (
+                  <tr key={m.module} style={{ borderBottom: `1px solid ${C.outlineVariant}40` }}>
+                    <td style={{ padding: '10px 8px' }}>{m.module}</td>
+                    <td style={{ padding: '10px 8px', fontFamily: F.code, color: C.primaryFixedDim, fontSize: 11 }}>{m.primaryOwner}</td>
+                    <td style={{ padding: '10px 8px' }}>{m.ownershipPct}%</td>
+                    <td style={{ padding: '10px 8px' }}>{m.authorCount}</td>
+                    <td style={{ padding: '10px 8px' }}>
+                      <span style={{ color: m.busFactor <= 1 ? C.error : C.onSurface, fontWeight: m.busFactor <= 1 ? 700 : 400,
+                        display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {m.busFactor <= 1 && <Icon name="warning" size={13} color={C.error} fill={1} />}
+                        {m.busFactor}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 8px', color: DIFF_COLOR[m.difficulty] ?? C.onSurface }}>~{m.onboardingHours}h ({m.difficulty})</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {own.startHere.length > 0 && (
+            <div style={{ fontSize: 12, color: C.onSurfaceVariant, marginTop: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Icon name="rocket_launch" size={14} color={C.secondary} />
+              Comece por aqui (onboarding): <strong style={{ color: C.secondary, fontFamily: F.code }}>{own.startHere.join(', ')}</strong>
+            </div>
+          )}
         </Section>
       )}
 
+      {/* Knowledge risk */}
       {own && own.knowledgeRisk.length > 0 && (
-        <Section title="🧠 Conhecimento em risco (bus-factor 1)">
-          <div style={{ fontSize: '11px', color: C.muted, marginBottom: '8px' }}>Arquivos importantes que só uma pessoa tocou — se ela sair, o conhecimento vai junto.</div>
+        <Section title="Conhecimento em Risco (bus-factor 1)" icon="person_alert">
+          <p style={{ fontSize: 13, color: C.onSurfaceVariant, margin: '0 0 12px' }}>
+            Arquivos importantes com apenas um autor — se essa pessoa sair, o conhecimento vai junto.
+          </p>
           {own.knowledgeRisk.slice(0, 10).map((k) => (
-            <div key={k.file} style={{ display: 'flex', gap: '10px', padding: '5px 0', borderBottom: `1px solid ${C.border}`, fontSize: '12px' }}>
-              <span style={{ fontFamily: 'monospace', color: C.accent, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k.file}</span>
-              <span style={{ color: C.text }}>{k.author}</span>
-              <span style={{ color: C.muted, width: '160px', textAlign: 'right' as const }}>{k.reason}</span>
+            <div key={k.file} style={{ display: 'flex', gap: 12, padding: '10px 0',
+              borderBottom: `1px solid ${C.outlineVariant}40`, fontSize: 12, alignItems: 'center' }}>
+              <Icon name="warning" size={14} color={C.tertiaryFixedDim} fill={1} />
+              <span style={{ fontFamily: F.code, color: C.primaryFixedDim, flex: 1, overflow: 'hidden',
+                textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{k.file}</span>
+              <span style={{ color: C.onSurface, flexShrink: 0 }}>{k.author}</span>
+              <span style={{ color: C.onSurfaceVariant, flexShrink: 0, width: 180, textAlign: 'right' as const }}>{k.reason}</span>
             </div>
           ))}
         </Section>

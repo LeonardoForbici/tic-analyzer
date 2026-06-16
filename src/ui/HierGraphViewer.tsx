@@ -26,12 +26,19 @@ interface LevelData { nodes: AggNode[]; edges: AggEdge[]; error?: string; }
 
 const LAYER_COLORS: Record<string, string> = {
   frontend: '#4a9eff',
-  backend: '#56cfad',
-  database: '#f0a500',
-  default: '#7c83fd'
+  backend: '#4edea3',
+  database: '#ffb95f',
+  default: '#00dbe9'
 };
 
-const KIND_RING: Record<string, string> = { layer: '#ffffff', module: '#aab2ff', file: '#667', symbol: '#9d8cff', more: '#555' };
+const KIND_RING: Record<string, string> = { layer: '#dbfcff', module: '#7df4ff', file: '#849495', symbol: '#9d8cff', more: '#3b494b' };
+
+const C_GRAPH = {
+  surfaceContainerLow: '#131b2e', surfaceContainer: '#171f33', surfaceContainerHigh: '#222a3d',
+  surfaceContainerHighest: '#2d3449', primaryFixedDim: '#00dbe9', onSurface: '#dae2fd',
+  onSurfaceVariant: '#b9cacb', outlineVariant: '#3b494b', outline: '#849495', secondary: '#4edea3',
+};
+const F_GRAPH = { body: "'Inter', system-ui, sans-serif", code: "'JetBrains Mono', monospace" };
 
 export function HierGraphViewer({ projectPath }: { projectPath: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -397,67 +404,97 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
   const breadcrumb = [{ id: '__root__', label: 'Aplicação' }, ...expanded.map((id) => ({ id, label: id.slice(id.indexOf(':') + 1).split('/').pop() ?? id }))];
 
   return (
-    <div>
-      {/* Breadcrumb de drill-down */}
-      <div style={{ display: 'flex', gap: '4px', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
+    <div style={{ fontFamily: F_GRAPH.body, color: C_GRAPH.onSurface }}>
+      {/* Breadcrumb */}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' as const }}>
         {breadcrumb.map((b, i) => (
-          <span key={b.id} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            {i > 0 && <span style={{ color: '#555' }}>›</span>}
+          <span key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {i > 0 && <span style={{ color: C_GRAPH.outline, fontSize: 13 }}>›</span>}
             <button
               onClick={() => setExpanded(i === 0 ? [] : expanded.slice(0, i))}
               style={{
-                padding: '4px 10px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer',
-                background: i === breadcrumb.length - 1 ? '#7c83fd' : '#1a1a3a',
-                border: '1px solid #2a2a4e', color: i === breadcrumb.length - 1 ? '#fff' : '#aaa',
-                fontFamily: 'monospace'
+                padding: '4px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                fontFamily: F_GRAPH.code, fontWeight: i === breadcrumb.length - 1 ? 700 : 400,
+                background: i === breadcrumb.length - 1 ? C_GRAPH.primaryFixedDim : C_GRAPH.surfaceContainerHigh,
+                border: `1px solid ${i === breadcrumb.length - 1 ? C_GRAPH.primaryFixedDim : C_GRAPH.outlineVariant}`,
+                color: i === breadcrumb.length - 1 ? '#00363a' : C_GRAPH.onSurfaceVariant,
               }}>
               {b.label}
             </button>
           </span>
         ))}
-        <button onClick={fitNow} style={{ marginLeft: 'auto', padding: '4px 10px', background: '#1a1a3a', border: '1px solid #2a2a4e', borderRadius: '6px', color: '#aaa', cursor: 'pointer', fontSize: '12px' }}>⛶ Enquadrar</button>
-        <span style={{ fontSize: '11px', color: '#666' }}>
+        <button onClick={fitNow} style={{ marginLeft: 'auto', padding: '4px 12px',
+          background: C_GRAPH.surfaceContainerHigh, border: `1px solid ${C_GRAPH.outlineVariant}`,
+          borderRadius: 6, color: C_GRAPH.onSurfaceVariant, cursor: 'pointer', fontSize: 12, fontFamily: F_GRAPH.code }}>
+          ⛶ Enquadrar
+        </button>
+        <span style={{ fontSize: 11, color: C_GRAPH.outline, fontFamily: F_GRAPH.code }}>
           {data && !data.error ? `${data.nodes.length} nós · ${data.edges.length} arestas` : ''} · 2×clique = expandir · scroll = zoom
         </span>
       </div>
 
-      {data?.error && <div style={{ padding: '20px', color: '#ff6b6b', fontSize: '13px' }}>{data.error}</div>}
+      {data?.error && (
+        <div style={{ padding: 16, color: C_GRAPH.onSurface, fontSize: 13, background: C_GRAPH.surfaceContainerLow,
+          border: `1px solid ${C_GRAPH.outlineVariant}`, borderRadius: 8, marginBottom: 12 }}>{data.error}</div>
+      )}
 
       <div style={{ position: 'relative', opacity: loading ? 0.5 : 1, transition: 'opacity 0.2s' }}>
         <canvas
           ref={canvasRef} width={900} height={560}
-          style={{ background: '#0d1117', borderRadius: '8px', cursor: 'grab', display: 'block', maxWidth: '100%' }}
+          style={{ background: '#060e20', borderRadius: 8, cursor: 'grab', display: 'block', maxWidth: '100%',
+            border: `1px solid ${C_GRAPH.outlineVariant}` }}
           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onWheel={handleWheel}
         />
 
-        {/* Legenda */}
-        <div style={{ position: 'absolute', left: 10, bottom: 10, display: 'flex', gap: '12px', fontSize: '11px', color: '#aaa', background: '#0d1117cc', padding: '6px 10px', borderRadius: '6px' }}>
+        {/* Legend */}
+        <div style={{ position: 'absolute', left: 10, bottom: 10, display: 'flex', gap: 12,
+          fontSize: 11, color: C_GRAPH.onSurfaceVariant, fontFamily: F_GRAPH.code,
+          background: '#060e20cc', padding: '6px 10px', borderRadius: 6,
+          border: `1px solid ${C_GRAPH.outlineVariant}40`, backdropFilter: 'blur(8px)' }}>
           {Object.entries(LAYER_COLORS).filter(([k]) => k !== 'default').map(([layer, color]) => (
-            <span key={layer} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, display: 'inline-block' }} />{layer}
+            <span key={layer} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, display: 'inline-block' }} />
+              {layer}
             </span>
           ))}
-          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: 18, height: 2, background: '#56cfad', display: 'inline-block' }} />AST</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: 18, height: 2, background: '#f0a500', display: 'inline-block' }} />heurística</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 18, height: 2, background: C_GRAPH.secondary, display: 'inline-block' }} />AST
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 18, height: 2, background: '#ffb95f', display: 'inline-block' }} />heurística
+          </span>
         </div>
 
-        {/* Painel do nó selecionado */}
+        {/* Selected node panel */}
         {selected && (
-          <div style={{ position: 'absolute', top: 8, right: 8, background: '#16213e', border: '1px solid #2a2a4e', borderRadius: '8px', padding: '10px 14px', maxWidth: '280px', fontSize: '12px' }}>
-            <div style={{ color: LAYER_COLORS[selected.layer ?? 'default'], fontWeight: 600, marginBottom: '4px', wordBreak: 'break-all' }}>{selected.label}</div>
-            <div style={{ color: '#888' }}>
+          <div style={{ position: 'absolute', top: 8, right: 8, background: C_GRAPH.surfaceContainer,
+            border: `1px solid ${C_GRAPH.outlineVariant}`, borderRadius: 8,
+            padding: '12px 16px', maxWidth: 280, fontSize: 12, backdropFilter: 'blur(8px)' }}>
+            <div style={{ color: LAYER_COLORS[selected.layer ?? 'default'], fontWeight: 700,
+              marginBottom: 4, wordBreak: 'break-all' as const, fontFamily: F_GRAPH.code }}>{selected.label}</div>
+            <div style={{ color: C_GRAPH.onSurfaceVariant }}>
               {selected.kind}{selected.layer ? ` · ${selected.layer}` : ''}
               {selected.childCount > 0 ? ` · ${selected.childCount} filhos` : ''}
             </div>
-            <div style={{ color: '#888', marginTop: '4px' }}>dependências: in {selected.inWeight} · out {selected.outWeight}</div>
-            <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+            <div style={{ color: C_GRAPH.onSurfaceVariant, marginTop: 4, fontFamily: F_GRAPH.code, fontSize: 11 }}>
+              in {selected.inWeight} · out {selected.outWeight}
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
               {(selected.kind === 'layer' || selected.kind === 'module' || selected.kind === 'file') && (
-                <button onClick={() => expand(selected)} style={{ padding: '4px 10px', background: '#7c83fd', border: 'none', borderRadius: '5px', color: '#fff', cursor: 'pointer', fontSize: '11px', fontWeight: 600 }}>
+                <button onClick={() => expand(selected)}
+                  style={{ padding: '5px 12px', background: C_GRAPH.primaryFixedDim, border: 'none',
+                    borderRadius: 5, color: '#00363a', cursor: 'pointer', fontSize: 11,
+                    fontWeight: 700, fontFamily: F_GRAPH.code }}>
                   ⤵ Expandir
                 </button>
               )}
-              <button onClick={() => setSelected(null)} style={{ padding: '4px 10px', background: '#0d1117', border: '1px solid #2a2a4e', borderRadius: '5px', color: '#888', cursor: 'pointer', fontSize: '11px' }}>Fechar</button>
+              <button onClick={() => setSelected(null)}
+                style={{ padding: '5px 12px', background: 'transparent',
+                  border: `1px solid ${C_GRAPH.outlineVariant}`, borderRadius: 5,
+                  color: C_GRAPH.onSurfaceVariant, cursor: 'pointer', fontSize: 11, fontFamily: F_GRAPH.code }}>
+                Fechar
+              </button>
             </div>
           </div>
         )}

@@ -1,16 +1,21 @@
-/**
- * Dashboard de Governança de Engenharia:
- *   🎯 KPIs (Impact Score, Risk Level, Modules Analyzed, Architecture Drift)
- *   📊 Impact Analysis (tendência de PRs + distribuição de saúde por módulo)
- *   🔍 Triage Queue (skill triage: bug/enhancement × máquina de estados)
- *   🏗️ Architecture Governance (regras .tic-rules.json com compliance)
- *   📈 Recent PRs (histórico de pr-review com blast radius e gates)
- */
 import { useCallback, useEffect, useState } from 'react';
 import { SvgLineChart } from './charts/SvgLineChart';
 import { SvgBarChart } from './charts/SvgBarChart';
 
-const C = { card: '#16213e', border: '#2a2a4e', accent: '#7c83fd', green: '#56cfad', red: '#ff6b6b', orange: '#f0a500', text: '#e0e0e0', muted: '#888' };
+const C = {
+  bg: '#0b1326', surfaceContainer: '#171f33', surfaceContainerLow: '#131b2e',
+  surfaceContainerHigh: '#222a3d', surfaceContainerHighest: '#2d3449',
+  primary: '#dbfcff', primaryFixedDim: '#00dbe9', primaryFixed: '#7df4ff',
+  secondary: '#4edea3', error: '#ffb4ab', errorContainer: '#93000a',
+  tertiaryFixedDim: '#ffb95f',
+  onSurface: '#dae2fd', onSurfaceVariant: '#b9cacb',
+  outline: '#849495', outlineVariant: '#3b494b',
+};
+const F = {
+  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  body: "'Inter', system-ui, sans-serif",
+  code: "'JetBrains Mono', monospace",
+};
 
 interface TriageItem {
   id: string; title: string; category: 'bug' | 'enhancement';
@@ -21,9 +26,13 @@ interface ArchViolation { ruleId: string; severity: string; from: string; to: st
 interface PrEntry { date: string; changedFiles: number; totalImpacted: number; newRisks: number; newViolations: number; newRuleViolations: number; healthDelta: number | null; gateFailed: boolean; }
 interface Snapshot { score: number; grade: string; counts: { risks: number; modules: number; impactEdges: number }; }
 
-const STATE_COLORS: Record<string, string> = {
-  'needs-triage': '#f0a500', 'needs-info': '#4a9eff', 'ready-for-agent': '#56cfad',
-  'ready-for-human': '#9d8cff', 'wontfix': '#666', 'done': '#3a3'
+const STATE_META: Record<string, { color: string; bg: string }> = {
+  'needs-triage': { color: C.tertiaryFixedDim, bg: `${C.tertiaryFixedDim}18` },
+  'needs-info': { color: C.primaryFixedDim, bg: `${C.primaryFixedDim}18` },
+  'ready-for-agent': { color: C.secondary, bg: `${C.secondary}18` },
+  'ready-for-human': { color: '#9d8cff', bg: '#9d8cff18' },
+  'wontfix': { color: C.onSurfaceVariant, bg: `${C.surfaceContainerHighest}` },
+  'done': { color: C.secondary, bg: `${C.secondary}18` },
 };
 const STATE_NEXT: Record<string, string[]> = {
   'needs-triage': ['needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix'],
@@ -31,25 +40,49 @@ const STATE_NEXT: Record<string, string[]> = {
   'ready-for-agent': ['needs-triage', 'done'],
   'ready-for-human': ['needs-triage', 'done'],
   'wontfix': ['needs-triage'],
-  'done': []
+  'done': [],
 };
-const PRIORITY_COLORS: Record<string, string> = { critical: '#ff6b6b', high: '#f0a500', medium: '#7c83fd', low: '#888' };
+const PRIORITY_META: Record<string, { color: string; label: string }> = {
+  critical: { color: C.error, label: 'CRITICAL' },
+  high: { color: C.tertiaryFixedDim, label: 'HIGH' },
+  medium: { color: '#9d8cff', label: 'MED' },
+  low: { color: C.onSurfaceVariant, label: 'LOW' },
+};
 
-function Kpi({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
+function Icon({ name, size = 20, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
   return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: '12px', padding: '16px', flex: '1 1 160px' }}>
-      <div style={{ fontSize: '11px', color: C.muted, fontWeight: 600, marginBottom: '6px' }}>{label}</div>
-      <div style={{ fontSize: '26px', fontWeight: 800, color }}>{value}</div>
-      {sub && <div style={{ fontSize: '11px', color: C.muted, marginTop: '4px' }}>{sub}</div>}
+    <span className="material-symbols-outlined" style={{
+      fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center',
+      fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
+    }}>{name}</span>
+  );
+}
+
+function KpiCard({ label: rawLabel, value, sub, color, icon }: { label: string; value: string; sub?: string; color: string; icon: string }) {
+  return (
+    <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`,
+      borderLeft: `3px solid ${color}`, borderRadius: 8, padding: '16px 20px', flex: '1 1 160px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Icon name={icon} size={16} color={color} />
+        <span style={{ fontSize: 10, fontFamily: F.code, letterSpacing: '0.08em', fontWeight: 700,
+          color: C.onSurfaceVariant, textTransform: 'uppercase' as const }}>{rawLabel}</span>
+      </div>
+      <div style={{ fontSize: 28, fontWeight: 800, color, fontFamily: F.headline, lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: C.onSurfaceVariant, fontFamily: F.body, marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }
 
-function SectionCard({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
+function SectionCard({ title, icon, children, right }: { title: string; icon?: string; children: React.ReactNode; right?: React.ReactNode }) {
   return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: '12px', padding: '16px', marginTop: '16px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-        <div style={{ fontSize: '13px', fontWeight: 700 }}>{title}</div>
+    <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`,
+      borderRadius: 12, padding: 20, marginTop: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 600, fontFamily: F.headline, color: C.onSurface, margin: 0,
+          display: 'flex', alignItems: 'center', gap: 8 }}>
+          {icon && <Icon name={icon} size={16} color={C.onSurfaceVariant} />}
+          {title}
+        </h3>
         {right}
       </div>
       {children}
@@ -89,7 +122,6 @@ export function GovernanceDashboard({ ticCodeDir, projectPath }: { ticCodeDir: s
 
   useEffect(loadAll, [loadAll]);
 
-  // Sistema vivo: recarrega sozinho quando uma nova análise é concluída
   useEffect(() => {
     const off = window.ticAnalyzer.onActivity?.((e: { type?: string }) => {
       if (e?.type === 'analysis') loadAll();
@@ -103,7 +135,6 @@ export function GovernanceDashboard({ ticCodeDir, projectPath }: { ticCodeDir: s
     loadAll();
   }, [projectPath, loadAll]);
 
-  // ── KPIs ──────────────────────────────────────────────────────────────────
   const cur = snaps[snaps.length - 1];
   const prev = snaps.length > 1 ? snaps[snaps.length - 2] : null;
   const impactScore = cur?.counts.impactEdges ?? analysis?.impact?.indexedFiles ?? 0;
@@ -114,9 +145,8 @@ export function GovernanceDashboard({ ticCodeDir, projectPath }: { ticCodeDir: s
     : criticalOpen > 0 || cur.score < 40 ? 'CRITICAL'
     : archErrors > 0 || cur.score < 60 ? 'HIGH'
     : cur.score < 80 ? 'MEDIUM' : 'LOW';
-  const riskColor = riskLevel === 'CRITICAL' ? C.red : riskLevel === 'HIGH' ? '#ff9f43' : riskLevel === 'MEDIUM' ? C.orange : C.green;
+  const riskColor = riskLevel === 'CRITICAL' ? C.error : riskLevel === 'HIGH' ? C.tertiaryFixedDim : riskLevel === 'MEDIUM' ? '#9d8cff' : C.secondary;
 
-  // ── Distribuição por módulo (debt) ────────────────────────────────────────
   const moduleBars = ((analysis?.metrics?.topHotspots ?? []) as Array<{ file: string; debtScore: number }>)
     .slice(0, 8).map((h) => ({ label: h.file.split('/').pop() ?? h.file, value: h.debtScore }));
 
@@ -125,158 +155,240 @@ export function GovernanceDashboard({ ticCodeDir, projectPath }: { ticCodeDir: s
     .sort((a, b) => ['critical', 'high', 'medium', 'low'].indexOf(a.priority) - ['critical', 'high', 'medium', 'low'].indexOf(b.priority));
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+    <div style={{ fontFamily: F.body, color: C.onSurface }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: '15px' }}>Governança de Engenharia</div>
-          <div style={{ fontSize: '12px', color: C.muted }}>Regras de arquitetura · triagem · risco preditivo · histórico de PRs</div>
+          <h2 style={{ fontSize: 24, fontWeight: 700, fontFamily: F.headline, color: C.onSurface, margin: 0, lineHeight: 1.2 }}>
+            Governança de Engenharia
+          </h2>
+          <p style={{ fontSize: 13, color: C.onSurfaceVariant, margin: '4px 0 0' }}>
+            Regras de arquitetura · triagem · risco preditivo · histórico de PRs
+          </p>
         </div>
         <button onClick={() => window.ticAnalyzer.openArchReport(projectPath)}
-          style={{ padding: '7px 14px', background: C.accent, border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '12px' }}>
-          📐 Relatório de arquitetura (HTML)
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+            background: C.surfaceContainerHigh, border: `1px solid ${C.outlineVariant}`,
+            borderRadius: 8, color: C.onSurface, cursor: 'pointer', fontFamily: F.code, fontSize: 12, fontWeight: 600 }}>
+          <Icon name="architecture" size={15} color={C.primaryFixedDim} />
+          Relatório de Arquitetura
         </button>
       </div>
 
-      {/* 🎯 KPIs */}
-      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-        <Kpi label="🎯 IMPACT SCORE" value={impactScore.toLocaleString()} sub="arestas de impacto cross-tier" color={C.accent} />
-        <Kpi label="⚠️ RISK LEVEL" value={riskLevel} sub={criticalOpen > 0 ? `${criticalOpen} crítico(s) na triagem` : `health ${cur?.score ?? '—'}/100`} color={riskColor} />
-        <Kpi label="📦 MODULES ANALYZED" value={String(cur?.counts.modules ?? analysis?.modules?.length ?? 0)} sub={prev ? `${(cur!.counts.modules - prev.counts.modules) >= 0 ? '+' : ''}${cur!.counts.modules - prev.counts.modules} vs anterior` : undefined} color={C.green} />
-        <Kpi label="🏗️ ARCHITECTURE DRIFT" value={String(archData?.violations.length ?? 0)} sub={`${archErrors} error · ${archWarns} warn`} color={archErrors > 0 ? C.red : C.green} />
+      {/* KPIs */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <KpiCard label="Impact Score" value={impactScore.toLocaleString()} sub="arestas de impacto cross-tier" color={C.primaryFixedDim} icon="hub" />
+        <KpiCard label="Risk Level" value={riskLevel} sub={criticalOpen > 0 ? `${criticalOpen} crítico(s) na triagem` : `health ${cur?.score ?? '—'}/100`} color={riskColor} icon="warning" />
+        <KpiCard label="Modules Analyzed" value={String(cur?.counts.modules ?? analysis?.modules?.length ?? 0)} sub={prev ? `${(cur!.counts.modules - prev.counts.modules) >= 0 ? '+' : ''}${cur!.counts.modules - prev.counts.modules} vs anterior` : undefined} color={C.secondary} icon="category" />
+        <KpiCard label="Architecture Drift" value={String(archData?.violations.length ?? 0)} sub={`${archErrors} error · ${archWarns} warn`} color={archErrors > 0 ? C.error : C.secondary} icon="difference" />
       </div>
 
-      {/* 📊 Impact Analysis */}
-      <SectionCard title="📊 IMPACT ANALYSIS — tendência de PRs e distribuição de dívida">
+      {/* Impact Analysis */}
+      <SectionCard title="Impact Analysis" icon="analytics">
         {prHistory.length >= 2 ? (
           <>
-            <div style={{ fontSize: '11px', color: C.muted, marginBottom: '4px' }}>Entidades impactadas por PR analisado</div>
+            <div style={{ fontSize: 12, color: C.onSurfaceVariant, marginBottom: 8 }}>Entidades impactadas por PR analisado</div>
             <SvgLineChart
               points={prHistory.map((p, i) => ({ x: i, y: p.totalImpacted, label: `${new Date(p.date).toLocaleDateString('pt-BR')} · ${p.changedFiles} arquivos · ${p.gateFailed ? '❌ gate' : '✅'}` }))}
-              color={C.accent} height={150}
+              color={C.primaryFixedDim} height={150}
             />
           </>
         ) : (
-          <div style={{ fontSize: '12px', color: C.muted, marginBottom: '10px' }}>
-            Tendência aparece após 2+ execuções de <code>tic-analyzer pr-review</code> (CI self-hosted ou local).
+          <div style={{ fontSize: 12, color: C.onSurfaceVariant, marginBottom: 10, padding: '8px 0' }}>
+            Tendência aparece após 2+ execuções de <code style={{ fontFamily: F.code, color: C.primaryFixedDim }}>tic-analyzer pr-review</code> (CI self-hosted ou local).
           </div>
         )}
         {moduleBars.length > 0 && (
-          <div style={{ marginTop: '14px' }}>
-            <div style={{ fontSize: '11px', color: C.muted, marginBottom: '4px' }}>Dívida técnica — maiores focos</div>
-            <SvgBarChart items={moduleBars} color={C.orange} />
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 12, color: C.onSurfaceVariant, marginBottom: 8 }}>Dívida técnica — maiores focos</div>
+            <SvgBarChart items={moduleBars} color={C.tertiaryFixedDim} />
           </div>
         )}
       </SectionCard>
 
-      {/* 🔍 Triage Queue */}
+      {/* Triage Queue */}
       <SectionCard
-        title={`🔍 TRIAGE QUEUE — ${triage.length} item(ns)`}
+        title={`Triage Queue — ${triage.length} item(ns)`}
+        icon="inbox"
         right={
           <select value={triageFilter} onChange={(e) => setTriageFilter(e.target.value)}
-            style={{ padding: '4px 8px', background: '#1a1a3a', border: `1px solid ${C.border}`, borderRadius: '6px', color: '#ccc', fontSize: '11px' }}>
+            style={{ padding: '5px 10px', background: C.surfaceContainerHigh, border: `1px solid ${C.outlineVariant}`,
+              borderRadius: 6, color: C.onSurface, fontSize: 11, fontFamily: F.code, cursor: 'pointer' }}>
             <option value="all">todos os estados</option>
-            {Object.keys(STATE_COLORS).map((s) => <option key={s} value={s}>{s}</option>)}
+            {Object.keys(STATE_META).map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         }>
-        {msg && <div style={{ color: C.red, fontSize: '11px', marginBottom: '8px' }}>{msg}</div>}
+        {msg && <div style={{ color: C.error, fontSize: 12, marginBottom: 8, fontFamily: F.code }}>{msg}</div>}
         {filteredTriage.length === 0 ? (
-          <div style={{ fontSize: '12px', color: C.muted }}>Fila vazia — riscos critical/high e violações de regra entram aqui automaticamente a cada análise.</div>
-        ) : filteredTriage.slice(0, 15).map((t) => (
-          <div key={t.id} style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '8px 0', borderBottom: `1px solid ${C.border}`, fontSize: '12px' }}>
-            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: PRIORITY_COLORS[t.priority] ?? C.muted, flexShrink: 0 }} title={`prioridade ${t.priority}`} />
-            <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '10px', background: t.category === 'bug' ? '#3a1a1a' : '#1a2a3a', color: t.category === 'bug' ? '#ff9a9a' : '#9ad0ff' }}>{t.category}</span>
-            <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '10px', background: '#0d1117', color: STATE_COLORS[t.state] ?? C.muted, border: `1px solid ${STATE_COLORS[t.state] ?? C.border}` }}>{t.state}</span>
-            <span style={{ flex: 1, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.detail ?? t.title}>{t.title}</span>
-            <select value="" onChange={(e) => e.target.value && transition(t.id, e.target.value)}
-              style={{ padding: '3px 6px', background: '#1a1a3a', border: `1px solid ${C.border}`, borderRadius: '6px', color: '#ccc', fontSize: '10px' }}>
-              <option value="">mover para…</option>
-              {(STATE_NEXT[t.state] ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+          <div style={{ fontSize: 13, color: C.onSurfaceVariant, padding: '16px 0', textAlign: 'center' as const }}>
+            <Icon name="check_circle" size={24} color={C.secondary} />
+            <div style={{ marginTop: 8 }}>Fila vazia — riscos critical/high e violações entram aqui automaticamente.</div>
           </div>
-        ))}
-        <div style={{ fontSize: '10px', color: '#555', marginTop: '8px' }}>
-          Máquina de estados da skill <code>triage</code> (mattpocock/skills) — brief de qualquer item via MCP: <code>get_agent_brief(id)</code>
-        </div>
-      </SectionCard>
-
-      {/* 🏗️ Architecture Governance */}
-      <SectionCard title="🏗️ ARCHITECTURE GOVERNANCE — compliance por regra">
-        {!archData || archData.rules.length === 0 ? (
-          <div style={{ fontSize: '12px', color: C.muted }}>
-            Sem <code>.tic-rules.json</code> na raiz do projeto. Exemplo gerado em <code>.tic-code/tic-rules.example.json</code> — copie, ajuste e re-analise.
-          </div>
-        ) : archData.rules.map((r) => {
-          const v = archData.violations.filter((x) => x.ruleId === r.id);
-          return (
-            <div key={r.id} style={{ display: 'flex', gap: '10px', alignItems: 'center', padding: '7px 0', borderBottom: `1px solid ${C.border}`, fontSize: '12px' }}>
-              <span style={{ fontSize: '14px' }}>{v.length === 0 ? '✅' : '❌'}</span>
-              <code style={{ color: C.accent, width: '160px', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.id}</code>
-              <span style={{ color: r.severity === 'error' ? C.red : C.orange, width: '44px', fontSize: '10px' }}>{r.severity}</span>
-              <span style={{ flex: 1, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.description ?? ''}</span>
-              <span style={{ color: v.length > 0 ? C.red : C.green, fontWeight: 600 }}>{v.length === 0 ? 'compliant' : `${v.length} violação(ões)`}</span>
-            </div>
-          );
-        })}
-      </SectionCard>
-
-      {/* 🔗 GitHub / CI */}
-      <SectionCard title="🔗 GITHUB / CI — a Action está rodando?">
-        {!gh ? (
-          <div style={{ fontSize: '12px', color: C.muted }}>Verificando…</div>
         ) : (
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-              {gh.installed ? (
-                <span style={{ color: C.green, fontWeight: 600, fontSize: '13px' }}>✅ Action configurada</span>
-              ) : (
-                <span style={{ color: C.orange, fontWeight: 600, fontSize: '13px' }}>⚠️ Action não detectada neste projeto</span>
+            {/* Table header */}
+            <div style={{ display: 'grid', gridTemplateColumns: '24px 80px 100px 1fr 110px',
+              gap: 8, padding: '6px 8px', fontSize: 10, fontFamily: F.code, letterSpacing: '0.06em',
+              color: C.onSurfaceVariant, borderBottom: `1px solid ${C.outlineVariant}` }}>
+              <span></span><span>TIPO</span><span>ESTADO</span><span>TÍTULO</span><span>AÇÃO</span>
+            </div>
+            {filteredTriage.slice(0, 15).map((t) => {
+              const pMeta = PRIORITY_META[t.priority] ?? { color: C.onSurfaceVariant, label: t.priority };
+              const sMeta = STATE_META[t.state] ?? { color: C.onSurfaceVariant, bg: C.surfaceContainerHighest };
+              return (
+                <div key={t.id} style={{ display: 'grid', gridTemplateColumns: '24px 80px 100px 1fr 110px',
+                  gap: 8, alignItems: 'center', padding: '10px 8px',
+                  borderBottom: `1px solid ${C.outlineVariant}40`, fontSize: 12 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: pMeta.color,
+                    display: 'inline-block' }} title={t.priority} />
+                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontFamily: F.code, fontWeight: 700,
+                    background: t.category === 'bug' ? `${C.error}20` : `${C.primaryFixedDim}20`,
+                    color: t.category === 'bug' ? C.error : C.primaryFixedDim,
+                    border: `1px solid ${t.category === 'bug' ? C.error : C.primaryFixedDim}40` }}>
+                    {t.category.toUpperCase()}
+                  </span>
+                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontFamily: F.code, fontWeight: 700,
+                    background: sMeta.bg, color: sMeta.color, border: `1px solid ${sMeta.color}40` }}>
+                    {t.state.toUpperCase().replace(/-/g, '_')}
+                  </span>
+                  <span style={{ color: C.onSurface, overflow: 'hidden', textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap', fontFamily: F.body }} title={t.detail ?? t.title}>{t.title}</span>
+                  <select value="" onChange={(e) => e.target.value && transition(t.id, e.target.value)}
+                    style={{ padding: '4px 8px', background: C.surfaceContainerHigh, border: `1px solid ${C.outlineVariant}`,
+                      borderRadius: 6, color: C.onSurface, fontSize: 10, fontFamily: F.code, cursor: 'pointer' }}>
+                    <option value="">mover para…</option>
+                    {(STATE_NEXT[t.state] ?? []).map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              );
+            })}
+            <div style={{ fontSize: 11, color: C.onSurfaceVariant, fontFamily: F.code, marginTop: 10, padding: '8px 0' }}>
+              Skill <code style={{ color: C.primaryFixedDim }}>triage</code> — brief via MCP: <code style={{ color: C.primaryFixedDim }}>get_agent_brief(id)</code>
+            </div>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* Architecture Governance */}
+      <SectionCard title="Architecture Governance" icon="account_balance">
+        {!archData || archData.rules.length === 0 ? (
+          <div style={{ fontSize: 13, color: C.onSurfaceVariant, padding: '12px 0' }}>
+            Sem <code style={{ fontFamily: F.code, color: C.primaryFixedDim }}>.tic-rules.json</code> na raiz do projeto.
+            Exemplo em <code style={{ fontFamily: F.code, color: C.onSurfaceVariant }}>.tic-code/tic-rules.example.json</code>.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {archData.rules.map((r) => {
+              const v = archData.violations.filter((x) => x.ruleId === r.id);
+              const ok = v.length === 0;
+              return (
+                <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+                  background: C.surfaceContainer, border: `1px solid ${C.outlineVariant}40`, borderRadius: 8,
+                  borderLeft: `2px solid ${ok ? C.secondary : r.severity === 'error' ? C.error : C.tertiaryFixedDim}` }}>
+                  <Icon name={ok ? 'check_circle' : 'cancel'} size={16} color={ok ? C.secondary : C.error} fill={1} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontFamily: F.code, color: C.primaryFixedDim,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.id}</div>
+                    {r.description && <div style={{ fontSize: 11, color: C.onSurfaceVariant, marginTop: 2,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.description}</div>}
+                  </div>
+                  <span style={{ fontSize: 11, fontFamily: F.code, fontWeight: 700, flexShrink: 0,
+                    color: ok ? C.secondary : C.error }}>
+                    {ok ? 'compliant' : `${v.length} violação(ões)`}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SectionCard>
+
+      {/* GitHub / CI */}
+      <SectionCard title="GitHub / CI" icon="merge">
+        {!gh ? (
+          <div style={{ fontSize: 13, color: C.onSurfaceVariant }}>Verificando…</div>
+        ) : (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, fontSize: 13,
+                color: gh.installed ? C.secondary : C.tertiaryFixedDim }}>
+                <Icon name={gh.installed ? 'check_circle' : 'warning'} size={16} color={gh.installed ? C.secondary : C.tertiaryFixedDim} fill={1} />
+                {gh.installed ? 'Action configurada' : 'Action não detectada'}
+              </span>
+              {gh.installed && gh.workflowFile && (
+                <code style={{ fontSize: 11, color: C.onSurfaceVariant, fontFamily: F.code }}>{gh.workflowFile}</code>
               )}
-              {gh.installed && gh.workflowFile && <code style={{ fontSize: '11px', color: C.muted }}>{gh.workflowFile}</code>}
               {!gh.installed && (
                 <button onClick={installWorkflow}
-                  style={{ padding: '5px 12px', background: C.accent, border: 'none', borderRadius: '6px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '11px' }}>
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+                    background: C.primaryFixedDim, border: 'none', borderRadius: 6,
+                    color: '#00363a', cursor: 'pointer', fontWeight: 700, fontSize: 12, fontFamily: F.code }}>
+                  <Icon name="download" size={14} color="#00363a" />
                   Instalar workflow
                 </button>
               )}
             </div>
-            {!gh.hasGit && <div style={{ fontSize: '11px', color: C.orange, marginBottom: '6px' }}>Este projeto não é um repositório git.</div>}
-            {ghMsg && <div style={{ fontSize: '11px', color: ghMsg.startsWith('Erro') ? C.red : C.green, marginBottom: '6px' }}>{ghMsg}</div>}
-            <div style={{ fontSize: '11px', color: C.muted }}>
+            {!gh.hasGit && <div style={{ fontSize: 12, color: C.tertiaryFixedDim, marginBottom: 6, fontFamily: F.body }}>Este projeto não é um repositório git.</div>}
+            {ghMsg && <div style={{ fontSize: 12, marginBottom: 6, color: ghMsg.startsWith('Erro') ? C.error : C.secondary, fontFamily: F.body }}>{ghMsg}</div>}
+            <div style={{ fontSize: 12, color: C.onSurfaceVariant, fontFamily: F.body }}>
               {gh.installed
-                ? 'A cada PR, a Action analisa as mudanças e comenta impacto/riscos/health. Os PRs revisados aparecem abaixo.'
-                : 'Sem a Action, os PRs não são revisados automaticamente. Instale o workflow, faça commit/push, e abra um PR — a primeira revisão aparecerá abaixo.'}
+                ? 'A cada PR, a Action analisa as mudanças e comenta impacto/riscos/health.'
+                : 'Instale o workflow, faça commit/push, e abra um PR — a primeira revisão aparecerá abaixo.'}
             </div>
           </div>
         )}
       </SectionCard>
 
-      {/* 📈 PRs analisados pela Action */}
-      <SectionCard title="📈 PRs ANALISADOS PELA ACTION — cada linha = um PR revisado">
+      {/* PR History */}
+      <SectionCard title={`PRs Analisados pela Action — ${prHistory.length} PR(s)`} icon="rate_review">
         {prHistory.length === 0 ? (
-          <div style={{ fontSize: '12px', color: C.muted }}>
-            Nenhum PR analisado ainda. Quando a Action rodar no 1º PR (ou você usar <code>tic-analyzer pr-review</code> localmente), o histórico aparece aqui.
+          <div style={{ fontSize: 13, color: C.onSurfaceVariant, padding: '16px 0', textAlign: 'center' as const }}>
+            <Icon name="hourglass_empty" size={24} color={C.outline} />
+            <div style={{ marginTop: 8 }}>Nenhum PR analisado ainda. Use <code style={{ fontFamily: F.code, color: C.primaryFixedDim }}>tic-analyzer pr-review</code> ou a Action no CI.</div>
           </div>
         ) : (
-          <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ color: C.muted, textAlign: 'left' }}>
-                <th style={{ padding: '4px' }}>Data</th><th>Arquivos</th><th>Blast radius</th><th>Riscos novos</th><th>Drift novo</th><th>Δ Health</th><th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...prHistory].reverse().slice(0, 10).map((p, i) => (
-                <tr key={i} style={{ borderTop: `1px solid ${C.border}` }}>
-                  <td style={{ padding: '6px 4px', color: C.muted }}>{new Date(p.date).toLocaleString('pt-BR')}</td>
-                  <td>{p.changedFiles}</td>
-                  <td style={{ color: C.accent, fontWeight: 600 }}>{p.totalImpacted}</td>
-                  <td style={{ color: p.newRisks > 0 ? C.red : C.muted }}>{p.newRisks}</td>
-                  <td style={{ color: p.newRuleViolations > 0 ? C.red : C.muted }}>{p.newRuleViolations}</td>
-                  <td style={{ color: (p.healthDelta ?? 0) < 0 ? C.red : C.green }}>{p.healthDelta !== null ? `${p.healthDelta >= 0 ? '+' : ''}${p.healthDelta}` : '—'}</td>
-                  <td>{p.gateFailed ? '❌ gate' : '✅ ok'}</td>
+          <div style={{ overflowX: 'auto' as const }}>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', fontFamily: F.body }}>
+              <thead>
+                <tr style={{ color: C.onSurfaceVariant, textAlign: 'left' as const, fontSize: 10,
+                  fontFamily: F.code, letterSpacing: '0.06em', borderBottom: `1px solid ${C.outlineVariant}` }}>
+                  <th style={{ padding: '6px 8px' }}>DATA</th>
+                  <th style={{ padding: '6px 8px' }}>ARQUIVOS</th>
+                  <th style={{ padding: '6px 8px' }}>BLAST RADIUS</th>
+                  <th style={{ padding: '6px 8px' }}>RISCOS NOVOS</th>
+                  <th style={{ padding: '6px 8px' }}>DRIFT NOVO</th>
+                  <th style={{ padding: '6px 8px' }}>Δ HEALTH</th>
+                  <th style={{ padding: '6px 8px' }}>STATUS</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {[...prHistory].reverse().slice(0, 10).map((p, i) => (
+                  <tr key={i} style={{ borderBottom: `1px solid ${C.outlineVariant}40` }}>
+                    <td style={{ padding: '10px 8px', color: C.onSurfaceVariant, fontFamily: F.code, fontSize: 11 }}>
+                      {new Date(p.date).toLocaleString('pt-BR')}
+                    </td>
+                    <td style={{ padding: '10px 8px' }}>{p.changedFiles}</td>
+                    <td style={{ padding: '10px 8px', color: C.primaryFixedDim, fontWeight: 600, fontFamily: F.code }}>{p.totalImpacted}</td>
+                    <td style={{ padding: '10px 8px', color: p.newRisks > 0 ? C.error : C.onSurfaceVariant }}>{p.newRisks}</td>
+                    <td style={{ padding: '10px 8px', color: p.newRuleViolations > 0 ? C.error : C.onSurfaceVariant }}>{p.newRuleViolations}</td>
+                    <td style={{ padding: '10px 8px', color: (p.healthDelta ?? 0) < 0 ? C.error : C.secondary, fontFamily: F.code }}>
+                      {p.healthDelta !== null ? `${p.healthDelta >= 0 ? '+' : ''}${p.healthDelta}` : '—'}
+                    </td>
+                    <td style={{ padding: '10px 8px' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontFamily: F.code,
+                        fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+                        background: p.gateFailed ? `${C.error}20` : `${C.secondary}20`,
+                        color: p.gateFailed ? C.error : C.secondary,
+                        border: `1px solid ${p.gateFailed ? C.error : C.secondary}40` }}>
+                        <Icon name={p.gateFailed ? 'cancel' : 'check_circle'} size={12} color={p.gateFailed ? C.error : C.secondary} fill={1} />
+                        {p.gateFailed ? 'GATE FAILED' : 'OK'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </SectionCard>
     </div>
