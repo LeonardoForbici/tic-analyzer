@@ -45,20 +45,22 @@ function Icon({ name, size = 20, color, fill = 0 }: { name: string; size?: numbe
 const DIM_META: Record<string, {
   label: string; icon: string; color: string;
   goodStatus: string; midStatus: string; badStatus: string;
-  weight: string;
+  weight: string; desc: string;
   itemsOf: (cur: Snapshot, resolutionPct: number) => Array<[string, string]>;
 }> = {
   debt: {
     label: 'Dívida', icon: 'account_balance_wallet', color: C.tertiaryFixedDim,
-    goodStatus: 'HEALTHY', midStatus: 'ATTENTION', badStatus: 'CRITICAL', weight: '25%',
+    goodStatus: 'SAUDÁVEL', midStatus: 'ATENÇÃO', badStatus: 'CRÍTICO', weight: '25%',
+    desc: 'Arquivos com código muito complexo — custam caro para manter e têm mais bugs.',
     itemsOf: (cur) => [
-      ['Complexidade Alta', `${cur.counts.hotspots} hotspots`],
+      ['Complexidade Alta', `${cur.counts.hotspots} arquivos`],
       ['Violações', `${cur.counts.violations} itens`],
     ],
   },
   risks: {
     label: 'Risco', icon: 'gpp_maybe', color: C.primaryFixedDim,
-    goodStatus: 'HEALTHY', midStatus: 'ATTENTION', badStatus: 'CRITICAL', weight: '30%',
+    goodStatus: 'SAUDÁVEL', midStatus: 'ATENÇÃO', badStatus: 'CRÍTICO', weight: '30%',
+    desc: 'Arquivos que mudam muito E são complexos ao mesmo tempo — os mais propensos a quebrar.',
     itemsOf: (cur) => [
       ['Riscos detectados', `${cur.counts.risks} itens`],
       ['Endpoints expostos', `${cur.counts.endpoints} endpoints`],
@@ -66,15 +68,17 @@ const DIM_META: Record<string, {
   },
   violations: {
     label: 'Drift', icon: 'compare_arrows', color: C.secondary,
-    goodStatus: 'STABLE', midStatus: 'MONITOR', badStatus: 'CRITICAL', weight: '15%',
+    goodStatus: 'ESTÁVEL', midStatus: 'MONITOR', badStatus: 'CRÍTICO', weight: '15%',
+    desc: 'O projeto está seguindo as regras de organização definidas? Drift = desvio da arquitetura planejada.',
     itemsOf: (cur) => [
-      ['Violações de arquitetura', `${cur.counts.violations} itens`],
+      ['Regras quebradas', `${cur.counts.violations} itens`],
       ['Módulos analisados', `${cur.counts.modules} módulos`],
     ],
   },
   deadCode: {
     label: 'Código Morto', icon: 'delete_sweep', color: C.primaryFixed,
-    goodStatus: 'OPTIMIZED', midStatus: 'MONITOR', badStatus: 'CRITICAL', weight: '10%',
+    goodStatus: 'OTIMIZADO', midStatus: 'MONITOR', badStatus: 'CRÍTICO', weight: '10%',
+    desc: 'Código que existe mas nunca é usado — deixa o projeto mais lento e confuso.',
     itemsOf: (cur) => [
       ['Componentes não usados', `${cur.counts.deadComponents} itens`],
       ['PL/SQL morto', `${cur.counts.deadPlsql} itens`],
@@ -82,18 +86,20 @@ const DIM_META: Record<string, {
   },
   coupling: {
     label: 'Acoplamento', icon: 'link', color: C.tertiaryFixedDim,
-    goodStatus: 'HEALTHY', midStatus: 'ATTENTION', badStatus: 'CRITICAL', weight: '15%',
+    goodStatus: 'SAUDÁVEL', midStatus: 'ATENÇÃO', badStatus: 'CRÍTICO', weight: '15%',
+    desc: 'Arquivos que dependem de muitos outros — uma mudança pode quebrar várias partes.',
     itemsOf: (cur) => [
-      ['Hotspots de acoplamento', `${cur.counts.hotspots} nós`],
-      ['Arestas de impacto', `${cur.counts.impactEdges.toLocaleString()} arestas`],
+      ['Arquivos muito conectados', `${cur.counts.hotspots} arquivos`],
+      ['Conexões rastreadas', `${cur.counts.impactEdges.toLocaleString()}`],
     ],
   },
   resolution: {
     label: 'Heurísticas', icon: 'psychology', color: C.secondary,
-    goodStatus: 'STABLE', midStatus: 'MONITOR', badStatus: 'CRITICAL', weight: '5%',
+    goodStatus: 'ESTÁVEL', midStatus: 'MONITOR', badStatus: 'CRÍTICO', weight: '5%',
+    desc: 'O quanto o analisador entendeu a estrutura do código. Quanto maior, mais precisa a análise.',
     itemsOf: (_cur, res) => [
-      ['Resolução AST', `${res}% compliance`],
-      ['Dependências totais', `${_cur.counts.totalEdges.toLocaleString()} arestas`],
+      ['Compreensão do código', `${res}%`],
+      ['Dependências mapeadas', `${_cur.counts.totalEdges.toLocaleString()}`],
     ],
   },
 };
@@ -140,6 +146,7 @@ export function HealthDashboard({ ticCodeDir }: { ticCodeDir: string }) {
   const [snaps, setSnaps] = useState<Snapshot[] | null>(null);
   const [roi, setRoi] = useState<{ devDays?: number; hoursSaved?: number; debtCost?: number; savedCost?: number; currency?: string } | null>(null);
   const [error, setError] = useState('');
+  const [selectedRisk, setSelectedRisk] = useState<'critical' | 'medium' | 'low' | null>(null);
 
   useEffect(() => {
     const load = () => {
@@ -364,12 +371,9 @@ export function HealthDashboard({ ticCodeDir }: { ticCodeDir: string }) {
             <div key={dim} style={{
               background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`,
               borderTop: `2px solid ${meta.color}`, borderRadius: 12, padding: 20,
-              cursor: 'pointer', transition: 'background 0.15s',
-            }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceContainer)}
-              onMouseLeave={(e) => (e.currentTarget.style.background = C.surfaceContainerLow)}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+              transition: 'background 0.15s',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
                 <h4 style={{ fontSize: 14, fontWeight: 600, fontFamily: F.code, color: C.onSurface, margin: 0,
                   display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Icon name={meta.icon} size={18} color={meta.color} />
@@ -379,11 +383,14 @@ export function HealthDashboard({ ticCodeDir }: { ticCodeDir: string }) {
                   {dimScore}
                 </span>
               </div>
+              <p style={{ fontSize: 11, color: C.onSurfaceVariant, margin: '0 0 10px', fontFamily: F.body, lineHeight: 1.4 }}>
+                {meta.desc}
+              </p>
               <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
                 <span style={{ fontSize: 10, fontFamily: F.code, letterSpacing: '0.08em', fontWeight: 700,
                   color: C.onSurfaceVariant, background: C.surfaceContainerHighest,
                   padding: '2px 7px', borderRadius: 4 }}>
-                  PESO: {meta.weight}
+                  Importância: {meta.weight}
                 </span>
                 <span style={{ fontSize: 10, fontFamily: F.code, letterSpacing: '0.08em', fontWeight: 700,
                   color: statusColor, background: `${statusColor}18`,
@@ -415,9 +422,9 @@ export function HealthDashboard({ ticCodeDir }: { ticCodeDir: string }) {
           const medium = Math.ceil(total * 0.3);
           const low = total - critical - medium;
           return [
-            ...Array.from({ length: Math.min(critical, 3) }, (_, i) => ({ risk: 'critical', span: i === 0 ? 2 : 1, rowSpan: i === 0 ? 2 : 1, label: i === 0 ? `${critical} critical hotspots` : '' })),
-            ...Array.from({ length: Math.min(medium, 4) }, (_, i) => ({ risk: 'medium', span: i === 0 ? 2 : 1, rowSpan: 1, label: i === 0 ? `${medium} medium` : '' })),
-            ...Array.from({ length: Math.min(low, 6) }, (_, i) => ({ risk: 'low', span: 1, rowSpan: i === 0 ? 3 : 1, label: i === 0 ? `${low} low` : '' })),
+            ...Array.from({ length: Math.min(critical, 3) }, (_, i) => ({ risk: 'critical', span: i === 0 ? 2 : 1, rowSpan: i === 0 ? 2 : 1, label: i === 0 ? `${critical} hotspots críticos` : '' })),
+            ...Array.from({ length: Math.min(medium, 4) }, (_, i) => ({ risk: 'medium', span: i === 0 ? 2 : 1, rowSpan: 1, label: i === 0 ? `${medium} médios` : '' })),
+            ...Array.from({ length: Math.min(low, 6) }, (_, i) => ({ risk: 'low', span: 1, rowSpan: i === 0 ? 3 : 1, label: i === 0 ? `${low} baixo risco` : '' })),
           ];
         })();
         return (
@@ -430,7 +437,7 @@ export function HealthDashboard({ ticCodeDir }: { ticCodeDir: string }) {
                   Mapa de Hotspots
                 </h3>
                 <p style={{ fontSize: 12, color: C.onSurfaceVariant, margin: '4px 0 0' }}>
-                  Arquivos com alta taxa de alteração (Churn) × alta Complexidade.
+                  Arquivos com alta taxa de alteração (Churn) × alta Complexidade. <strong style={{ color: C.onSurface }}>Clique num bloco</strong> para ver a contagem por categoria.
                 </p>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, fontFamily: F.code, color: C.onSurfaceVariant, letterSpacing: '0.06em' }}>
@@ -451,6 +458,7 @@ export function HealthDashboard({ ticCodeDir }: { ticCodeDir: string }) {
                     gridColumn: `span ${b.span}`, gridRow: `span ${b.rowSpan}`,
                     padding: 6, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
                     cursor: 'pointer', transition: 'filter 0.15s', overflow: 'hidden' }}
+                    onClick={() => setSelectedRisk(prev => prev === b.risk ? null : b.risk as 'critical' | 'medium' | 'low')}
                     onMouseEnter={(e) => (e.currentTarget.style.filter = 'brightness(1.3)')}
                     onMouseLeave={(e) => (e.currentTarget.style.filter = 'none')}>
                     {b.label && (
@@ -458,12 +466,30 @@ export function HealthDashboard({ ticCodeDir }: { ticCodeDir: string }) {
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{b.label}</span>
                     )}
                     {b.risk === 'critical' && b.span > 1 && (
-                      <span style={{ fontSize: 9, fontFamily: F.code, color: C.error, letterSpacing: '0.06em', fontWeight: 700 }}>CRITICAL</span>
+                      <span style={{ fontSize: 9, fontFamily: F.code, color: C.error, letterSpacing: '0.06em', fontWeight: 700 }}>CRÍTICO</span>
                     )}
                   </div>
                 );
               })}
             </div>
+            {selectedRisk && (() => {
+              const count = selectedRisk === 'critical' ? Math.ceil(cur.counts.hotspots * 0.2)
+                : selectedRisk === 'medium' ? Math.ceil(cur.counts.hotspots * 0.3)
+                : cur.counts.hotspots - Math.ceil(cur.counts.hotspots * 0.2) - Math.ceil(cur.counts.hotspots * 0.3);
+              const color = selectedRisk === 'critical' ? C.error : selectedRisk === 'medium' ? C.tertiaryFixedDim : C.outline;
+              const label = selectedRisk === 'critical' ? 'Críticos' : selectedRisk === 'medium' ? 'Médios' : 'Baixo Risco';
+              return (
+                <div style={{ marginTop: 12, padding: '12px 16px', background: `${color}14`, border: `1px solid ${color}40`, borderRadius: 8, fontSize: 13, fontFamily: F.body }}>
+                  <span style={{ color, fontWeight: 700 }}>{count} arquivo(s) — {label}</span>
+                  <span style={{ color: C.onSurfaceVariant, marginLeft: 12 }}>
+                    {selectedRisk === 'critical' ? 'Mudam frequentemente E têm código complexo. São os mais urgentes para refatorar.' :
+                     selectedRisk === 'medium' ? 'Risco moderado — monitorar nas próximas sprints.' :
+                     'Risco baixo — complexidade ou churn acima da média, mas ainda gerenciável.'}
+                  </span>
+                  <span style={{ color: C.outline, marginLeft: 8, fontSize: 11 }}>— veja os arquivos na aba Explorador.</span>
+                </div>
+              );
+            })()}
           </div>
         );
       })()}

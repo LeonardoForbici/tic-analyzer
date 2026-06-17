@@ -1033,18 +1033,18 @@ function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onO
   const scoreColor = score >= 75 ? C.secondary : score >= 60 ? C.tertiaryFixedDim : C.error;
 
   const spiderDims = [
-    { label: 'Debt', value: Math.max(0, 100 - result.hotspots * 2), color: C.tertiaryFixedDim },
-    { label: 'Risk', value: Math.max(0, 100 - (result.violations ?? 0) * 5), color: C.primaryFixedDim },
+    { label: 'Dívida', value: Math.max(0, 100 - result.hotspots * 2), color: C.tertiaryFixedDim },
+    { label: 'Risco', value: Math.max(0, 100 - (result.violations ?? 0) * 5), color: C.primaryFixedDim },
     { label: 'Drift', value: Math.max(0, 100 - (result.violations ?? 0) * 3), color: C.secondary },
-    { label: 'Dead Code', value: Math.max(0, 100 - (result.deadComponents ?? 0) * 10), color: C.primaryFixed },
-    { label: 'Coupling', value: Math.max(0, 100 - result.hotspots), color: C.tertiaryFixedDim },
-    { label: 'Heuristics', value: Math.min(100, (result.patterns ?? 0) * 5 + 60), color: C.secondary },
+    { label: 'Código Morto', value: Math.max(0, 100 - (result.deadComponents ?? 0) * 10), color: C.primaryFixed },
+    { label: 'Acoplamento', value: Math.max(0, 100 - result.hotspots), color: C.tertiaryFixedDim },
+    { label: 'Heurísticas', value: Math.min(100, (result.patterns ?? 0) * 5 + 60), color: C.secondary },
   ];
 
   const sideStats = [
-    { label: 'Architecture Drifts', value: String(result.violations ?? 0), color: C.tertiaryFixed, icon: 'route', borderColor: `${C.tertiaryFixed}50` },
-    { label: 'Critical Risks', value: String(result.hotspots), color: C.error, icon: 'warning', borderColor: `${C.error}80`, bg: `${C.error}08` },
-    { label: 'Impact Edges', value: (result.impactEdges ?? 0).toLocaleString(), color: C.primaryFixedDim, icon: 'hub', borderColor: `${C.primaryFixedDim}30` },
+    { label: 'Violações de Arquitetura', desc: 'Regras do .tic-rules.json que foram quebradas pelo projeto', value: String(result.violations ?? 0), color: C.tertiaryFixed, icon: 'route', borderColor: `${C.tertiaryFixed}50` },
+    { label: 'Arquivos de Alto Risco', desc: 'Alta complexidade + muitas alterações no git (hotspots)', value: String(result.hotspots), color: C.error, icon: 'warning', borderColor: `${C.error}80`, bg: `${C.error}08` },
+    { label: 'Conexões entre Arquivos', desc: 'Total de dependências rastreadas no grafo de impacto', value: (result.impactEdges ?? 0).toLocaleString(), color: C.primaryFixedDim, icon: 'hub', borderColor: `${C.primaryFixedDim}30` },
   ];
 
   const recentEvents = [...liveEvents].reverse().slice(0, 8);
@@ -1095,7 +1095,7 @@ function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onO
             pointerEvents: 'none' }} />
           <div style={{ flex: 1, zIndex: 1 }}>
             <span style={{ fontFamily: F.code, fontSize: 10, color: C.outline, letterSpacing: '0.1em',
-              textTransform: 'uppercase' as const, display: 'block', marginBottom: 8 }}>System Health Index</span>
+              textTransform: 'uppercase' as const, display: 'block', marginBottom: 8 }}>Saúde do Projeto</span>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
               <span style={{ fontSize: 80, lineHeight: 1, fontWeight: 700, fontFamily: F.headline, color: scoreColor,
                 filter: `drop-shadow(0 0 15px ${scoreColor}50)` }}>{grade}</span>
@@ -1109,8 +1109,25 @@ function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onO
                   : 'Estado crítico. Priorize remediação de riscos e violações.'}
             </p>
           </div>
-          <div style={{ width: 220, height: 220, flexShrink: 0, position: 'relative', zIndex: 1 }}>
-            <SpiderChart dims={spiderDims} />
+          <div style={{ flexShrink: 0, position: 'relative', zIndex: 1 }}>
+            <div style={{ width: 220, height: 220 }}>
+              <SpiderChart dims={spiderDims} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 12px', marginTop: 8 }}>
+              {[
+                { label: 'Dívida Técnica', desc: 'complexidade dos arquivos', color: C.tertiaryFixedDim },
+                { label: 'Risco', desc: 'hotspots churn × complexidade', color: C.primaryFixedDim },
+                { label: 'Drift', desc: 'violações de arquitetura', color: C.secondary },
+                { label: 'Código Morto', desc: 'componentes sem uso', color: C.primaryFixed },
+                { label: 'Acoplamento', desc: 'dependências excessivas', color: C.tertiaryFixedDim },
+                { label: 'Heurísticas', desc: 'padrões arquiteturais bons', color: C.secondary },
+              ].map((d) => (
+                <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: d.color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 9, fontFamily: F.code, color: C.onSurfaceVariant, lineHeight: 1.3 }} title={d.desc}>{d.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1121,12 +1138,14 @@ function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onO
               borderRadius: 8, padding: '14px 16px',
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', flex: 1,
               cursor: 'pointer', transition: 'background 0.15s' }}
+              title={'desc' in s ? (s as any).desc : undefined}
               onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceContainerHigh)}
               onMouseLeave={(e) => (e.currentTarget.style.background = s.bg ?? C.surfaceContainer)}>
               <div>
                 <span style={{ fontFamily: F.code, fontSize: 10, color: s.color, letterSpacing: '0.08em',
                   textTransform: 'uppercase' as const, display: 'block', marginBottom: 4 }}>{s.label}</span>
                 <span style={{ fontFamily: F.headline, fontSize: 20, fontWeight: 700, color: s.color }}>{s.value}</span>
+                {'desc' in s && <span style={{ fontSize: 11, color: C.onSurfaceVariant, display: 'block', marginTop: 4, lineHeight: 1.4 }}>{(s as any).desc}</span>}
               </div>
               <div style={{ width: 40, height: 40, borderRadius: 8, border: `1px solid ${s.color}40`,
                 background: `${s.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1143,7 +1162,7 @@ function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onO
         <div style={{ background: C.surface, border: `1px solid ${C.outlineVariant}`, borderRadius: 8, overflow: 'hidden' }}>
           <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.outlineVariant}`,
             display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontFamily: F.code, fontSize: 13, color: C.onSurface }}>Recent Analysis Gates</span>
+            <span style={{ fontFamily: F.code, fontSize: 13, color: C.onSurface }}>Histórico de PRs Analisados</span>
           </div>
           {prHistory.length === 0 ? (
             <div style={{ padding: '24px 16px', fontFamily: F.body, fontSize: 13, color: C.onSurfaceVariant, textAlign: 'center' as const }}>
@@ -1151,7 +1170,7 @@ function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onO
             </div>
           ) : (
             prHistory.slice(0, 4).map((p, i) => {
-              const status = p.gateFailed ? 'REJECTED' : (p.newRisks > 0 || p.newRuleViolations > 0) ? 'WARNING' : 'PASSED';
+              const status = p.gateFailed ? 'REPROVADO' : (p.newRisks > 0 || p.newRuleViolations > 0) ? 'ATENÇÃO' : 'APROVADO';
               const statusColor = status === 'REJECTED' ? C.error : status === 'WARNING' ? C.tertiaryFixed : C.secondary;
               const impactBars = Math.min(4, Math.ceil(p.totalImpacted / 5));
               return (
@@ -1170,12 +1189,12 @@ function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onO
                         {new Date(p.date).toLocaleDateString('pt-BR')} · {p.changedFiles} arquivos
                       </div>
                       <div style={{ fontFamily: F.body, fontSize: 12, color: C.onSurfaceVariant, marginTop: 1 }}>
-                        {p.newRisks > 0 ? `+${p.newRisks} riscos · ` : ''}{p.totalImpacted} entidades impactadas
+                        {p.newRisks > 0 ? `+${p.newRisks} riscos · ` : ''}{p.totalImpacted} arquivos afetados em cadeia
                       </div>
                     </div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                    <span style={{ fontFamily: F.code, fontSize: 10, color: C.outline, letterSpacing: '0.06em' }}>BLAST RADIUS</span>
+                    <span style={{ fontFamily: F.code, fontSize: 10, color: C.outline, letterSpacing: '0.06em' }} title="Quantos arquivos podem ser afetados por este PR em cadeia">RAIO DE IMPACTO</span>
                     <div style={{ display: 'flex', gap: 3 }}>
                       {[0,1,2,3].map((j) => (
                         <div key={j} style={{ width: 14, height: 14, background: j < impactBars ? statusColor : C.surfaceVariant, borderRadius: 2 }} />
@@ -1193,7 +1212,7 @@ function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onO
           borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden', height: 300 }}>
           <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.outlineVariant}`,
             background: C.surface, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontFamily: F.code, fontSize: 13, color: C.onSurface }}>Live Telemetry</span>
+            <span style={{ fontFamily: F.code, fontSize: 13, color: C.onSurface }}>Log em Tempo Real</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: F.code, fontSize: 11,
               color: C.secondary }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.secondary,
