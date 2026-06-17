@@ -1113,18 +1113,18 @@ function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onO
             <div style={{ width: 220, height: 220 }}>
               <SpiderChart dims={spiderDims} />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 12px', marginTop: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 8, width: 220 }}>
               {[
                 { label: 'Dívida Técnica', desc: 'complexidade dos arquivos', color: C.tertiaryFixedDim },
                 { label: 'Risco', desc: 'hotspots churn × complexidade', color: C.primaryFixedDim },
                 { label: 'Drift', desc: 'violações de arquitetura', color: C.secondary },
                 { label: 'Código Morto', desc: 'componentes sem uso', color: C.primaryFixed },
                 { label: 'Acoplamento', desc: 'dependências excessivas', color: C.tertiaryFixedDim },
-                { label: 'Heurísticas', desc: 'padrões arquiteturais bons', color: C.secondary },
+                { label: 'Heurísticas', desc: 'padrões arquiteturais', color: C.secondary },
               ].map((d) => (
-                <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: d.color, flexShrink: 0 }} />
-                  <span style={{ fontSize: 9, fontFamily: F.code, color: C.onSurfaceVariant, lineHeight: 1.3 }} title={d.desc}>{d.label}</span>
+                <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: d.color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 10, fontFamily: F.code, color: C.onSurfaceVariant, lineHeight: 1.3, whiteSpace: 'nowrap' }} title={d.desc}>{d.label}</span>
                 </div>
               ))}
             </div>
@@ -1540,10 +1540,8 @@ export function App() {
                 </div>
               )}
 
-              {activeTab === 'http' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
-                  <HttpFlowsViewer projectPath={projectPath} />
-                </div>
+              {activeTab === 'http' && projectPath && (
+                <HttpFlowsViewer projectPath={projectPath} />
               )}
 
               {activeTab === 'impact' && (
@@ -1596,9 +1594,6 @@ export function App() {
                     </button>
                   </div>
                 </div>
-              )}
-              {activeTab === 'http' && projectPath && (
-                <HttpFlowsViewer projectPath={projectPath} />
               )}
             </>
           )}
