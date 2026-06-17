@@ -9,7 +9,7 @@ import { queryGraphLevel } from '../src/analyzer/store/graphQueries';
 import { querySearch, queryVectorSearch, embeddingsCount, fuseRRF } from '../src/mcp/queries';
 import { getEmbedder } from '../src/analyzer/semantic/embeddings';
 import { transitionTriageItem, createManualItem, type TriageState, type TriageCategory, type TriagePriority } from '../src/analyzer/store/triageStore';
-import { renderArchReviewHtml, loadArchRules } from '../src/analyzer/checkArchRules';
+import { renderArchReviewHtml, loadArchRules, rulesTemplate } from '../src/analyzer/checkArchRules';
 import { loadActivity } from '../src/analyzer/store/activityLog';
 import { dispatchAlerts } from '../src/analyzer/notify';
 import { renderExecutiveHtml, buildExecReportData } from '../src/analyzer/generateExecutiveReport';
@@ -194,6 +194,18 @@ ipcMain.handle('install-github-workflow', async (_event, projectPath: string) =>
     fs.mkdirSync(wfDir, { recursive: true });
     fs.writeFileSync(target, TIC_WORKFLOW, 'utf8');
     return { ok: true, existed: false, path: '.github/workflows/tic-review.yml' };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle('create-tic-rules', async (_event, projectPath: string) => {
+  const fs = await import('fs');
+  try {
+    const target = path.join(projectPath, '.tic-rules.json');
+    if (fs.existsSync(target)) return { ok: true, existed: true, path: '.tic-rules.json' };
+    fs.writeFileSync(target, JSON.stringify(rulesTemplate(), null, 2), 'utf8');
+    return { ok: true, existed: false, path: '.tic-rules.json' };
   } catch (err) {
     return { ok: false, error: String(err) };
   }

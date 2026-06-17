@@ -155,7 +155,37 @@ const PHASES: PipelinePhase[] = [
   { id: 'ai-files', label: 'Gerando arquivos para IA', status: 'pending' }
 ];
 
-export async function runPipeline(projectPath: string, onProgress: ProgressCallback, opts: PipelineOptions = {}): Promise<PipelineResult> {
+/**
+ * Rede de segurança para workspaces com frontend e backend em pastas-irmãs.
+ * Se a pasta selecionada parece só um lado (frontend OU backend) e a pasta-pai
+ * contém irmãs dos dois tipos, sobe para a pai para que a ligação cross-tier
+ * (frontend→endpoint) seja detectável. O fluxo recomendado continua sendo
+ * selecionar a pasta-pai diretamente.
+ */
+const FRONTEND_DIRS = /^(frontend|ui|web|client|app|webapp)$/i;
+const BACKEND_DIRS = /^(backend|api|server|service|services|core)$/i;
+export function findScanRoot(selectedPath: string): string {
+  try {
+    const base = path.basename(selectedPath);
+    const selfIsOneSide = FRONTEND_DIRS.test(base) || BACKEND_DIRS.test(base);
+    if (!selfIsOneSide) return selectedPath;
+    const parent = path.dirname(selectedPath);
+    if (!parent || parent === selectedPath) return selectedPath;
+    const siblings = fs.readdirSync(parent, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+    const hasFront = siblings.some((s) => FRONTEND_DIRS.test(s));
+    const hasBack = siblings.some((s) => BACKEND_DIRS.test(s));
+    return hasFront && hasBack ? parent : selectedPath;
+  } catch {
+    return selectedPath;
+  }
+}
+
+export async function runPipeline(projectPathInput: string, onProgress: ProgressCallback, opts: PipelineOptions = {}): Promise<PipelineResult> {
+  const scanRoot = findScanRoot(projectPathInput.replace(/[\\/]$/, ''));
+  const scanRootAdjusted = scanRoot !== projectPathInput.replace(/[\\/]$/, '');
+  const projectPath = scanRoot;
   const normalized = projectPath.replace(/[\\/]$/, '');
   if (normalized.endsWith('.tic-code')) {
     return {
@@ -209,7 +239,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     const previousAccuracy = readPrev('prediction-accuracy.json');
 
     // ── 1. SCAN ──────────────────────────────────────────────────────────────────
-    report('scan', 5, 'Iniciando scan...');
+    report('scan', 5, scanRootAdjusted
+      ? `Analisando a pasta-pai (${path.basename(projectPath)}) para incluir frontend + backend...`
+      : 'Iniciando scan...');
     const files = scanFiles(projectPath, {
       onProgress: (count, current) => {
         if (count % 1000 === 0) report('scan', 5, `${count.toLocaleString()} arquivos — ${current}`);

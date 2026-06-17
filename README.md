@@ -127,7 +127,21 @@ O arquiteto declara o que não pode acontecer; a pipeline valida; o PR bloqueia 
 }
 ```
 
-Regras por **camada** (frontend/backend/database), **módulo** ou **glob de path**. Violações `error` derrubam o health score e o gate `new-rule-violations`. Sem o arquivo, a análise gera um exemplo em `.tic-code/tic-rules.example.json`. O catálogo `outOfScope` registra decisões para o time não rediscutir. A seção `alerts` (opcional) dispara notificações outbound — ver "Sistema vivo".
+Regras por **camada** (frontend/backend/database), **módulo** ou **glob de path**. Violações `error` derrubam o health score e o gate `new-rule-violations`. O catálogo `outOfScope` registra decisões para o time não rediscutir. A seção `alerts` (opcional) dispara notificações outbound — ver "Sistema vivo".
+
+**Como criar.** Na aba **Governança**, quando não há `.tic-rules.json` na raiz, clique em **"Criar .tic-rules.json"** — o TIC grava um template comentado na raiz do projeto (sem sobrescrever um arquivo já existente). Edite as regras e **reanalise** para validar. Alternativamente, copie `.tic-code/tic-rules.example.json` (gerado a cada análise) para a raiz como `.tic-rules.json`.
+
+**Campos do schema:**
+
+| Campo | O que faz |
+|---|---|
+| `rules[].id` | Identificador único da regra (aparece no relatório/gate). |
+| `rules[].severity` | `error` (derruba health + gate) ou `warn` (apenas alerta). |
+| `rules[].description` | Texto livre exibido na UI. |
+| `rules[].forbid` | O que é proibido: `fromLayer`/`toLayer` (camada), `fromModule`/`toModule` (módulo) ou `fromPath`/`toPath` (glob). |
+| `outOfScope[]` | Decisões de escopo registradas (`decision`, `reason`, `date`) — o time não rediscute. |
+| `alerts` | Opcional: `slackWebhook`, `webhook` e limiares em `on` (`healthDrop`, `newCriticalRisk`, `newRuleViolation`). |
+| `roi` | Opcional: `hourlyRate`, `currency`, `hoursPerDebtPoint` — converte débito em tempo/dinheiro na aba Valor. |
 
 ### Manutenção preditiva
 

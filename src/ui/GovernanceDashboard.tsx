@@ -100,6 +100,7 @@ export function GovernanceDashboard({ ticCodeDir, projectPath }: { ticCodeDir: s
   const [msg, setMsg] = useState('');
   const [gh, setGh] = useState<{ installed: boolean; workflowFile: string | null; hasGit: boolean; yaml: string } | null>(null);
   const [ghMsg, setGhMsg] = useState('');
+  const [rulesMsg, setRulesMsg] = useState('');
 
   const loadAll = useCallback(() => {
     const readJson = async (file: string) => {
@@ -118,6 +119,13 @@ export function GovernanceDashboard({ ticCodeDir, projectPath }: { ticCodeDir: s
     const r = (await window.ticAnalyzer.installGithubWorkflow(projectPath)) as { ok: boolean; existed?: boolean; path?: string; error?: string };
     setGhMsg(r.ok ? (r.existed ? `Já existia: ${r.path}` : `Workflow criado: ${r.path} — commit e push para ativar`) : `Erro: ${r.error}`);
     window.ticAnalyzer.getGithubStatus?.(projectPath).then((s) => setGh(s as any));
+  }, [projectPath]);
+
+  const createRules = useCallback(async () => {
+    const r = (await window.ticAnalyzer.createTicRules?.(projectPath)) as { ok: boolean; existed?: boolean; path?: string; error?: string };
+    setRulesMsg(r?.ok
+      ? (r.existed ? `Já existe ${r.path} na raiz.` : `Criado ${r.path} na raiz — edite as regras e reanalise o projeto.`)
+      : `Erro: ${r?.error}`);
   }, [projectPath]);
 
   useEffect(loadAll, [loadAll]);
@@ -272,9 +280,20 @@ export function GovernanceDashboard({ ticCodeDir, projectPath }: { ticCodeDir: s
       {/* Architecture Governance */}
       <SectionCard title="Architecture Governance" icon="account_balance">
         {!archData || archData.rules.length === 0 ? (
-          <div style={{ fontSize: 13, color: C.onSurfaceVariant, padding: '12px 0' }}>
-            Sem <code style={{ fontFamily: F.code, color: C.primaryFixedDim }}>.tic-rules.json</code> na raiz do projeto.
-            Exemplo em <code style={{ fontFamily: F.code, color: C.onSurfaceVariant }}>.tic-code/tic-rules.example.json</code>.
+          <div style={{ padding: '12px 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 13, color: C.onSurfaceVariant }}>
+              Sem <code style={{ fontFamily: F.code, color: C.primaryFixedDim }}>.tic-rules.json</code> na raiz do projeto.
+              Defina regras de arquitetura (ex: "frontend não acessa o banco") para o TIC validar a cada análise.
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <button onClick={createRules} style={{ display: 'flex', alignItems: 'center', gap: 6,
+                fontSize: 12, fontFamily: F.code, color: C.onPrimaryFixed ?? '#fff', background: C.primaryFixedDim,
+                border: 'none', borderRadius: 8, padding: '8px 14px', cursor: 'pointer' }}>
+                <Icon name="add" size={16} color={C.onPrimaryFixed ?? '#fff'} />
+                Criar .tic-rules.json
+              </button>
+              {rulesMsg && <span style={{ fontSize: 12, color: C.onSurfaceVariant }}>{rulesMsg}</span>}
+            </div>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>

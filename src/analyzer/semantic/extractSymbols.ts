@@ -155,18 +155,38 @@ function readJavaType(node: SyntaxNode): TypeDeclSym {
 
   const methods: string[] = [];
   const fields: FieldRef[] = [];
+  const seenField = new Set<string>();
+  const addField = (name: string, type: string) => {
+    if (!name || !type || seenField.has(name)) return;
+    seenField.add(name);
+    fields.push({ name, type });
+  };
   const body = node.childForFieldName('body');
   if (body) {
+    // 1ª passada: campos declarados (fonte de tipo mais confiável).
     for (const member of body.namedChildren) {
-      if (member.type === 'method_declaration' || member.type === 'constructor_declaration') {
-        const mn = member.childForFieldName('name');
-        if (mn) methods.push(mn.text);
-      } else if (member.type === 'field_declaration') {
+      if (member.type === 'field_declaration') {
         const typeNode = member.childForFieldName('type');
         const typeName = typeNode ? baseTypeName(typeNode) : '';
         for (const decl of member.namedChildren.filter((c) => c.type === 'variable_declarator')) {
           const fn = decl.childForFieldName('name');
-          if (fn && typeName) fields.push({ name: fn.text, type: typeName });
+          if (fn && typeName) addField(fn.text, typeName);
+        }
+      }
+    }
+    // 2ª passada: métodos + parâmetros como "campos virtuais" (DI por construtor/
+    // método — padrão Spring/Jakarta) para resolver chamadas `param.metodo()`.
+    for (const member of body.namedChildren) {
+      if (member.type === 'method_declaration' || member.type === 'constructor_declaration') {
+        const mn = member.childForFieldName('name');
+        if (mn) methods.push(mn.text);
+        const params = member.childForFieldName('parameters');
+        if (params) {
+          for (const p of params.namedChildren.filter((c) => c.type === 'formal_parameter')) {
+            const pType = p.childForFieldName('type');
+            const pName = p.childForFieldName('name');
+            if (pType && pName) addField(pName.text, baseTypeName(pType));
+          }
         }
       }
     }
