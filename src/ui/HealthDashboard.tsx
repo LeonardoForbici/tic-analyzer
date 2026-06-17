@@ -45,20 +45,22 @@ function Icon({ name, size = 20, color, fill = 0 }: { name: string; size?: numbe
 const DIM_META: Record<string, {
   label: string; icon: string; color: string;
   goodStatus: string; midStatus: string; badStatus: string;
-  weight: string;
+  weight: string; desc: string;
   itemsOf: (cur: Snapshot, resolutionPct: number) => Array<[string, string]>;
 }> = {
   debt: {
     label: 'Dívida', icon: 'account_balance_wallet', color: C.tertiaryFixedDim,
     goodStatus: 'SAUDÁVEL', midStatus: 'ATENÇÃO', badStatus: 'CRÍTICO', weight: '25%',
+    desc: 'Arquivos com código muito complexo — custam caro para manter e têm mais bugs.',
     itemsOf: (cur) => [
-      ['Complexidade Alta', `${cur.counts.hotspots} hotspots`],
+      ['Complexidade Alta', `${cur.counts.hotspots} arquivos`],
       ['Violações', `${cur.counts.violations} itens`],
     ],
   },
   risks: {
     label: 'Risco', icon: 'gpp_maybe', color: C.primaryFixedDim,
     goodStatus: 'SAUDÁVEL', midStatus: 'ATENÇÃO', badStatus: 'CRÍTICO', weight: '30%',
+    desc: 'Arquivos que mudam muito E são complexos ao mesmo tempo — os mais propensos a quebrar.',
     itemsOf: (cur) => [
       ['Riscos detectados', `${cur.counts.risks} itens`],
       ['Endpoints expostos', `${cur.counts.endpoints} endpoints`],
@@ -67,14 +69,16 @@ const DIM_META: Record<string, {
   violations: {
     label: 'Drift', icon: 'compare_arrows', color: C.secondary,
     goodStatus: 'ESTÁVEL', midStatus: 'MONITOR', badStatus: 'CRÍTICO', weight: '15%',
+    desc: 'O projeto está seguindo as regras de organização definidas? Drift = desvio da arquitetura planejada.',
     itemsOf: (cur) => [
-      ['Violações de arquitetura', `${cur.counts.violations} itens`],
+      ['Regras quebradas', `${cur.counts.violations} itens`],
       ['Módulos analisados', `${cur.counts.modules} módulos`],
     ],
   },
   deadCode: {
     label: 'Código Morto', icon: 'delete_sweep', color: C.primaryFixed,
     goodStatus: 'OTIMIZADO', midStatus: 'MONITOR', badStatus: 'CRÍTICO', weight: '10%',
+    desc: 'Código que existe mas nunca é usado — deixa o projeto mais lento e confuso.',
     itemsOf: (cur) => [
       ['Componentes não usados', `${cur.counts.deadComponents} itens`],
       ['PL/SQL morto', `${cur.counts.deadPlsql} itens`],
@@ -83,17 +87,19 @@ const DIM_META: Record<string, {
   coupling: {
     label: 'Acoplamento', icon: 'link', color: C.tertiaryFixedDim,
     goodStatus: 'SAUDÁVEL', midStatus: 'ATENÇÃO', badStatus: 'CRÍTICO', weight: '15%',
+    desc: 'Arquivos que dependem de muitos outros — uma mudança pode quebrar várias partes.',
     itemsOf: (cur) => [
-      ['Hotspots de acoplamento', `${cur.counts.hotspots} nós`],
-      ['Arestas de impacto', `${cur.counts.impactEdges.toLocaleString()} arestas`],
+      ['Arquivos muito conectados', `${cur.counts.hotspots} arquivos`],
+      ['Conexões rastreadas', `${cur.counts.impactEdges.toLocaleString()}`],
     ],
   },
   resolution: {
     label: 'Heurísticas', icon: 'psychology', color: C.secondary,
     goodStatus: 'ESTÁVEL', midStatus: 'MONITOR', badStatus: 'CRÍTICO', weight: '5%',
+    desc: 'O quanto o analisador entendeu a estrutura do código. Quanto maior, mais precisa a análise.',
     itemsOf: (_cur, res) => [
-      ['Resolução AST', `${res}% compliance`],
-      ['Dependências totais', `${_cur.counts.totalEdges.toLocaleString()} arestas`],
+      ['Compreensão do código', `${res}%`],
+      ['Dependências mapeadas', `${_cur.counts.totalEdges.toLocaleString()}`],
     ],
   },
 };
@@ -367,7 +373,7 @@ export function HealthDashboard({ ticCodeDir }: { ticCodeDir: string }) {
               borderTop: `2px solid ${meta.color}`, borderRadius: 12, padding: 20,
               transition: 'background 0.15s',
             }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
                 <h4 style={{ fontSize: 14, fontWeight: 600, fontFamily: F.code, color: C.onSurface, margin: 0,
                   display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Icon name={meta.icon} size={18} color={meta.color} />
@@ -377,11 +383,14 @@ export function HealthDashboard({ ticCodeDir }: { ticCodeDir: string }) {
                   {dimScore}
                 </span>
               </div>
+              <p style={{ fontSize: 11, color: C.onSurfaceVariant, margin: '0 0 10px', fontFamily: F.body, lineHeight: 1.4 }}>
+                {meta.desc}
+              </p>
               <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
                 <span style={{ fontSize: 10, fontFamily: F.code, letterSpacing: '0.08em', fontWeight: 700,
                   color: C.onSurfaceVariant, background: C.surfaceContainerHighest,
                   padding: '2px 7px', borderRadius: 4 }}>
-                  PESO: {meta.weight}
+                  Importância: {meta.weight}
                 </span>
                 <span style={{ fontSize: 10, fontFamily: F.code, letterSpacing: '0.08em', fontWeight: 700,
                   color: statusColor, background: `${statusColor}18`,
