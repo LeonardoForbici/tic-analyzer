@@ -107,7 +107,8 @@ export function buildCallGraph(
         const backId = beId(ep.file);
         if (!matched.has(backId)) {
           matched.add(backId);
-          addEdge({ from: frontId, to: backId, type: 'HTTP_CALL', confidence: call.confidence });
+          const label = `${(call.method ?? ep.method ?? 'ANY').toUpperCase()} ${call.urlPattern}`;
+          addEdge({ from: frontId, to: backId, type: 'HTTP_CALL', confidence: call.confidence, label });
         }
       }
     }
@@ -205,8 +206,18 @@ function pathsMatch(callPath: string, epPath: string): boolean {
   const epNorm = epPath.replace(/\{[^}]+\}|:[^/]+/g, '*');
   const a = callPath.split('/').filter(Boolean);
   const b = epNorm.split('/').filter(Boolean);
-  if (a.length !== b.length) return false;
-  return a.every((part, i) => b[i] === '*' || b[i] === part);
+  if (a.length === 0 || b.length === 0) return false;
+  // match exato (mesma contagem de segmentos)
+  if (a.length === b.length) return a.every((part, i) => b[i] === '*' || b[i] === part);
+  // match por sufixo: backend pode ter prefixo extra (ex: /api/v2/users vs users).
+  // Alinha pelo fim; exige ao menos 1 segmento e que o último não seja curinga puro.
+  const [shorter, longer] = a.length < b.length ? [a, b] : [b, a];
+  const off = longer.length - shorter.length;
+  const ok = shorter.every((part, i) => {
+    const lp = longer[off + i];
+    return lp === '*' || part === '*' || lp === part;
+  });
+  return ok && shorter[shorter.length - 1] !== '*';
 }
 
 // "pessoa-service.ts" → "pessoa", "PessoaController.java" → "pessoa"

@@ -92,6 +92,18 @@ webhook) via seção `alerts` do `.tic-rules.json`; timeline em `activity.json`
 e loop preditivo em `prediction-accuracy.json`. Em rede, `--token` é
 obrigatório (`Authorization: Bearer` ou `?token=` no `/events`).
 
+## Governança (`.tic-rules.json`)
+
+Regras de arquitetura ficam em `.tic-rules.json` na **raiz do projeto analisado**
+(não neste repo). Criar pela aba Governança (botão "Criar .tic-rules.json", via
+IPC `create-tic-rules` → `rulesTemplate()` em `checkArchRules.ts`) ou copiar
+`.tic-code/tic-rules.example.json`. O botão e o IPC **não sobrescrevem** um
+arquivo existente. Schema: `rules[].forbid` com `fromLayer/toLayer`,
+`fromModule/toModule` ou `fromPath/toPath` (glob); `severity` `error|warn`;
+`outOfScope[]` (decisões), `alerts` (Slack/webhook) e `roi` (custo/hora).
+Carregado por `loadArchRules`; valida em `checkArchRules.ts` e alimenta o gate
+`new-rule-violations`.
+
 ## Desenvolvimento
 
 ```bash

@@ -70,7 +70,14 @@ export class SymbolTable {
       const samePkg = `${fromFile.packageName}.${simpleName}`;
       if (this.byFqn.has(samePkg)) return [samePkg];
     }
-    // 3. índice global por nome simples
+    // 3. import wildcard `a.b.*` cujo pacote contém o tipo `a.b.SimpleName`
+    for (const imp of fromFile.imports) {
+      if (!imp.isWildcard) continue;
+      const pkg = imp.source.replace(/\.\*$/, '');
+      const fqn = `${pkg}.${simpleName}`;
+      if (this.byFqn.has(fqn)) return [fqn];
+    }
+    // 4. índice global por nome simples
     return this.bySimpleName.get(simpleName) ?? [];
   }
 }

@@ -36,6 +36,7 @@ declare global {
       setRoiConfig: (projectPath: string, cfg: { hourlyRate: number; currency: string }) => Promise<unknown>;
       getGithubStatus: (projectPath: string) => Promise<unknown>;
       installGithubWorkflow: (projectPath: string) => Promise<unknown>;
+      createTicRules: (projectPath: string) => Promise<unknown>;
       onLiveStatus: (cb: (s: { watching?: boolean; analyzing?: boolean; lastRun?: string }) => void) => () => void;
       getTokenStats: () => Promise<TokenStats | null>;
       clearTokenStats: () => Promise<void>;

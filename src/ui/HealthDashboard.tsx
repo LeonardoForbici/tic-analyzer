@@ -462,11 +462,11 @@ export function HealthDashboard({ ticCodeDir }: { ticCodeDir: string }) {
                     onMouseEnter={(e) => (e.currentTarget.style.filter = 'brightness(1.3)')}
                     onMouseLeave={(e) => (e.currentTarget.style.filter = 'none')}>
                     {b.label && (
-                      <span style={{ fontSize: 10, fontFamily: F.code, color: textColor, opacity: 0.85,
+                      <span style={{ fontSize: 10, fontFamily: F.code, color: textColor, opacity: 0.85, pointerEvents: 'none',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{b.label}</span>
                     )}
                     {b.risk === 'critical' && b.span > 1 && (
-                      <span style={{ fontSize: 9, fontFamily: F.code, color: C.error, letterSpacing: '0.06em', fontWeight: 700 }}>CRÍTICO</span>
+                      <span style={{ fontSize: 9, fontFamily: F.code, color: C.error, letterSpacing: '0.06em', fontWeight: 700, pointerEvents: 'none' }}>CRÍTICO</span>
                     )}
                   </div>
                 );

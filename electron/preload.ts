@@ -79,6 +79,9 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   installGithubWorkflow: (projectPath: string): Promise<unknown> =>
     ipcRenderer.invoke('install-github-workflow', projectPath),
 
+  createTicRules: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('create-tic-rules', projectPath),
+
   onLiveStatus: (callback: (s: unknown) => void) => {
     const handler = (_event: unknown, s: unknown) => callback(s);
     ipcRenderer.on('live-status', handler);
