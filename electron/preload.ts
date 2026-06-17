@@ -101,5 +101,8 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
     const handler = (_event: unknown, entry: unknown) => callback(entry);
     ipcRenderer.on('mcp-token-update', handler);
     return () => ipcRenderer.removeListener('mcp-token-update', handler);
-  }
+  },
+
+  listHttpFlows: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('list-http-flows', projectPath),
 });

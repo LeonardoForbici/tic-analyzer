@@ -671,6 +671,26 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
 
     report('persist-index', 97, 'Gravando índice consultável (SQLite)...');
     const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges, columnAccess: orm.columnAccess, modules, impactEdges, embeddings });
+
+    // Populate architectural roles from detectPatterns results
+    {
+      const Database = (await import('better-sqlite3')).default;
+      const roleDb = new Database(path.join(ticCodeDir, INDEX_DB_FILE));
+      try {
+        const updateRole = roleDb.prepare('UPDATE files SET role = ? WHERE rel_path = ?');
+        const roleMap = new Map<string, string>();
+        for (const match of patternMatches) {
+          if (!roleMap.has(match.file)) roleMap.set(match.file, match.pattern);
+        }
+        const setRoles = roleDb.transaction(() => {
+          for (const [file, role] of roleMap) updateRole.run(role, file);
+        });
+        setRoles();
+      } finally {
+        roleDb.close();
+      }
+    }
+
     markDone('persist-index');
     const vecNote = embeddings ? `, ${embeddings.length} embeddings` : ' (embeddings off: modelo indisponível, FTS ativo)';
     report('persist-index', 100, `index.db: ${dbStats.nodes.toLocaleString()} nós, ${dbStats.edges.toLocaleString()} arestas (sem teto)${vecNote}`);

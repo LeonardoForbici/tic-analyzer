@@ -7,6 +7,7 @@ import { PortfolioDashboard } from './PortfolioDashboard';
 import { GovernanceDashboard } from './GovernanceDashboard';
 import { MemoryViewer } from './MemoryViewer';
 import { SearchCodeViewer } from './SearchCodeViewer';
+import { HttpFlowsViewer } from './HttpFlowsViewer';
 
 declare global {
   interface Window {
@@ -41,6 +42,7 @@ declare global {
       onTokenUpdate: (cb: (entry: TokenEntry) => void) => () => void;
       onProgress: (cb: (p: Progress) => void) => () => void;
       onAnalysisDone: (cb: (r: AnalysisResult) => void) => void;
+      listHttpFlows: (projectPath: string) => Promise<unknown>;
     };
   }
 }
@@ -74,7 +76,7 @@ interface ImpactOfResponse {
 export interface SearchHitUI { file: string; snippet: string; score: number; origin: 'fts' | 'vec' | 'both' }
 export interface SearchCodeResponse { hits?: SearchHitUI[]; mode?: string; error?: string }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
-type Tab = 'overview' | 'health' | 'value' | 'governance' | 'activity' | 'explorer' | 'search' | 'memory' | 'impact' | 'metrics' | 'files' | 'portfolio' | 'docs';
+type Tab = 'overview' | 'health' | 'value' | 'governance' | 'activity' | 'explorer' | 'search' | 'memory' | 'impact' | 'metrics' | 'files' | 'portfolio' | 'docs' | 'http';
 
 // ── Design System ─────────────────────────────────────────────────────────────
 const C = {
@@ -760,6 +762,7 @@ const NAV_ITEMS: Array<{ id: Tab; label: string; icon: string; requiresDone?: bo
   { id: 'files',       label: 'Arquivos',     icon: 'folder',            requiresDone: true },
   { id: 'portfolio',   label: 'Portfólio',    icon: 'inventory_2' },
   { id: 'docs',        label: 'Docs',         icon: 'help' },
+  { id: 'http',        label: 'HTTP',         icon: 'http',              requiresDone: true },
 ];
 
 function SideNav({ activeTab, onTabChange, isDone }: {
@@ -1518,6 +1521,12 @@ export function App() {
                 </div>
               )}
 
+              {activeTab === 'http' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <HttpFlowsViewer projectPath={projectPath} />
+                </div>
+              )}
+
               {activeTab === 'impact' && (
                 <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
                   <ImpactTab ticCodeDir={result!.outputPath} projectPath={projectPath} />
@@ -1568,6 +1577,9 @@ export function App() {
                     </button>
                   </div>
                 </div>
+              )}
+              {activeTab === 'http' && projectPath && (
+                <HttpFlowsViewer projectPath={projectPath} />
               )}
             </>
           )}

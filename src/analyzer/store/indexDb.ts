@@ -29,7 +29,8 @@ CREATE TABLE files (
   in_degree INTEGER,
   out_degree INTEGER,
   module TEXT,
-  layer TEXT
+  layer TEXT,
+  role TEXT
 );
 CREATE INDEX idx_files_module ON files(module);
 
@@ -158,7 +159,7 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
     }
 
     const insertFile = db.prepare(
-      'INSERT OR REPLACE INTO files (rel_path, ext, lines, in_degree, out_degree, module, layer) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      'INSERT OR REPLACE INTO files (rel_path, ext, lines, in_degree, out_degree, module, layer, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
     const insertModule = db.prepare('INSERT OR REPLACE INTO modules (name, file_count, layer) VALUES (?, ?, ?)');
     const insertImpact = db.prepare('INSERT INTO impact_edges (from_id, to_id, from_kind, to_kind, via, confidence) VALUES (?, ?, ?, ?, ?, ?)');
@@ -174,7 +175,7 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
     const writeAll = db.transaction(() => {
       for (const n of input.graph.nodes) {
         const sf = linesByPath.get(n.path);
-        insertFile.run(n.path, sf?.extension ?? null, sf?.lines ?? null, n.inDegree, n.outDegree, moduleByFile.get(n.path) ?? null, fileLayer(n.path, sf?.extension ?? ''));
+        insertFile.run(n.path, sf?.extension ?? null, sf?.lines ?? null, n.inDegree, n.outDegree, moduleByFile.get(n.path) ?? null, fileLayer(n.path, sf?.extension ?? ''), null);
       }
       for (const m of moduleLayers) insertModule.run(m.name, m.fileCount, m.layer);
       for (const e of input.impactEdges ?? []) {

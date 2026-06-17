@@ -387,6 +387,26 @@ ipcMain.handle('search-code', async (_event, projectPath: string, query: string)
   }
 });
 
+ipcMain.handle('list-http-flows', async (_event, projectPath: string) => {
+  try {
+    const db = openIndexDb(path.join(projectPath, '.tic-code', INDEX_DB_FILE));
+    if (!db) return { flows: [], error: 'index.db não encontrado — rode a análise primeiro.' };
+    try {
+      const rows = (db.prepare(
+        `SELECT from_id, to_id, label FROM cg_edges WHERE type = 'HTTP_CALL' LIMIT 500`
+      ).all()) as Array<{ from_id: string; to_id: string; label: string | null }>;
+      const flows = rows.map(r => {
+        let url: string | undefined; let method: string | undefined;
+        try { const m = r.label ? JSON.parse(r.label) : {}; url = m.url; method = m.method; } catch {}
+        return { from: r.from_id, to: r.to_id, url, method };
+      });
+      return { flows };
+    } finally { db.close(); }
+  } catch (e) {
+    return { flows: [], error: String(e) };
+  }
+});
+
 ipcMain.handle('update-triage', async (_event, projectPath: string, id: string, changes: { state?: TriageState; category?: TriageCategory; priority?: TriagePriority }) => {
   return transitionTriageItem(path.join(projectPath, '.tic-code'), id, changes);
 });

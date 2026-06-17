@@ -5,7 +5,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare module 'cytoscape-dagre';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import cytoscape from 'cytoscape';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import dagre from 'cytoscape-dagre';
@@ -17,6 +17,7 @@ interface AggNode {
   label: string;
   kind: 'layer' | 'module' | 'file' | 'symbol' | 'more';
   layer?: string;
+  role?: string;
   childCount: number;
   inWeight: number;
   outWeight: number;
@@ -52,6 +53,20 @@ const F = { body: "'Inter', system-ui, sans-serif", code: "'JetBrains Mono', mon
 // ── Layer accent colors (para painel info / legenda) ────────────────────────
 const LAYER_COLORS: Record<string, string> = {
   frontend: '#4a9eff', backend: '#4edea3', database: '#ffb95f', default: C.nodeAmber,
+};
+
+// ── Architectural role colors ────────────────────────────────────────────────
+const ROLE_STYLE: Record<string, { color: string; shape: string }> = {
+  Controller:  { color: '#60a5fa', shape: 'round-rectangle' },
+  Service:     { color: '#4edea3', shape: 'ellipse' },
+  Repository:  { color: '#c084fc', shape: 'ellipse' },
+  Entity:      { color: '#f97316', shape: 'diamond' },
+  DTO:         { color: '#facc15', shape: 'ellipse' },
+  Mapper:      { color: '#fb7185', shape: 'ellipse' },
+  UseCase:     { color: '#38bdf8', shape: 'ellipse' },
+  Guard:       { color: '#94a3b8', shape: 'ellipse' },
+  Interceptor: { color: '#94a3b8', shape: 'ellipse' },
+  Middleware:  { color: '#94a3b8', shape: 'ellipse' },
 };
 
 const CY_STYLE: cytoscape.Stylesheet[] = [
@@ -156,6 +171,15 @@ const CY_STYLE: cytoscape.Stylesheet[] = [
       'font-size': 9,
     },
   },
+  // ── Architectural role colors ──────────────────────────────────────────────
+  { selector: 'node[role = "Controller"]', style: { 'background-color': '#60a5fa', 'shape': 'round-rectangle' as any } },
+  { selector: 'node[role = "Service"]', style: { 'background-color': '#4edea3' } },
+  { selector: 'node[role = "Repository"]', style: { 'background-color': '#c084fc' } },
+  { selector: 'node[role = "Entity"]', style: { 'background-color': '#f97316', 'shape': 'diamond' as any } },
+  { selector: 'node[role = "DTO"]', style: { 'background-color': '#facc15' } },
+  { selector: 'node[role = "Mapper"]', style: { 'background-color': '#fb7185' } },
+  { selector: 'node[role = "UseCase"]', style: { 'background-color': '#38bdf8' } },
+  { selector: 'node[role = "Guard"], node[role = "Interceptor"], node[role = "Middleware"]', style: { 'background-color': '#94a3b8' } },
   // ── Edges ─────────────────────────────────────────────────────────────────
   {
     selector: 'edge',
@@ -175,6 +199,7 @@ const CY_STYLE: cytoscape.Stylesheet[] = [
     selector: 'edge.heuristic',
     style: { 'line-color': 'rgba(255,185,95,0.25)', 'line-style': 'dashed', 'opacity': 0.5 },
   },
+  { selector: 'edge[edgeType = "HTTP_CALL"]', style: { 'line-color': '#60a5fa', 'line-style': 'dashed', 'line-dash-pattern': [6, 3] as any } },
   // ── Estados interativos ───────────────────────────────────────────────────
   {
     selector: ':selected',
@@ -306,7 +331,7 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
 
     cy.add(data.nodes.map((n) => ({
       group: 'nodes' as const,
-      data: { id: n.id, label: n.label, kind: n.kind, layer: n.layer ?? '', childCount: n.childCount, inWeight: n.inWeight, outWeight: n.outWeight },
+      data: { id: n.id, label: n.label, kind: n.kind, layer: n.layer ?? '', role: n.role ?? '', childCount: n.childCount, inWeight: n.inWeight, outWeight: n.outWeight },
     })));
 
     cy.add(data.edges.map((e) => {
@@ -375,6 +400,13 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
     { id: '__root__', label: 'Aplicação' },
     ...expanded.map((id) => ({ id, label: id.slice(id.indexOf(':') + 1).split('/').pop() ?? id })),
   ];
+
+  const visibleRoles = useMemo(() => {
+    if (!data) return [];
+    const roles = new Set<string>();
+    for (const n of data.nodes) { if (n.role && ROLE_STYLE[n.role]) roles.add(n.role); }
+    return [...roles];
+  }, [data]);
 
   // ── Styles inline reutilizados ─────────────────────────────────────────────
   const btnBase: React.CSSProperties = {
@@ -521,6 +553,22 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
             <span style={{ width: 16, height: 1, borderTop: '1px dashed rgba(255,185,95,0.5)', display: 'inline-block' }} /> heurística
           </span>
         </div>
+
+        {/* Role legend (bottom-right) */}
+        {visibleRoles.length > 0 && (
+          <div style={{
+            position: 'absolute', bottom: 12, right: 12, zIndex: 10,
+            background: 'rgba(6,13,26,0.85)', border: '1px solid #3b494b',
+            borderRadius: 8, padding: '8px 12px', fontSize: 10, fontFamily: F.code,
+          }}>
+            {visibleRoles.map((role) => (
+              <div key={role} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: ROLE_STYLE[role].color, display: 'inline-block', boxShadow: `0 0 5px ${ROLE_STYLE[role].color}` }} />
+                <span style={{ color: ROLE_STYLE[role].color }}>{role}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Painel de nó selecionado */}
         {selected && (

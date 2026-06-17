@@ -233,6 +233,11 @@ export class TicAnalyzerMcpServer {
           }
         },
         {
+          name: 'list_http_flows',
+          description: 'Lista chamadas HTTP cross-tier detectadas: quais componentes frontend chamam quais endpoints backend (fetch, axios, HttpClient). ~300 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
           name: 'get_arch_rules',
           description: 'Regras de arquitetura do projeto (.tic-rules.json) e violações atuais (architecture drift). ~300 tokens.',
           inputSchema: { type: 'object', properties: {} }
@@ -329,6 +334,11 @@ export class TicAnalyzerMcpServer {
             },
             required: ['entity']
           }
+        },
+        {
+          name: 'list_http_flows',
+          description: 'Lista chamadas HTTP cross-tier detectadas (fetch/axios/HttpClient): qual componente frontend chama qual endpoint backend, com método e URL. Útil para mapear dependências entre camadas.',
+          inputSchema: { type: 'object', properties: {} }
         },
         {
           name: 'get_portfolio',
@@ -727,7 +737,7 @@ export class TicAnalyzerMcpServer {
               `# Grafo agregado${expanded.length ? ` (expandido: ${expanded.join(', ')})` : ' (visão por camadas)'}`,
               '',
               '## Nós',
-              ...level.nodes.slice(0, 80).map((n) => `- [${n.kind}] \`${n.id.slice(n.id.indexOf(':') + 1)}\` — ${n.childCount > 0 ? `${n.childCount} filhos, ` : ''}in ${n.inWeight} / out ${n.outWeight}`),
+              ...level.nodes.slice(0, 80).map((n) => `- [${n.kind}] \`${n.id.slice(n.id.indexOf(':') + 1)}\`${(n as any).role ? ` [${(n as any).role}]` : ''} — ${n.childCount > 0 ? `${n.childCount} filhos, ` : ''}in ${n.inWeight} / out ${n.outWeight}`),
               level.nodes.length > 80 ? `- ... e mais ${level.nodes.length - 80} nós` : '',
               '',
               '## Arestas (peso = dependências agregadas)',
@@ -738,6 +748,28 @@ export class TicAnalyzerMcpServer {
               level.edges.length > 60 ? `- ... e mais ${level.edges.length - 60} arestas` : '',
               '',
               '> Para detalhar: get_graph_level(expanded=[..., "module:<nome>"]).'
+            ].filter(Boolean);
+            return respond(textResult(lines.join('\n')));
+          } finally { db.close(); }
+        }
+
+        case 'list_http_flows': {
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const rows = db.prepare(
+              `SELECT from_id, to_id, label FROM cg_edges WHERE type = 'HTTP_CALL' LIMIT 500`
+            ).all() as Array<{ from_id: string; to_id: string; label: string | null }>;
+            const flows = rows.map((r) => {
+              let url: string | undefined; let method: string | undefined;
+              try { const m = r.label ? JSON.parse(r.label) : {}; url = m.url; method = m.method; } catch {}
+              return { from: r.from_id, to: r.to_id, url, method };
+            });
+            const lines = [
+              `# HTTP Flows (${flows.length} chamadas)`,
+              '',
+              ...flows.slice(0, 50).map((f) => `- \`${f.from}\` → \`${f.to}\`${f.method ? ` [${f.method}]` : ''}${f.url ? ` ${f.url}` : ''}`),
+              flows.length > 50 ? `... e mais ${flows.length - 50} chamadas` : '',
             ].filter(Boolean);
             return respond(textResult(lines.join('\n')));
           } finally { db.close(); }
@@ -933,6 +965,32 @@ export class TicAnalyzerMcpServer {
             lines.push('');
           }
           return respond(textResult(lines.join('\n')));
+        }
+
+        case 'list_http_flows': {
+          const flowDb = openIndexDb(this.indexDbPath);
+          if (!flowDb) return respond(noIndexDb());
+          try {
+            const rows = flowDb.prepare(
+              "SELECT from_id, to_id, type, label FROM cg_edges WHERE type = 'HTTP_CALL' LIMIT 500"
+            ).all() as Array<{ from_id: string; to_id: string; type: string; label: string | null }>;
+            if (rows.length === 0) return respond(textResult('Nenhuma chamada HTTP cross-tier detectada. O projeto precisa ter fetch/axios/HttpClient no frontend e endpoints no backend.'));
+            const byFrom = new Map<string, typeof rows>();
+            for (const r of rows) {
+              if (!byFrom.has(r.from_id)) byFrom.set(r.from_id, []);
+              byFrom.get(r.from_id)!.push(r);
+            }
+            const lines: string[] = [`# HTTP Flows Cross-Tier (${rows.length} chamada(s))`, ''];
+            for (const [from, calls] of byFrom) {
+              lines.push(`## ${from}`);
+              for (const c of calls) {
+                const label = c.label ? ` (${c.label})` : '';
+                lines.push(`- → \`${c.to_id}\`${label}`);
+              }
+              lines.push('');
+            }
+            return respond(textResult(lines.join('\n')));
+          } finally { flowDb.close(); }
         }
 
         case 'get_portfolio': {
