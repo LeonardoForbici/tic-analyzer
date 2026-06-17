@@ -11,12 +11,13 @@ import {
 import type { ImpactIndex } from '../analyzer/buildImpactIndex';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
 import { getFileSummary } from '../analyzer/store/fileSummary';
-import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount } from './queries';
+import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount, fuseRRF, type FusedHit } from './queries';
 import { queryImpactOf, queryBlastRadius, type ImpactOfResult, type BlastRadiusResult } from '../analyzer/store/impactQueries';
 import { queryGraphLevel } from '../analyzer/store/graphQueries';
 import { buildAgentBrief, buildDiagnosis } from './agentBrief';
 import { loadTriage, transitionTriageItem, type TriageState, type TriageCategory, type TriagePriority } from '../analyzer/store/triageStore';
 import { loadActivity } from '../analyzer/store/activityLog';
+import { appendMemory, queryMemory, type MemoryKind, type MemoryResult } from '../analyzer/store/memoryStore';
 import { suggestReviewers } from '../analyzer/computeOwnership';
 import { loadPortfolio } from '../analyzer/store/portfolioStore';
 import { getEmbedder } from '../analyzer/semantic/embeddings';
@@ -232,6 +233,11 @@ export class TicAnalyzerMcpServer {
           }
         },
         {
+          name: 'list_http_flows',
+          description: 'Lista chamadas HTTP cross-tier detectadas: quais componentes frontend chamam quais endpoints backend (fetch, axios, HttpClient). ~300 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
           name: 'get_arch_rules',
           description: 'Regras de arquitetura do projeto (.tic-rules.json) e violações atuais (architecture drift). ~300 tokens.',
           inputSchema: { type: 'object', properties: {} }
@@ -301,6 +307,38 @@ export class TicAnalyzerMcpServer {
             },
             required: ['id']
           }
+        },
+        {
+          name: 'remember',
+          description: 'Registra uma decisão, tentativa de fix ou nota na memória persistente do projeto para uma entidade (arquivo, módulo, procedure, tabela). Use quando tentar algo e quiser deixar registrado para futuras sessões.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity: { type: 'string', description: 'Entidade afetada (ex: "file:src/api/user.ts", "proc:PKG.SALVAR", nome de módulo).' },
+              kind: { type: 'string', description: 'decision | fix-attempt | outcome | note' },
+              summary: { type: 'string', description: 'Resumo em 1-2 frases.' },
+              detail: { type: 'string', description: 'Detalhe opcional.' },
+              result: { type: 'string', description: 'worked | failed | unknown (opcional, para fix-attempt/outcome).' },
+              refs: { type: 'array', items: { type: 'string' }, description: 'Arquivos ou URLs de referência (opcional).' }
+            },
+            required: ['entity', 'kind', 'summary']
+          }
+        },
+        {
+          name: 'recall',
+          description: 'Consulta a memória persistente do projeto para uma entidade: histórico de tentativas, decisões e outcomes registrados por agentes ou pela pipeline. Incluído automaticamente em get_agent_brief. ~300 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity: { type: 'string', description: 'Entidade a consultar (arquivo, módulo, procedure, tabela ou termo).' }
+            },
+            required: ['entity']
+          }
+        },
+        {
+          name: 'list_http_flows',
+          description: 'Lista chamadas HTTP cross-tier detectadas (fetch/axios/HttpClient): qual componente frontend chama qual endpoint backend, com método e URL. Útil para mapear dependências entre camadas.',
+          inputSchema: { type: 'object', properties: {} }
         },
         {
           name: 'get_portfolio',
@@ -699,7 +737,7 @@ export class TicAnalyzerMcpServer {
               `# Grafo agregado${expanded.length ? ` (expandido: ${expanded.join(', ')})` : ' (visão por camadas)'}`,
               '',
               '## Nós',
-              ...level.nodes.slice(0, 80).map((n) => `- [${n.kind}] \`${n.id.slice(n.id.indexOf(':') + 1)}\` — ${n.childCount > 0 ? `${n.childCount} filhos, ` : ''}in ${n.inWeight} / out ${n.outWeight}`),
+              ...level.nodes.slice(0, 80).map((n) => `- [${n.kind}] \`${n.id.slice(n.id.indexOf(':') + 1)}\`${(n as any).role ? ` [${(n as any).role}]` : ''} — ${n.childCount > 0 ? `${n.childCount} filhos, ` : ''}in ${n.inWeight} / out ${n.outWeight}`),
               level.nodes.length > 80 ? `- ... e mais ${level.nodes.length - 80} nós` : '',
               '',
               '## Arestas (peso = dependências agregadas)',
@@ -710,6 +748,28 @@ export class TicAnalyzerMcpServer {
               level.edges.length > 60 ? `- ... e mais ${level.edges.length - 60} arestas` : '',
               '',
               '> Para detalhar: get_graph_level(expanded=[..., "module:<nome>"]).'
+            ].filter(Boolean);
+            return respond(textResult(lines.join('\n')));
+          } finally { db.close(); }
+        }
+
+        case 'list_http_flows': {
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const rows = db.prepare(
+              `SELECT from_id, to_id, label FROM cg_edges WHERE type = 'HTTP_CALL' LIMIT 500`
+            ).all() as Array<{ from_id: string; to_id: string; label: string | null }>;
+            const flows = rows.map((r) => {
+              let url: string | undefined; let method: string | undefined;
+              try { const m = r.label ? JSON.parse(r.label) : {}; url = m.url; method = m.method; } catch {}
+              return { from: r.from_id, to: r.to_id, url, method };
+            });
+            const lines = [
+              `# HTTP Flows (${flows.length} chamadas)`,
+              '',
+              ...flows.slice(0, 50).map((f) => `- \`${f.from}\` → \`${f.to}\`${f.method ? ` [${f.method}]` : ''}${f.url ? ` ${f.url}` : ''}`),
+              flows.length > 50 ? `... e mais ${flows.length - 50} chamadas` : '',
             ].filter(Boolean);
             return respond(textResult(lines.join('\n')));
           } finally { db.close(); }
@@ -789,7 +849,16 @@ export class TicAnalyzerMcpServer {
               outOfScope: archData?.outOfScope ?? []
             });
             if (!brief) return respond(textResult(`Entidade "${entity}" não encontrada no grafo de impacto.`));
-            return respond(textResult(brief));
+            // Injeta memória persistente ao final do brief.
+            const memories = queryMemory(this.ticCodePath, target);
+            if (memories.length === 0) return respond(textResult(brief));
+            const memLines = [`\n## Tentativas Anteriores`, `*${memories.length} entrada(s) na memória persistente*`, ''];
+            for (const m of memories.slice(0, 5)) {
+              const tag = m.result ? ` → **${m.result}**` : '';
+              memLines.push(`- **[${m.kind}]** ${m.summary}${tag} *(${m.ts.slice(0, 10)})*`);
+              if (m.detail) memLines.push(`  > ${m.detail}`);
+            }
+            return respond(textResult(brief + memLines.join('\n')));
           } finally { db.close(); }
         }
 
@@ -871,6 +940,57 @@ export class TicAnalyzerMcpServer {
           });
           if (!r.ok) return respond(textResult(`❌ ${r.error}`));
           return respond(textResult(`✅ Item \`${id}\` atualizado: estado=${r.item!.state}, categoria=${r.item!.category}, prioridade=${r.item!.priority}`));
+        }
+
+        case 'remember': {
+          const { entity, kind, summary, detail, result, refs } = args as {
+            entity: string; kind: MemoryKind; summary: string;
+            detail?: string; result?: MemoryResult; refs?: string[];
+          };
+          const entry = appendMemory(this.ticCodePath, { entity, kind, summary, detail, result, refs });
+          return respond(textResult(`Registrado (${entry.id}): [${kind}] ${summary}`));
+        }
+
+        case 'recall': {
+          const { entity } = args as { entity: string };
+          const entries = queryMemory(this.ticCodePath, entity);
+          if (entries.length === 0) return respond(textResult(`Nenhuma memória registrada para "${entity}".`));
+          const lines = [`## Memória: ${entity}`, `*${entries.length} entrada(s) — mais recentes primeiro*`, ''];
+          for (const e of entries) {
+            const resultTag = e.result ? ` → **${e.result}**` : '';
+            lines.push(`### [${e.kind}] ${e.summary}${resultTag}`);
+            lines.push(`*${e.ts.slice(0, 10)} · source: ${e.source ?? 'agent'}*`);
+            if (e.detail) lines.push(`> ${e.detail}`);
+            if (e.refs?.length) lines.push(`refs: ${e.refs.join(', ')}`);
+            lines.push('');
+          }
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'list_http_flows': {
+          const flowDb = openIndexDb(this.indexDbPath);
+          if (!flowDb) return respond(noIndexDb());
+          try {
+            const rows = flowDb.prepare(
+              "SELECT from_id, to_id, type, label FROM cg_edges WHERE type = 'HTTP_CALL' LIMIT 500"
+            ).all() as Array<{ from_id: string; to_id: string; type: string; label: string | null }>;
+            if (rows.length === 0) return respond(textResult('Nenhuma chamada HTTP cross-tier detectada. O projeto precisa ter fetch/axios/HttpClient no frontend e endpoints no backend.'));
+            const byFrom = new Map<string, typeof rows>();
+            for (const r of rows) {
+              if (!byFrom.has(r.from_id)) byFrom.set(r.from_id, []);
+              byFrom.get(r.from_id)!.push(r);
+            }
+            const lines: string[] = [`# HTTP Flows Cross-Tier (${rows.length} chamada(s))`, ''];
+            for (const [from, calls] of byFrom) {
+              lines.push(`## ${from}`);
+              for (const c of calls) {
+                const label = c.label ? ` (${c.label})` : '';
+                lines.push(`- → \`${c.to_id}\`${label}`);
+              }
+              lines.push('');
+            }
+            return respond(textResult(lines.join('\n')));
+          } finally { flowDb.close(); }
         }
 
         case 'get_portfolio': {
@@ -1498,8 +1618,7 @@ export class TicAnalyzerMcpServer {
 
         case 'search_code': {
           const query = ((args as { query: string }).query ?? '').trim();
-          const semantic = await this.searchSemanticTool(query);
-          return respond({ content: [{ type: 'text', text: semantic ?? this.searchCodeTool(query) }] });
+          return respond({ content: [{ type: 'text', text: await this.searchCodeFused(query) }] });
         }
 
         case 'get_concept_map': {
@@ -1907,8 +2026,54 @@ export class TicAnalyzerMcpServer {
   }
 
   /**
+   * Busca híbrida: tenta fundir FTS5 e vetorial via RRF quando há embeddings.
+   * Fallback: FTS puro quando o modelo ou os embeddings não estão disponíveis.
+   */
+  private async searchCodeFused(query: string): Promise<string> {
+    if (!query) return 'Informe um query para busca.';
+    const tokens = this.tokenizeQuery(query);
+    if (tokens.length === 0) return 'Query muito curta. Use pelo menos 3 caracteres.';
+    const db = openIndexDb(this.indexDbPath);
+    if (!db) return this.searchCodeTool(query);
+    try {
+      const ftsHits = querySearch(db, tokens, 20);
+      let hits: FusedHit[] | null = null;
+      if (embeddingsCount(db) > 0) {
+        const embedder = await getEmbedder();
+        if (embedder) {
+          const [qvec] = await embedder([query]);
+          const vecHits = queryVectorSearch(db, qvec, 20);
+          hits = fuseRRF(ftsHits, vecHits, 60, 10);
+        }
+      }
+      if (!hits) {
+        // Sem embeddings: usa FTS puro convertido para FusedHit.
+        hits = ftsHits.slice(0, 10).map((h) => ({ ...h, origin: 'fts' as const }));
+      }
+      if (hits.length === 0) return `Nenhum arquivo encontrado para "${query}". Tente termos mais gerais.`;
+      const hasVec = hits.some((h) => h.origin !== 'fts');
+      const mode = hasVec ? 'FTS5 + vetorial (RRF)' : 'FTS5/BM25';
+      const lines: string[] = [
+        `## Resultados para: "${query}"`,
+        `*${hits.length} arquivos relevantes (${mode})*`,
+        ''
+      ];
+      for (const hit of hits) {
+        const originTag = hasVec ? ` [${hit.origin}]` : '';
+        lines.push(`### \`${hit.file}\`${originTag} (score: ${hit.score})`);
+        if (hit.snippet) lines.push(`> ${hit.snippet}`);
+        lines.push('');
+      }
+      return lines.join('\n');
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
    * Busca semântica via embeddings locais (Fase 4). Retorna null quando não há
    * embeddings no índice ou o modelo não está disponível — aí o caller usa FTS.
+   * @deprecated Use searchCodeFused() que agrega RRF.
    */
   private async searchSemanticTool(query: string): Promise<string | null> {
     if (!query) return null;

@@ -87,6 +87,7 @@ export function ValueDashboard({ ticCodeDir, projectPath }: { ticCodeDir: string
   const [rateInput, setRateInput] = useState('');
   const [curInput, setCurInput] = useState('R$');
   const [savingCfg, setSavingCfg] = useState(false);
+  const [showFormula, setShowFormula] = useState(false);
 
   const load = useCallback(() => {
     const readJson = async (f: string) => { const c = await window.ticAnalyzer.readFile(`${ticCodeDir}/${f}`); try { return c ? JSON.parse(c) : null; } catch { return null; } };
@@ -175,6 +176,57 @@ export function ValueDashboard({ ticCodeDir, projectPath }: { ticCodeDir: string
               color={roi.net >= 0 ? C.secondary : C.tertiaryFixedDim} icon="balance" accentBg />
             <KpiCard label="Conhecimento em Risco" value={String(own?.knowledgeRisk.length ?? 0)}
               unit="arquivos" sub="com 1 só autor" color={C.tertiaryFixedDim} icon="person_alert" />
+          </div>
+
+          {/* Formula accordion */}
+          <div style={{ marginBottom: 20, marginTop: 16, background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: 12, overflow: 'hidden' }}>
+            <button onClick={() => setShowFormula(s => !s)} style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 16px', background: 'none', border: 'none', cursor: 'pointer', color: C.onSurfaceVariant,
+              fontFamily: F.body, fontSize: 13,
+            }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>calculate</span>
+                Como este valor foi calculado
+              </span>
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{showFormula ? 'expand_less' : 'expand_more'}</span>
+            </button>
+            {showFormula && (
+              <div style={{ padding: '0 16px 16px', borderTop: `1px solid ${C.outlineVariant}` }}>
+                {/* Debt cost formula */}
+                <div style={{ marginTop: 16, marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.error, marginBottom: 6, fontFamily: F.code }}>CUSTO DE DÉBITO</div>
+                  <div style={{ fontFamily: F.code, fontSize: 12, color: C.onSurface, background: C.surfaceContainer, padding: '8px 12px', borderRadius: 8, borderLeft: `2px solid ${C.error}` }}>
+                    <div>Custo = Σ(debtScore × {roi.hoursPerDebtPoint}h) × {curInput}{roi.hourlyRate}/h</div>
+                    <div style={{ color: C.onSurfaceVariant, marginTop: 4 }}>= {roi.remediationHours}h × {curInput}{roi.hourlyRate} = <span style={{ color: C.error }}>{money(roi.debtCost)}</span></div>
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 11, color: C.onSurfaceVariant, fontFamily: F.body }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>debtScore por arquivo:</div>
+                    <div>• Complexidade ciclomática &gt; 20 → até 40 pts</div>
+                    <div>• Arquivo &gt; 1.500 linhas → 10 pts (ou &gt; 500 linhas → 3 pts)</div>
+                    <div>• Dependências de saída &gt; 15 → até 15 pts</div>
+                  </div>
+                </div>
+                {/* Savings formula */}
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.secondary, marginBottom: 6, fontFamily: F.code }}>ECONOMIA VIA PRs</div>
+                  <div style={{ fontFamily: F.code, fontSize: 12, color: C.onSurface, background: C.surfaceContainer, padding: '8px 12px', borderRadius: 8, borderLeft: `2px solid ${C.secondary}` }}>
+                    <div>Economia = (entidades impactadas × 5 min) / 60 × {curInput}{roi.hourlyRate}/h</div>
+                    <div style={{ color: C.onSurfaceVariant, marginTop: 4 }}>= {roi.hoursSaved}h × {curInput}{roi.hourlyRate} = <span style={{ color: C.secondary }}>{money(roi.savedCost)}</span></div>
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 11, color: C.onSurfaceVariant }}>
+                    Cada entidade impactada num PR = ~5 minutos economizados de navegação manual no código.
+                  </div>
+                </div>
+                {/* Net */}
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.primaryFixedDim, marginBottom: 6, fontFamily: F.code }}>SALDO</div>
+                  <div style={{ fontFamily: F.code, fontSize: 12, color: C.onSurface, background: C.surfaceContainer, padding: '8px 12px', borderRadius: 8, borderLeft: `2px solid ${C.primaryFixedDim}` }}>
+                    Saldo = Economia − Custo = {money(roi.savedCost)} − {money(roi.debtCost)} = <span style={{ color: roi.net >= 0 ? C.secondary : C.error }}>{money(Math.abs(roi.net))}</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ROI Config */}

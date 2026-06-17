@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   getGraphLevel: (projectPath: string, expanded: string[]): Promise<unknown> =>
     ipcRenderer.invoke('get-graph-level', projectPath, expanded),
 
+  searchCode: (projectPath: string, query: string): Promise<unknown> =>
+    ipcRenderer.invoke('search-code', projectPath, query),
+
   updateTriage: (projectPath: string, id: string, changes: unknown): Promise<unknown> =>
     ipcRenderer.invoke('update-triage', projectPath, id, changes),
 
@@ -98,5 +101,8 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
     const handler = (_event: unknown, entry: unknown) => callback(entry);
     ipcRenderer.on('mcp-token-update', handler);
     return () => ipcRenderer.removeListener('mcp-token-update', handler);
-  }
+  },
+
+  listHttpFlows: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('list-http-flows', projectPath),
 });

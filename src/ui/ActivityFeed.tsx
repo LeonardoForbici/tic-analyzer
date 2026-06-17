@@ -43,6 +43,7 @@ const TYPE_META: Record<string, { icon: string; color: string }> = {
   'module-removed': { icon: 'remove_circle', color: C.error },
   'prediction-confirmed': { icon: 'target', color: C.secondary },
   'alert-sent': { icon: 'notifications', color: C.primaryFixedDim },
+  'memory-contradiction': { icon: 'psychology_alt', color: C.error },
 };
 
 function Icon({ name, size = 20, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {

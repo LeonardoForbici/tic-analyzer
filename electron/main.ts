@@ -6,6 +6,8 @@ import { TicAnalyzerMcpServer } from '../src/mcp/server';
 import { openIndexDb, INDEX_DB_FILE } from '../src/analyzer/store/indexDb';
 import { queryImpactOf, queryBlastRadius } from '../src/analyzer/store/impactQueries';
 import { queryGraphLevel } from '../src/analyzer/store/graphQueries';
+import { querySearch, queryVectorSearch, embeddingsCount, fuseRRF } from '../src/mcp/queries';
+import { getEmbedder } from '../src/analyzer/semantic/embeddings';
 import { transitionTriageItem, createManualItem, type TriageState, type TriageCategory, type TriagePriority } from '../src/analyzer/store/triageStore';
 import { renderArchReviewHtml, loadArchRules } from '../src/analyzer/checkArchRules';
 import { loadActivity } from '../src/analyzer/store/activityLog';
@@ -340,6 +342,68 @@ ipcMain.handle('get-graph-level', async (_event, projectPath: string, expanded: 
     return { error: String(err) };
   } finally {
     db.close();
+  }
+});
+
+// Busca de código: funde FTS5 + vetorial via RRF (mesma engine da tool MCP search_code).
+function tokenizeForSearch(query: string): string[] {
+  const raw = query.match(/[a-zA-Z]{3,}/g) ?? [];
+  const tokens = new Set<string>();
+  for (const word of raw) {
+    word
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+      .replace(/([a-z\d])([A-Z])/g, '$1_$2')
+      .split('_')
+      .map((t) => t.toLowerCase())
+      .filter((t) => t.length >= 3)
+      .forEach((p) => tokens.add(p));
+    tokens.add(word.toLowerCase());
+  }
+  return [...tokens];
+}
+
+ipcMain.handle('search-code', async (_event, projectPath: string, query: string) => {
+  const q = (query ?? '').trim();
+  if (!q) return { hits: [], mode: 'empty' };
+  const db = openIndexDb(path.join(projectPath, '.tic-code', INDEX_DB_FILE));
+  if (!db) return { error: 'index.db não encontrado. Execute a análise novamente.' };
+  try {
+    const tokens = tokenizeForSearch(q);
+    if (tokens.length === 0) return { hits: [], mode: 'short' };
+    const ftsHits = querySearch(db, tokens, 20);
+    if (embeddingsCount(db) > 0) {
+      const embedder = await getEmbedder();
+      if (embedder) {
+        const [qvec] = await embedder([q]);
+        const vecHits = queryVectorSearch(db, qvec, 20);
+        return { hits: fuseRRF(ftsHits, vecHits, 60, 12), mode: 'rrf' };
+      }
+    }
+    return { hits: ftsHits.slice(0, 12).map((h) => ({ ...h, origin: 'fts' as const })), mode: 'fts' };
+  } catch (err) {
+    return { error: String(err) };
+  } finally {
+    db.close();
+  }
+});
+
+ipcMain.handle('list-http-flows', async (_event, projectPath: string) => {
+  try {
+    const db = openIndexDb(path.join(projectPath, '.tic-code', INDEX_DB_FILE));
+    if (!db) return { flows: [], error: 'index.db não encontrado — rode a análise primeiro.' };
+    try {
+      const rows = (db.prepare(
+        `SELECT from_id, to_id, label FROM cg_edges WHERE type = 'HTTP_CALL' LIMIT 500`
+      ).all()) as Array<{ from_id: string; to_id: string; label: string | null }>;
+      const flows = rows.map(r => {
+        let url: string | undefined; let method: string | undefined;
+        try { const m = r.label ? JSON.parse(r.label) : {}; url = m.url; method = m.method; } catch {}
+        return { from: r.from_id, to: r.to_id, url, method };
+      });
+      return { flows };
+    } finally { db.close(); }
+  } catch (e) {
+    return { flows: [], error: String(e) };
   }
 });
 

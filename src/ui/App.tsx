@@ -5,6 +5,9 @@ import { ActivityFeed, type ActivityEvent } from './ActivityFeed';
 import { ValueDashboard } from './ValueDashboard';
 import { PortfolioDashboard } from './PortfolioDashboard';
 import { GovernanceDashboard } from './GovernanceDashboard';
+import { MemoryViewer } from './MemoryViewer';
+import { SearchCodeViewer } from './SearchCodeViewer';
+import { HttpFlowsViewer } from './HttpFlowsViewer';
 
 declare global {
   interface Window {
@@ -19,6 +22,7 @@ declare global {
       getGitDiff: (projectPath: string) => Promise<{ files: string[]; error?: string }>;
       getImpactOf: (projectPath: string, entity: string) => Promise<ImpactOfResponse>;
       getGraphLevel: (projectPath: string, expanded: string[]) => Promise<unknown>;
+      searchCode: (projectPath: string, query: string) => Promise<SearchCodeResponse>;
       updateTriage: (projectPath: string, id: string, changes: unknown) => Promise<unknown>;
       createTriage: (projectPath: string, input: unknown) => Promise<unknown>;
       openArchReport: (projectPath: string) => Promise<unknown>;
@@ -38,6 +42,7 @@ declare global {
       onTokenUpdate: (cb: (entry: TokenEntry) => void) => () => void;
       onProgress: (cb: (p: Progress) => void) => () => void;
       onAnalysisDone: (cb: (r: AnalysisResult) => void) => void;
+      listHttpFlows: (projectPath: string) => Promise<unknown>;
     };
   }
 }
@@ -68,8 +73,10 @@ interface ImpactOfResponse {
   impact?: { entity: string; affected: ImpactedNode[]; byKind: Record<string, number>; byModule: Record<string, number>; totalVisited: number; truncated: boolean; candidates?: string[] };
   blast?: { entity: string; totalAffected: number; truncated: boolean; byKind: Record<string, number>; byModule: Record<string, number>; top: Array<{ id: string; kind: string; depth: number; dependents: number; confidence: string }> };
 }
+export interface SearchHitUI { file: string; snippet: string; score: number; origin: 'fts' | 'vec' | 'both' }
+export interface SearchCodeResponse { hits?: SearchHitUI[]; mode?: string; error?: string }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
-type Tab = 'overview' | 'health' | 'value' | 'governance' | 'activity' | 'explorer' | 'impact' | 'metrics' | 'files' | 'portfolio' | 'docs';
+type Tab = 'overview' | 'health' | 'value' | 'governance' | 'activity' | 'explorer' | 'search' | 'memory' | 'impact' | 'metrics' | 'files' | 'portfolio' | 'docs' | 'http';
 
 // ── Design System ─────────────────────────────────────────────────────────────
 const C = {
@@ -748,11 +755,14 @@ const NAV_ITEMS: Array<{ id: Tab; label: string; icon: string; requiresDone?: bo
   { id: 'governance',  label: 'Governança',   icon: 'account_balance',   requiresDone: true },
   { id: 'activity',    label: 'Atividade',    icon: 'history',           requiresDone: true },
   { id: 'explorer',    label: 'Explorador',   icon: 'explore',           requiresDone: true },
+  { id: 'search',      label: 'Busca',        icon: 'search',            requiresDone: true },
+  { id: 'memory',      label: 'Memória',      icon: 'neurology',         requiresDone: true },
   { id: 'impact',      label: 'Impacto',      icon: 'emergency_home',    requiresDone: true },
   { id: 'metrics',     label: 'Métricas',     icon: 'analytics',         requiresDone: true },
   { id: 'files',       label: 'Arquivos',     icon: 'folder',            requiresDone: true },
   { id: 'portfolio',   label: 'Portfólio',    icon: 'inventory_2' },
   { id: 'docs',        label: 'Docs',         icon: 'help' },
+  { id: 'http',        label: 'HTTP',         icon: 'http',              requiresDone: true },
 ];
 
 function SideNav({ activeTab, onTabChange, isDone }: {
@@ -1499,6 +1509,24 @@ export function App() {
                 </div>
               )}
 
+              {activeTab === 'search' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <SearchCodeViewer projectPath={projectPath} />
+                </div>
+              )}
+
+              {activeTab === 'memory' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <MemoryViewer ticCodeDir={result!.outputPath} />
+                </div>
+              )}
+
+              {activeTab === 'http' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <HttpFlowsViewer projectPath={projectPath} />
+                </div>
+              )}
+
               {activeTab === 'impact' && (
                 <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
                   <ImpactTab ticCodeDir={result!.outputPath} projectPath={projectPath} />
@@ -1549,6 +1577,9 @@ export function App() {
                     </button>
                   </div>
                 </div>
+              )}
+              {activeTab === 'http' && projectPath && (
+                <HttpFlowsViewer projectPath={projectPath} />
               )}
             </>
           )}

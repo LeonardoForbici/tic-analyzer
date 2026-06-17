@@ -9,6 +9,7 @@
  * Funções puras (sem I/O), testáveis isoladamente.
  */
 import { makeEvent, type ActivityEvent } from './store/activityLog';
+import { appendMemory } from './store/memoryStore';
 import type { RiskPrediction } from './computeRiskPrediction';
 import type { FileChurn } from './computeRiskPrediction';
 
@@ -91,7 +92,8 @@ export function computePredictionFeedback(
   prevPrediction: RiskPrediction[],
   curChurn: Map<string, FileChurn> | null,
   newRiskFiles: Set<string>,
-  prevAccuracy: PredictionAccuracy | null
+  prevAccuracy: PredictionAccuracy | null,
+  ticCodeDir?: string
 ): { events: ActivityEvent[]; accuracy: PredictionAccuracy } {
   const acc: PredictionAccuracy = prevAccuracy
     ? { ...prevAccuracy, history: [...prevAccuracy.history] }
@@ -108,11 +110,22 @@ export function computePredictionFeedback(
     if (gainedFix || becameRisk) {
       acc.confirmed++;
       acc.total++;
-      acc.history.push({ ts: new Date().toISOString(), file: p.file });
+      const nowTs = new Date().toISOString();
+      acc.history.push({ ts: nowTs, file: p.file });
+      const detail = `score era ${p.score} (${p.reasons.join(', ')}) — ${gainedFix ? 'recebeu fix' : 'virou risco'}`;
       events.push(makeEvent('prediction-confirmed', 'info',
-        `Predição confirmada: ${p.file.split('/').pop()}`,
-        `score era ${p.score} (${p.reasons.join(', ')}) — ${gainedFix ? 'recebeu fix' : 'virou risco'}`,
-        `file:${p.file}`));
+        `Predição confirmada: ${p.file.split('/').pop()}`, detail, `file:${p.file}`));
+      // Grava outcome automático na memória persistente.
+      if (ticCodeDir) {
+        appendMemory(ticCodeDir, {
+          entity: `file:${p.file}`,
+          kind: 'outcome',
+          summary: `Predição de risco confirmada (score ${p.score})`,
+          detail,
+          result: 'worked',
+          source: 'pipeline-auto'
+        });
+      }
     }
   }
   acc.hitRate = acc.total > 0 ? Math.round((acc.confirmed / acc.total) * 100) / 100 : 0;

@@ -20,6 +20,7 @@ export interface AggNode {
   label: string;
   kind: AggNodeKind;
   layer?: string;
+  role?: string;
   /** Quantos filhos este agregado tem (módulos num layer, arquivos num módulo...). */
   childCount: number;
   inWeight: number;
@@ -94,13 +95,14 @@ export function queryGraphLevel(db: Database.Database, req: GraphLevelRequest): 
       // Módulo expandido → só arquivos CONECTADOS (top N por grau); os sem
       // dependência (package.json, README...) viram um único pseudo-nó.
       const files = db
-        .prepare('SELECT rel_path, in_degree, out_degree, layer FROM files WHERE module = ? AND (in_degree + out_degree) > 0 ORDER BY (in_degree + out_degree) DESC LIMIT ?')
-        .all(m.name, MAX_CHILDREN) as Array<{ rel_path: string; in_degree: number; out_degree: number; layer: string | null }>;
+        .prepare('SELECT rel_path, in_degree, out_degree, layer, role FROM files WHERE module = ? AND (in_degree + out_degree) > 0 ORDER BY (in_degree + out_degree) DESC LIMIT ?')
+        .all(m.name, MAX_CHILDREN) as Array<{ rel_path: string; in_degree: number; out_degree: number; layer: string | null; role: string | null }>;
       for (const f of files) {
         const id = `file:${f.rel_path}`;
         nodes.set(id, {
           id, label: f.rel_path.split('/').pop() ?? f.rel_path, kind: 'file',
           layer: f.layer ?? layer,
+          role: f.role ?? undefined,
           childCount: 0, inWeight: f.in_degree, outWeight: f.out_degree
         });
         visibleFiles.set(f.rel_path, id);
