@@ -126,7 +126,56 @@ export function queryVectorSearch(db: Database.Database, queryVec: Float32Array,
   const rows = db.prepare('SELECT file, vec FROM embeddings').all() as any[];
   const scored = rows.map((r) => ({ file: r.file as string, score: cosine(queryVec, blobToVector(r.vec as Buffer)) }));
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit).map((s) => ({ file: s.file, snippet: '', score: Math.round(s.score * 1000) / 1000 }));
+  const top = scored.slice(0, limit);
+  // Enriquece com snippet da FTS5 para nunca devolver hit "cego" (sem contexto).
+  const snippetStmt = db.prepare('SELECT snippet FROM search_fts WHERE file = ? LIMIT 1');
+  return top.map((s) => {
+    const row = snippetStmt.get(s.file) as any;
+    return { file: s.file, snippet: (row?.snippet as string) ?? '', score: Math.round(s.score * 1000) / 1000 };
+  });
+}
+
+export interface FusedHit extends SearchHit {
+  /** Indica a origem do hit: só FTS, só vetorial, ou ambos. */
+  origin: 'fts' | 'vec' | 'both';
+}
+
+/**
+ * Reciprocal Rank Fusion (RRF) — funde listas FTS e vetorial num único ranking.
+ *
+ * score_rrf(d) = Σ 1/(k + rank_i(d))  onde rank é 1-based.
+ * k=60 é o padrão da literatura (Cormack et al. 2009); atenua o peso de
+ * posições iniciais sem depender de reranker neural — 100% determinístico.
+ */
+export function fuseRRF(ftsHits: SearchHit[], vecHits: SearchHit[], k = 60, limit = 10): FusedHit[] {
+  const scores = new Map<string, { rrf: number; ftsRank?: number; vecRank?: number; snippet: string }>();
+  for (let i = 0; i < ftsHits.length; i++) {
+    const h = ftsHits[i];
+    const entry = scores.get(h.file) ?? { rrf: 0, snippet: h.snippet };
+    entry.rrf += 1 / (k + i + 1);
+    entry.ftsRank = i + 1;
+    if (!entry.snippet && h.snippet) entry.snippet = h.snippet;
+    scores.set(h.file, entry);
+  }
+  for (let i = 0; i < vecHits.length; i++) {
+    const h = vecHits[i];
+    const entry = scores.get(h.file) ?? { rrf: 0, snippet: h.snippet };
+    entry.rrf += 1 / (k + i + 1);
+    entry.vecRank = i + 1;
+    if (!entry.snippet && h.snippet) entry.snippet = h.snippet;
+    scores.set(h.file, entry);
+  }
+  return [...scores.entries()]
+    .sort((a, b) => b[1].rrf - a[1].rrf)
+    .slice(0, limit)
+    .map(([file, e]) => ({
+      file,
+      snippet: e.snippet,
+      score: Math.round(e.rrf * 10000) / 10000,
+      origin: e.ftsRank !== undefined && e.vecRank !== undefined ? 'both'
+            : e.vecRank !== undefined ? 'vec'
+            : 'fts'
+    }));
 }
 
 export interface DbCallGraph {

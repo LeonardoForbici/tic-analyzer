@@ -646,7 +646,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       : null;
     const deltaEvents = computeSelfDelta(prevDelta, curDelta);
     const newRiskFiles = new Set(deltaEvents.filter((e) => e.type === 'risk-new' && e.entity).map((e) => e.entity!.replace(/^file:/, '')));
-    const { events: predEvents, accuracy } = computePredictionFeedback(previousPrediction, churn, newRiskFiles, previousAccuracy as PredictionAccuracy | null);
+    const { events: predEvents, accuracy } = computePredictionFeedback(previousPrediction, churn, newRiskFiles, previousAccuracy as PredictionAccuracy | null, ticCodeDir);
     fs.writeFileSync(path.join(ticCodeDir, 'prediction-accuracy.json'), JSON.stringify(accuracy), 'utf8');
     const summary = makeEvent('analysis', 'info',
       `Análise concluída — health ${health.score}/100 (${health.grade})`,
@@ -692,6 +692,28 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
 
     // ── SALVA CACHE ───────────────────────────────────────────────────────────────
     saveFileCache(ticCodeDir, files);
+
+    // ── DREAM CYCLE (manutenção incremental da memória) ───────────────────────────
+    // Dedup e detecção de contradições no memoryStore — determinístico, sem LLM.
+    try {
+      const { loadMemory, runMemoryMaintenance, appendMemory: addMem } = await import('./store/memoryStore');
+      const { appendEvents: addEvt, makeEvent: mkEvt } = await import('./store/activityLog');
+      const memEntries = loadMemory(ticCodeDir);
+      if (memEntries.length > 0) {
+        const { deduped, contradictions } = runMemoryMaintenance(memEntries);
+        if (deduped.length < memEntries.length) {
+          const { default: fsMod } = await import('fs');
+          const { join: joinPath } = await import('path');
+          fsMod.writeFileSync(joinPath(ticCodeDir, 'memory.json'), JSON.stringify(deduped, null, 2), 'utf8');
+        }
+        for (const c of contradictions) {
+          addEvt(ticCodeDir, [mkEvt('risk-new', 'warn',
+            `Memória contraditória: ${c.entity}`,
+            `${c.entries.length} outcomes opostos registrados — revise com recall("${c.entity}")`,
+            c.entity)]);
+        }
+      }
+    } catch { /* best-effort: nunca quebra a análise */ }
 
     // ── 22. ARQUIVOS PARA IA ─────────────────────────────────────────────────────
     if (opts.skipAiFiles) {
@@ -833,16 +855,45 @@ function computeDeadPlsql(plsqlObjects: PlsqlObject[], plsqlCalls: PlsqlCall[], 
   });
 }
 
+/**
+ * Grava `content` em `filePath` de forma segura: se o arquivo já existe e não
+ * contém os marcadores TIC, o conteúdo TIC é ADICIONADO no final — as
+ * configurações do usuário acima do bloco são preservadas intactas.
+ * Se os marcadores já existem, apenas o bloco interno é substituído.
+ */
+function writeGuardedBlock(filePath: string, content: string): void {
+  const START = '<!-- TIC:START -->';
+  const END = '<!-- TIC:END -->';
+  const block = `${START}\n${content}\n${END}`;
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, block + '\n', 'utf8');
+    return;
+  }
+  const existing = fs.readFileSync(filePath, 'utf8');
+  const startIdx = existing.indexOf(START);
+  const endIdx = existing.indexOf(END);
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    // Substitui apenas o bloco TIC; preserva tudo fora dele.
+    const before = existing.slice(0, startIdx);
+    const after = existing.slice(endIdx + END.length);
+    fs.writeFileSync(filePath, before + block + after, 'utf8');
+  } else {
+    // Arquivo existe mas sem bloco TIC — append no final.
+    const sep = existing.endsWith('\n') ? '\n' : '\n\n';
+    fs.writeFileSync(filePath, existing + sep + block + '\n', 'utf8');
+  }
+}
+
 function writeCopilotInstructions(projectPath: string, projectName: string, totalFiles: number, modules: ReturnType<typeof detectModules>): void {
   const githubDir = path.join(projectPath, '.github');
   fs.mkdirSync(githubDir, { recursive: true });
   const moduleList = modules.slice(0, 10).map((m) => `  - \`${m.name}\` (${m.fileCount} arquivos)`).join('\n');
   const content = `# ${projectName} — GitHub Copilot Instructions (TIC Analyzer)\n\n> Projeto com ${totalFiles.toLocaleString()} arquivos. Modo Large Project ativo.\n\n## Instruções Operacionais\n\nAntes de sugerir alterações:\n\n1. **Leia apenas** \`.tic-code/quick-context.md\` para contexto geral\n2. **Para módulo específico:** leia \`.tic-code/modules/{nome}/context.md\`\n3. **Para impacto de mudança:** leia \`.tic-code/impact-index.json\` (ou use MCP tool get_impact)\n4. **Para métricas:** leia \`.tic-code/metrics-summary.md\`\n\n## Módulos Disponíveis\n\n${moduleList}\n\n> Lista completa: \`.tic-code/index.md\`\n`;
-  fs.writeFileSync(path.join(githubDir, 'copilot-instructions.md'), content, 'utf8');
+  writeGuardedBlock(path.join(githubDir, 'copilot-instructions.md'), content);
 }
 
 function writeClaudeMd(projectPath: string, projectName: string, totalFiles: number, modules: ReturnType<typeof detectModules>): void {
   const moduleList = modules.slice(0, 10).map((m) => `- \`.tic-code/modules/${m.name}/context.md\` — ${m.fileCount} arquivos`).join('\n');
-  const content = `# ${projectName} — Claude Code Context (TIC Analyzer)\n\n> ${totalFiles.toLocaleString()} arquivos. Large Project Mode.\n\n## REGRA: MCP primeiro, arquivos depois\n\nANTES de ler arquivos do projeto, consulte o MCP (\`localhost:7432\`) — ele já tem a análise completa e gasta uma fração dos tokens:\n\n1. **Impacto de mudança** (arquivo, método, procedure PL/SQL, tabela ou coluna):\n   - \`get_blast_radius("PKG.PROC" | "TABELA" | "TABELA.COLUNA" | "Arquivo.java")\` — resumo ~200 tokens. Use PRIMEIRO.\n   - \`get_impact_of(entity)\` — detalhe por profundidade/módulo se o resumo não bastar\n   - \`get_table_impact(tabela[, coluna])\` — quem é afetado por mudar a tabela/coluna\n   - \`get_diff_impact()\` — impacto cross-tier de tudo que está no git diff\n2. **Localizar código**: \`search_code(query)\` (FTS) — só depois leia o arquivo certo\n3. **Entender fluxo**: \`trace_flow(entidade)\` — cadeia tela→endpoint→service→procedure→tabela\n4. **Contexto**: \`get_quick_context()\` (visão geral), \`get_module("nome")\` (módulo)\n5. **Qualidade**: \`get_metrics()\`, \`get_hotspots()\`, \`get_violations()\`\n\n## Navegação por arquivos (sem MCP)\n\n1. Visão geral: \`.tic-code/quick-context.md\`\n2. Módulo específico: \`.tic-code/modules/{nome}/context.md\`\n3. Mapa completo: \`.tic-code/index.md\`\n\n## Módulos Principais\n\n${moduleList}\n`;
-  fs.writeFileSync(path.join(projectPath, 'CLAUDE.md'), content, 'utf8');
+  const content = `# ${projectName} — Claude Code Context (TIC Analyzer)\n\n> ${totalFiles.toLocaleString()} arquivos. Large Project Mode.\n\n## REGRA: MCP primeiro, arquivos depois\n\nANTES de ler arquivos do projeto, consulte o MCP (\`localhost:7432\`) — ele já tem a análise completa e gasta uma fração dos tokens:\n\n1. **Impacto de mudança** (arquivo, método, procedure PL/SQL, tabela ou coluna):\n   - \`get_blast_radius("PKG.PROC" | "TABELA" | "TABELA.COLUNA" | "Arquivo.java")\` — resumo ~200 tokens. Use PRIMEIRO.\n   - \`get_impact_of(entity)\` — detalhe por profundidade/módulo se o resumo não bastar\n   - \`get_table_impact(tabela[, coluna])\` — quem é afetado por mudar a tabela/coluna\n   - \`get_diff_impact()\` — impacto cross-tier de tudo que está no git diff\n2. **Localizar código**: \`search_code(query)\` (FTS + vetorial fundidos)\n3. **Entender fluxo**: \`trace_flow(entidade)\` — cadeia tela→endpoint→service→procedure→tabela\n4. **Contexto**: \`get_quick_context()\` (visão geral), \`get_module("nome")\` (módulo)\n5. **Qualidade**: \`get_metrics()\`, \`get_hotspots()\`, \`get_violations()\`\n6. **Memória**: \`recall(entity)\` (histórico de tentativas/decisões), \`remember(entity, kind, summary)\` (registrar)\n\n## Navegação por arquivos (sem MCP)\n\n1. Visão geral: \`.tic-code/quick-context.md\`\n2. Módulo específico: \`.tic-code/modules/{nome}/context.md\`\n3. Mapa completo: \`.tic-code/index.md\`\n\n## Módulos Principais\n\n${moduleList}\n`;
+  writeGuardedBlock(path.join(projectPath, 'CLAUDE.md'), content);
 }
