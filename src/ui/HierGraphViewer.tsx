@@ -54,11 +54,6 @@ const LAYER_COLORS: Record<string, string> = {
   frontend: '#4a9eff', backend: '#4edea3', database: '#ffb95f', default: C.nodeAmber,
 };
 
-// Tamanho dos nós por kind
-function nodeSize(kind: AggNode['kind']): number {
-  return kind === 'layer' ? 28 : kind === 'module' ? 20 : kind === 'symbol' ? 9 : kind === 'more' ? 12 : 13;
-}
-
 const CY_STYLE: cytoscape.Stylesheet[] = [
   // ── Base ──────────────────────────────────────────────────────────────────
   {
@@ -77,14 +72,23 @@ const CY_STYLE: cytoscape.Stylesheet[] = [
       'color': C.textPrimary,
       'text-valign': 'center',
       'text-halign': 'right',
-      'text-margin-x': 8,
+      'text-margin-x': 9,
       'text-max-width': '120px',
       'text-overflow-wrap': 'anywhere' as any,
+      // Label sobre barra escura translúcida (estilo "tick" do print)
+      'text-background-color': '#04203a',
+      'text-background-opacity': 0.55,
+      'text-background-padding': 3 as any,
+      'text-background-shape': 'roundrectangle',
+      // Glow interno (shadow) + halo externo difuso (underlay) = brilho duplo
       'shadow-blur': 14,
       'shadow-color': C.nodeGlow,
       'shadow-offset-x': 0,
       'shadow-offset-y': 0,
       'shadow-opacity': 1,
+      'underlay-color': C.nodeAmber,
+      'underlay-padding': 5 as any,
+      'underlay-opacity': 0.18 as any,
     },
   },
   // ── Layer (nó mais relevante — hub) ───────────────────────────────────────
@@ -100,6 +104,9 @@ const CY_STYLE: cytoscape.Stylesheet[] = [
       'font-weight': 700,
       'shadow-blur': 28,
       'shadow-color': C.nodeGlowStrong,
+      'underlay-color': C.nodeAmberBright,
+      'underlay-padding': 10 as any,
+      'underlay-opacity': 0.22 as any,
     },
   },
   // ── Module ────────────────────────────────────────────────────────────────

@@ -22,6 +22,7 @@ export type ActivityType =
   | 'module-added'
   | 'module-removed'
   | 'prediction-confirmed'
+  | 'memory-contradiction'
   | 'alert-sent';
 
 export type ActivitySeverity = 'info' | 'warn' | 'critical';

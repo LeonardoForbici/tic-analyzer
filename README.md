@@ -223,13 +223,15 @@ Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `snapshots.
 
 ---
 
-## As 50 ferramentas MCP
+## As 54 ferramentas MCP
 
 **Impacto (use primeiro):** `get_blast_radius` (resumo ~200 tokens — **comece por ele**) · `get_impact_of` · `get_table_impact` · `get_diff_impact` · `get_impact`
 
 **Governança e skills:** `get_arch_rules` · `get_arch_suggestions` · `get_risk_prediction` · `get_agent_brief` · `get_diagnosis` · `get_zoom_out` · `get_out_of_scope` · `list_triage` · `update_triage`
 
-**Navegação e fluxo:** `trace_flow` · `find_path` · `get_graph_level` · `search_code` · `get_concept_map`
+**Memória persistente:** `remember` (registra decisão/tentativa/outcome por entidade) · `recall` (histórico de tentativas, injetado no `get_agent_brief`)
+
+**Navegação e fluxo:** `trace_flow` · `find_path` · `get_graph_level` · `search_code` (FTS5 + vetorial fundidos via RRF) · `get_concept_map`
 
 **Contexto:** `get_quick_context` · `list_modules` · `get_module(detail)` · `search_module` · `get_multigraph(detail)` · `get_diagram`
 
@@ -305,7 +307,7 @@ src/
       snapshots            histórico de health
       triageStore          fila de triagem (máquina de estados da skill)
   cli/               headless: analyze / health / pr-review / serve
-  mcp/               MCP Server HTTP/SSE (50 tools, auth Bearer, push SSE /events, agent briefs)
+  mcp/               MCP Server HTTP/SSE (54 tools, auth Bearer, push SSE /events, agent briefs)
   ui/                React: Health, Governança, Explorador, Impacto
 action.yml           GitHub Action (PR review, cache incremental, issues de triagem)
 ```

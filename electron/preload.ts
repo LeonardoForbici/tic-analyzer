@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   getGraphLevel: (projectPath: string, expanded: string[]): Promise<unknown> =>
     ipcRenderer.invoke('get-graph-level', projectPath, expanded),
 
+  searchCode: (projectPath: string, query: string): Promise<unknown> =>
+    ipcRenderer.invoke('search-code', projectPath, query),
+
   updateTriage: (projectPath: string, id: string, changes: unknown): Promise<unknown> =>
     ipcRenderer.invoke('update-triage', projectPath, id, changes),
 

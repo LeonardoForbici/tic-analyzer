@@ -707,7 +707,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
           fsMod.writeFileSync(joinPath(ticCodeDir, 'memory.json'), JSON.stringify(deduped, null, 2), 'utf8');
         }
         for (const c of contradictions) {
-          addEvt(ticCodeDir, [mkEvt('risk-new', 'warn',
+          addEvt(ticCodeDir, [mkEvt('memory-contradiction', 'warn',
             `Memória contraditória: ${c.entity}`,
             `${c.entries.length} outcomes opostos registrados — revise com recall("${c.entity}")`,
             c.entity)]);

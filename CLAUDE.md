@@ -115,10 +115,13 @@ Configure em `.claude/settings.json` do projeto analisado:
 { "mcpServers": { "tic-analyzer": { "url": "http://localhost:7432/mcp" } } }
 ```
 
-Ferramentas-chave (50 no total): `get_blast_radius` (resumo de impacto ~200
+Ferramentas-chave (54 no total): `get_blast_radius` (resumo de impacto ~200
 tokens — use PRIMEIRO), `get_impact_of` (impacto de arquivo/método/procedure/
 tabela/coluna), `get_table_impact`, `get_diff_impact` (cross-tier), `get_health`,
-`get_graph_level` (drill-down hierárquico), `trace_flow`, `search_code`,
-`list_modules`, `get_module`, `get_quick_context`. Governança/skills (mattpocock/skills):
-`get_arch_rules`, `get_arch_suggestions`, `get_risk_prediction`, `get_agent_brief`,
-`get_diagnosis`, `get_zoom_out`, `get_out_of_scope`, `list_triage`, `update_triage`.
+`get_graph_level` (drill-down hierárquico), `trace_flow`, `search_code` (FTS5 +
+vetorial fundidos via RRF), `list_modules`, `get_module`, `get_quick_context`.
+Governança/skills (mattpocock/skills): `get_arch_rules`, `get_arch_suggestions`,
+`get_risk_prediction`, `get_agent_brief`, `get_diagnosis`, `get_zoom_out`,
+`get_out_of_scope`, `list_triage`, `update_triage`. Memória persistente:
+`remember` (registra decisão/tentativa/outcome por entidade), `recall` (histórico
+de tentativas — também injetado no `get_agent_brief`).
