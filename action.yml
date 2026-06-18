@@ -117,6 +117,32 @@ runs:
           --brief-out /tmp/tic-brief.md
         echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
+    - name: Persiste pr-history no branch base
+      if: github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        BASE_REF: ${{ inputs.base-ref }}
+        REPO: ${{ github.repository }}
+      run: |
+        HIST="$PWD/.tic-code/pr-history.json"
+        [ -f "$HIST" ] || exit 0
+        CONTENT=$(base64 -w0 "$HIST")
+        FILE_PATH=".tic-code/pr-history.json"
+        SHA=$(gh api "repos/$REPO/contents/$FILE_PATH?ref=$BASE_REF" --jq '.sha' 2>/dev/null || true)
+        if [ -n "$SHA" ] && [ "$SHA" != "null" ]; then
+          gh api -X PUT "repos/$REPO/contents/$FILE_PATH" \
+            -f message="chore(tic): update PR history [skip ci]" \
+            -f content="$CONTENT" \
+            -f branch="$BASE_REF" \
+            -f sha="$SHA" || true
+        else
+          gh api -X PUT "repos/$REPO/contents/$FILE_PATH" \
+            -f message="chore(tic): update PR history [skip ci]" \
+            -f content="$CONTENT" \
+            -f branch="$BASE_REF" || true
+        fi
+
     - name: Comentário sticky no PR
       if: inputs.comment == 'true' && github.event_name == 'pull_request'
       shell: bash
