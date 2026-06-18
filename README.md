@@ -13,6 +13,9 @@ A ideia central: o trabalho pesado (AST, grafos, impacto, métricas, regras) é 
 ## O que ele responde
 
 - **"Se eu mexer aqui, o que quebra?"** — impacto de *qualquer* entidade: arquivo, método, procedure/function PL/SQL, tabela ou coluna, atravessando todas as camadas (coluna → trigger → procedure → DAO → endpoint → tela)
+- **"Por que X afeta Y?"** — caminho explicado salto a salto entre quaisquer duas entidades do grafo (arquivo, tabela, procedure, tela), com o tipo de cada ligação (`import`, `db-call`, `writes`...)
+- **"Quais são os nós mais críticos?"** — relatório de god nodes (hubs por grau), conexões surpreendentes entre camadas e chamadas MCP prontas para explorar
+- **"Que grupos naturais existem no código?"** — clusters detectados pela topologia real do grafo (Louvain), não pela estrutura de pastas; acoplamento entre clusters destacado
 - **"Como esse fluxo funciona?"** — trace ponta-a-ponta tela → endpoint → service → procedure → tabela
 - **"Esse PR é seguro?"** — review automático no GitHub com impacto, riscos novos, violações de regras de arquitetura e quality gates
 - **"A arquitetura está derivando?"** — regras escritas pelo arquiteto validadas a cada análise e a cada PR (architecture drift)
@@ -210,6 +213,7 @@ tic-analyzer health <path>
 tic-analyzer pr-review --base <dir> --head <dir> [--out report.md]
            [--gate new-high-risks,new-rule-violations,health-drop:5] [--brief-out brief.md]
 tic-analyzer serve <path> [--port 7432] [--host 0.0.0.0] [--token <segredo>] [--watch <min>] [--debounce <seg>]
+tic-analyzer export <path> [--format html|mermaid|svg] [--expanded id1,id2] [--out arquivo]  # grafo standalone
 tic-analyzer report <path> [--out report.html]                                          # relatório executivo (HTML)
 tic-analyzer portfolio [--json]                                                          # portfólio (todos os projetos analisados)
 ```
@@ -218,12 +222,12 @@ Exit codes do `pr-review`: `0` ok · `1` gate falhou · `2` erro. Cada execuçã
 
 ---
 
-## O que o engine analisa (pipeline de 36 fases)
+## O que o engine analisa (pipeline de 44 fases)
 
 | Área | Detalhe |
 |------|---------|
 | **Grafo de dependências** | AST real via tree-sitter (TS/TSX/JS/Java) com resolução de símbolos: aliases de tsconfig (`@/...`), barris (`export ... from`) seguidos até a origem, DI (interface → implementador), `extends`/`implements`, method edges. Fallback regex p/ Python/Go/C#/Rust/PHP/Kotlin. Cada aresta tem `confidence: resolved \| inferred` — em engenharia reversa, isso diz no que confiar |
-| **Grafo de impacto unificado** | Consolida imports, chamadas de método, HTTP (frontend→controller), backend→PL/SQL (`@Procedure`, `{call}`, `SimpleJdbcCall`...), PL/SQL→PL/SQL, triggers (`ON <tabela>`), sinônimos e acesso a tabela/coluna (ORM + SQL parseado) num único grafo endereçável: `file:` `method:` `plsql:` `table:` `column:` |
+| **Grafo de impacto unificado** | Consolida imports, chamadas de método, HTTP (frontend→controller), backend→PL/SQL (`@Procedure`, `{call}`, `SimpleJdbcCall`...), PL/SQL→PL/SQL, triggers (`ON <tabela>`), sinônimos e acesso a tabela/coluna (ORM + SQL parseado) num único grafo endereçável: `file:` `method:` `plsql:` `table:` `column:`. Path finding explica o caminho entre quaisquer duas entidades. Detecção de comunidades (Louvain) agrupa nós por topologia real |
 | **PL/SQL** | Procedures, functions, packages, triggers, views, sequences, sinônimos; tabelas lidas/escritas por objeto; chamadas inter-procedure; dead PL/SQL; lineage coluna-a-coluna |
 | **Monorepo** | Pastas `<projeto>-backend` / `<projeto>-frontend` lado a lado viram subprojetos automaticamente (nomes curtos: `backend`, `frontend`), com camada frontend/backend/database **por arquivo** |
 | **Governança** | Regras `.tic-rules.json` (drift), predição de risco, triagem (máquina de estados), candidatos a deepening, zoom-out executivo |
@@ -237,15 +241,17 @@ Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `snapshots.
 
 ---
 
-## As 54 ferramentas MCP
+## As 57 ferramentas MCP
 
-**Impacto (use primeiro):** `get_blast_radius` (resumo ~200 tokens — **comece por ele**) · `get_impact_of` · `get_table_impact` · `get_diff_impact` · `get_impact`
+**Impacto (use primeiro):** `get_blast_radius` (resumo ~200 tokens — **comece por ele**) · `get_impact_of` · `get_impact_path` (caminho explicado entre duas entidades — "por que X afeta Y") · `get_table_impact` · `get_diff_impact` · `get_impact`
+
+**Grafo e comunidades:** `get_graph_level` (drill-down hierárquico) · `get_graph_report` (god nodes + conexões surpreendentes) · `get_communities` (clusters por topologia Louvain)
 
 **Governança e skills:** `get_arch_rules` · `get_arch_suggestions` · `get_risk_prediction` · `get_agent_brief` · `get_diagnosis` · `get_zoom_out` · `get_out_of_scope` · `list_triage` · `update_triage`
 
 **Memória persistente:** `remember` (registra decisão/tentativa/outcome por entidade) · `recall` (histórico de tentativas, injetado no `get_agent_brief`)
 
-**Navegação e fluxo:** `trace_flow` · `find_path` · `get_graph_level` · `search_code` (FTS5 + vetorial fundidos via RRF) · `get_concept_map`
+**Navegação e fluxo:** `trace_flow` · `find_path` · `search_code` (FTS5 + vetorial fundidos via RRF) · `get_concept_map`
 
 **Contexto:** `get_quick_context` · `list_modules` · `get_module(detail)` · `search_module` · `get_multigraph(detail)` · `get_diagram`
 
@@ -286,8 +292,10 @@ dashboard ──► saúde, drift, triagem e PRs ao longo do tempo
 npm install
 npm run dev          # Vite (5173) + Electron
 
-npm run verify       # build + 10 suítes: semantic, store, crosstier, orm,
-                     # impacto, health, pr-review, serve, governança, embeddings
+npm run verify       # build + 18 suítes: semantic, store, crosstier, orm,
+                     # impacto, graph-insights, export, communities,
+                     # health, pr-review, serve, governança, vivo, valor,
+                     # portfólio, incremental, ux, embeddings
 ```
 
 > ⚠️ **Nunca rode `rebuild:electron` em CI** — recompila o better-sqlite3 para a ABI do Electron e quebra a execução em Node puro.
@@ -307,21 +315,24 @@ npm run dist:linux   # → release/TIC Analyzer.AppImage
 ```
 electron/            processo principal (janela, IPC, lifecycle do MCP)
 src/
-  analyzer/          engine puro Node (zero IA): pipeline de 36 fases
+  analyzer/          engine puro Node (zero IA): pipeline de 44 fases
     buildDependencyGraph   AST tree-sitter + resolução de símbolos
     buildImpactGraph       grafo de impacto unificado cross-tier
     computeHealthScore     health 0-100 em 6 dimensões
     checkArchRules         regras .tic-rules.json + deepening candidates + HTML
     computeRiskPrediction  churn git × complexidade × acoplamento
     generateZoomOut        visão executiva por fronteiras de domínio
+    generateGraphReport    god nodes + conexões surpreendentes (graph-report.md)
+    detectCommunities      clusters por topologia (Louvain, graphology)
+    exportGraph            export standalone do grafo (HTML interativo / Mermaid / SVG)
     store/
-      indexDb              index.db SQLite (files/edges/symbols/impact_edges/modules/FTS5)
-      impactQueries        BFS reverso cross-tier
-      graphQueries         agregação hierárquica (layer → module → file → symbol)
+      indexDb              index.db SQLite (files/edges/symbols/impact_edges/modules/communities/FTS5)
+      impactQueries        BFS reverso cross-tier + queryImpactPath (caminho entre entidades)
+      graphQueries         agregação hierárquica (layer → module → file → symbol) + queryCommunities
       snapshots            histórico de health
       triageStore          fila de triagem (máquina de estados da skill)
-  cli/               headless: analyze / health / pr-review / serve
-  mcp/               MCP Server HTTP/SSE (54 tools, auth Bearer, push SSE /events, agent briefs)
+  cli/               headless: analyze / health / pr-review / serve / export
+  mcp/               MCP Server HTTP/SSE (57 tools, auth Bearer, push SSE /events, agent briefs)
   ui/                React: Health, Governança, Explorador, Impacto
 action.yml           GitHub Action (PR review, cache incremental, issues de triagem)
 ```
