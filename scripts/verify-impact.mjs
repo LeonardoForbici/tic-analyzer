@@ -16,7 +16,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const need = (p) => { if (!existsSync(p)) { console.error(`✗ dist ausente: ${p}. Rode \`npm run build:electron\`.`); process.exit(1); } return p; };
 
 const { openIndexDb } = require(need(join(root, 'dist/src/analyzer/store/indexDb.js')));
-const { queryImpactOf, queryBlastRadius, resolveImpactId } = require(need(join(root, 'dist/src/analyzer/store/impactQueries.js')));
+const { queryImpactOf, queryBlastRadius, resolveImpactId, queryImpactPath } = require(need(join(root, 'dist/src/analyzer/store/impactQueries.js')));
 const { queryGraphLevel } = require(need(join(root, 'dist/src/analyzer/store/graphQueries.js')));
 const { runPipeline } = require(need(join(root, 'dist/src/analyzer/pipeline.js')));
 
@@ -80,6 +80,22 @@ function cleanupFixture(fixture) {
   const blast = queryBlastRadius(db, 'PKG_CLIENTE.SALVAR');
   check('B1: blast radius da procedure inclui o repository no top', !!blast && blast.top.some((t) => t.id.endsWith('ClienteRepository.java')), JSON.stringify(blast?.top ?? []));
   check('B2: blast radius reporta totalAffected e truncated', !!blast && blast.totalAffected > 0 && blast.truncated === false);
+
+  // Path finding: "por que mexer em table:CLIENTE afeta a tela React"
+  const pth = queryImpactPath(db, 'table:CLIENTE', 'src/pages/TelaCliente.tsx');
+  const path0 = pth && pth.paths.length > 0 ? pth.paths[0] : [];
+  const vias = path0.map((h) => h.via);
+  check('PF1: caminho CLIENTE→TelaCliente encontrado', !!pth && pth.paths.length > 0, JSON.stringify(pth));
+  check('PF2: caminho tem ≥3 saltos', !!pth && pth.hops >= 3, `hops=${pth?.hops}`);
+  check('PF3: caminho passa pela procedure PKG_CLIENTE.SALVAR', path0.some((h) => h.to === 'plsql:PKG_CLIENTE.SALVAR' || h.from === 'plsql:PKG_CLIENTE.SALVAR'), JSON.stringify(path0));
+  check('PF4: caminho usa via de banco (writes/reads/db-call)', vias.some((v) => ['writes', 'reads', 'db-call'].includes(v)), vias.join(', '));
+  check('PF5: cada salto tem via e confiança', path0.every((h) => !!h.via && (h.confidence === 'resolved' || h.confidence === 'inferred')), JSON.stringify(path0));
+  // direction='depends': caminho inverso (TelaCliente depende de CLIENTE)
+  const dep = queryImpactPath(db, 'src/pages/TelaCliente.tsx', 'table:CLIENTE', { direction: 'depends' });
+  check('PF6: direction=depends acha caminho TelaCliente→CLIENTE', !!dep && dep.paths.length > 0, JSON.stringify(dep?.paths?.length));
+  // Sem caminho: duas entidades não conectadas → paths vazio, sem erro
+  const none = queryImpactPath(db, 'src/pages/TelaCliente.tsx', 'table:CLIENTE', { direction: 'impact' });
+  check('PF7: entidades não conectadas (nessa direção) retornam paths vazio sem erro', !!none && Array.isArray(none.paths), JSON.stringify(none?.paths?.length));
 
   // Sanidade dos módulos persistidos (bugs do Explorador: módulo com nome de
   // arquivo tipo "frontend/package.json" e camada errada por arquivo)

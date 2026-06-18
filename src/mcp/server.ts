@@ -13,7 +13,7 @@ import type { ImpactIndex } from '../analyzer/buildImpactIndex';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
 import { getFileSummary } from '../analyzer/store/fileSummary';
 import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount, fuseRRF, type FusedHit } from './queries';
-import { queryImpactOf, queryBlastRadius, type ImpactOfResult, type BlastRadiusResult } from '../analyzer/store/impactQueries';
+import { queryImpactOf, queryBlastRadius, queryImpactPath, type ImpactOfResult, type BlastRadiusResult, type ImpactPathResult } from '../analyzer/store/impactQueries';
 import { queryGraphLevel } from '../analyzer/store/graphQueries';
 import { buildAgentBrief, buildDiagnosis } from './agentBrief';
 import { loadTriage, transitionTriageItem, type TriageState, type TriageCategory, type TriagePriority } from '../analyzer/store/triageStore';
@@ -210,6 +210,20 @@ export class TicAnalyzerMcpServer {
               entity: { type: 'string', description: 'Nome ou id da entidade (arquivo/procedure/tabela/coluna).' }
             },
             required: ['entity']
+          }
+        },
+        {
+          name: 'get_impact_path',
+          description: 'Reconstrói a CADEIA de arestas (com via + confiança por salto) que liga DUAS entidades no grafo de impacto cross-tier. Responde "POR QUE mexer em X afeta Y" mostrando o caminho exato (ex.: tela → controller → service → DAO → PKG.SALVAR → tabela). Aceita nome livre ou id canônico nas duas pontas. ~200-400 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              from: { type: 'string', description: 'Entidade de origem (a que muda).' },
+              to: { type: 'string', description: 'Entidade de destino (a afetada).' },
+              max_paths: { type: 'number', description: 'Quantas cadeias alternativas retornar (default 3).' },
+              direction: { type: 'string', enum: ['impact', 'depends'], description: "'impact' (default): caminho de propagação. 'depends': caminho de dependência (from depende de to)." }
+            },
+            required: ['from', 'to']
           }
         },
         {
@@ -706,6 +720,17 @@ export class TicAnalyzerMcpServer {
             const r = queryBlastRadius(db, entity);
             if (!r) return respond(textResult(`Entidade "${entity}" não encontrada no grafo de impacto.`));
             return respond(textResult(formatBlastRadius(r)));
+          } finally { db.close(); }
+        }
+
+        case 'get_impact_path': {
+          const { from, to, max_paths, direction } = args as { from: string; to: string; max_paths?: number; direction?: 'impact' | 'depends' };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const r = queryImpactPath(db, from, to, { maxPaths: max_paths, direction });
+            if (!r) return respond(textResult(`Não foi possível resolver "${from}" e/ou "${to}" no grafo de impacto. Use o caminho do arquivo, "PKG.PROCEDURE", "TABELA" ou "TABELA.COLUNA".`));
+            return respond(textResult(formatImpactPath(r)));
           } finally { db.close(); }
         }
 
@@ -2484,6 +2509,27 @@ function formatImpactOf(r: ImpactOfResult): string {
     lines.push('', `> Outras entidades com esse nome: ${r.candidates.map(shortId).join(', ')}`);
   }
   return lines.filter((l) => l !== '').join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+function formatImpactPath(r: ImpactPathResult): string {
+  const lines = [`# Caminho de impacto: \`${shortId(r.from)}\` → \`${shortId(r.to)}\``, ''];
+  if (r.paths.length === 0) {
+    lines.push('Nenhum caminho encontrado no grafo de impacto entre as duas entidades.');
+    if (r.truncated) lines.push('⚠️ Busca truncada (>5000 nós) — pode haver caminho além do teto.');
+  } else {
+    lines.push(`**${r.hops} salto(s)** no caminho mais curto${r.paths.length > 1 ? ` — ${r.paths.length} rotas mostradas` : ''}.`);
+    r.paths.forEach((path, i) => {
+      lines.push('', r.paths.length > 1 ? `## Rota ${i + 1} (${path.length} saltos)` : '## Caminho');
+      lines.push(`\`${shortId(r.from)}\``);
+      for (const h of path) {
+        lines.push(`  ${h.confidence === 'inferred' ? '🟡' : '🟢'} --${h.via}--> \`${shortId(h.to)}\``);
+      }
+    });
+    if (r.truncated) lines.push('', '⚠️ Busca truncada (>5000 nós) — rotas adicionais podem existir.');
+  }
+  if (r.fromCandidates?.length) lines.push('', `> Origem ambígua, outras opções: ${r.fromCandidates.map(shortId).join(', ')}`);
+  if (r.toCandidates?.length) lines.push(`> Destino ambíguo, outras opções: ${r.toCandidates.map(shortId).join(', ')}`);
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
 /**
