@@ -161,6 +161,11 @@ export class TicAnalyzerMcpServer {
           inputSchema: { type: 'object', properties: {} }
         },
         {
+          name: 'get_graph_report',
+          description: 'Insights do grafo de impacto: "god nodes" (hubs por onde tudo passa), conexões surpreendentes (arestas que pulam camadas ou ligam módulos pouco acoplados) e perguntas sugeridas. Use para entender a forma do sistema antes de mergulhar em entidades.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
           name: 'get_permissions',
           description: 'Retorna a matriz de permissões: rotas × roles.',
           inputSchema: { type: 'object', properties: {} }
@@ -615,6 +620,7 @@ export class TicAnalyzerMcpServer {
         case 'get_diagram': return respond({ content: [{ type: 'text', text: this.readFile('diagram.md') }] });
         case 'get_openapi': return respond({ content: [{ type: 'text', text: this.readFile('openapi.yaml') }] });
         case 'get_gaps': return respond({ content: [{ type: 'text', text: this.readFile('gaps.md') }] });
+        case 'get_graph_report': return respond(textResult(summarizeDoc(this.readFile('graph-report.md'), 'get_graph_report')));
         case 'get_permissions': return respond({ content: [{ type: 'text', text: this.readFile('permissions.md') }] });
         case 'get_inheritance': return respond({ content: [{ type: 'text', text: this.readFile('inheritance.md') }] });
 

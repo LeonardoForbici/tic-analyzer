@@ -48,6 +48,7 @@ import { appendEvents, makeEvent } from './store/activityLog';
 import { computeSelfDelta, computePredictionFeedback, type PredictionAccuracy } from './computeDelta';
 import { syncTriageItems, type TriageCandidate } from './store/triageStore';
 import { generateZoomOut } from './generateZoomOut';
+import { generateGraphReport } from './generateGraphReport';
 
 export type PhaseStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -88,6 +89,8 @@ export interface PipelineResult {
   deadComponents: number;
   /** Arestas do grafo de impacto unificado (file/method/plsql/table/column). */
   impactEdges?: number;
+  /** Nº de god nodes (hubs) destacados no relatório de insights do grafo. */
+  godNodes?: number;
   /** Health score do projeto (0–100) e grade (A–E). */
   healthScore?: number;
   healthGrade?: string;
@@ -148,6 +151,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'health', label: 'Computando health score do projeto', status: 'pending' },
   { id: 'triage', label: 'Sincronizando fila de triagem', status: 'pending' },
   { id: 'zoom-out', label: 'Gerando visão executiva (zoom-out)', status: 'pending' },
+  { id: 'graph-report', label: 'Analisando god nodes e conexões surpreendentes', status: 'pending' },
   { id: 'activity', label: 'Registrando atividade (delta + predição)', status: 'pending' },
   { id: 'search-index', label: 'Construindo índice de busca por código', status: 'pending' },
   { id: 'persist-index', label: 'Gravando índice consultável (SQLite)', status: 'pending' },
@@ -663,6 +667,14 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
     markDone('zoom-out');
     report('zoom-out', 100, 'zoom-out.md gerado');
 
+    // ── 24c'. INSIGHTS DO GRAFO (god nodes + conexões surpreendentes) ────────────
+    report('graph-report', 94, 'Identificando hubs e conexões atípicas do grafo de impacto...');
+    const fileToModule = new Map<string, string>();
+    for (const m of modules) for (const f of m.files) fileToModule.set(f.relativePath, m.name);
+    const graphReport = generateGraphReport(ticCodeDir, projectName, impactEdges, fileToModule);
+    markDone('graph-report');
+    report('graph-report', 100, `${graphReport.godNodes.length} god nodes, ${graphReport.surprising.length} conexões surpreendentes`);
+
     // ── 24d. ATIVIDADE (self-delta + loop preditivo) — o batimento do sistema ────
     report('activity', 94, 'Computando o que mudou desde a última análise...');
     const curDelta = {
@@ -801,6 +813,7 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
       angularModules: angularModules.length,
       deadComponents: deadComponents.length,
       impactEdges: impactEdges.length,
+      godNodes: graphReport.godNodes.length,
       healthScore: health.score,
       healthGrade: health.grade,
       archViolations: archViolations.length,
