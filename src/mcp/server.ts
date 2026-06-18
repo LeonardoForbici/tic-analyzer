@@ -4,6 +4,7 @@ import * as http from 'http';
 import { execSync } from 'child_process';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema
@@ -59,6 +60,7 @@ function estimateTokens(text: string): number {
 export class TicAnalyzerMcpServer {
   private httpServer?: http.Server;
   private sseClients = new Set<http.ServerResponse>();
+  private sseSessions = new Map<string, { transport: SSEServerTransport; server: Server }>();
   private projectPath: string;
   private ticCodePath: string;
   private tokenLog: TokenEntry[] = [];
@@ -2350,6 +2352,28 @@ export class TicAnalyzerMcpServer {
       }
       if (req.url === '/mcp' || req.url?.startsWith('/mcp')) {
         try {
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const sessionId = url.searchParams.get('sessionId');
+
+          // Old SSE protocol: GET opens the SSE stream
+          if (req.method === 'GET') {
+            const transport = new SSEServerTransport('/mcp', res);
+            const serverInstance = this.createServerInstance();
+            await serverInstance.connect(transport);
+            this.sseSessions.set(transport.sessionId, { transport, server: serverInstance });
+            req.on('close', () => { this.sseSessions.delete(transport.sessionId); });
+            await transport.start();
+            return;
+          }
+
+          // Old SSE protocol: POST with sessionId routes to existing session
+          if (sessionId && this.sseSessions.has(sessionId)) {
+            const session = this.sseSessions.get(sessionId)!;
+            await session.transport.handlePostMessage(req, res);
+            return;
+          }
+
+          // New Streamable HTTP protocol: stateless POST
           const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
           const serverInstance = this.createServerInstance();
           await serverInstance.connect(transport);

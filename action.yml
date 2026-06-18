@@ -34,12 +34,23 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: 20
-        cache: npm
-        cache-dependency-path: ${{ env.GITHUB_ACTION_PATH }}/package-lock.json
+
+    # hashFiles() only works inside GITHUB_WORKSPACE; copy the action's lock file there first
+    - name: Expose action lock file for cache key
+      shell: bash
+      run: cp "${{ github.action_path }}/package-lock.json" "${{ github.workspace }}/.tic-action-lock.json"
+
+    - name: Cache npm dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm
+        key: npm-${{ runner.os }}-${{ hashFiles('.tic-action-lock.json') }}
+        restore-keys: |
+          npm-${{ runner.os }}-
 
     - name: Build analyzer (sem electron-builder — better-sqlite3 usa prebuild Node)
       shell: bash
-      working-directory: ${{ env.GITHUB_ACTION_PATH }}
+      working-directory: ${{ github.action_path }}
       run: |
         npm ci --no-audit --no-fund
         npm run build:electron
