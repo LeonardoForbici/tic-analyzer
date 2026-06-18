@@ -16,8 +16,8 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const need = (p) => { if (!existsSync(p)) { console.error(`✗ dist ausente: ${p}. Rode \`npm run build:electron\`.`); process.exit(1); } return p; };
 
 const { openIndexDb } = require(need(join(root, 'dist/src/analyzer/store/indexDb.js')));
-const { queryImpactOf, queryBlastRadius, resolveImpactId } = require(need(join(root, 'dist/src/analyzer/store/impactQueries.js')));
-const { queryGraphLevel } = require(need(join(root, 'dist/src/analyzer/store/graphQueries.js')));
+const { queryImpactOf, queryBlastRadius, resolveImpactId, queryImpactPath } = require(need(join(root, 'dist/src/analyzer/store/impactQueries.js')));
+const { queryGraphLevel, queryUnifiedGraph } = require(need(join(root, 'dist/src/analyzer/store/graphQueries.js')));
 const { runPipeline } = require(need(join(root, 'dist/src/analyzer/pipeline.js')));
 
 const failures = [];
@@ -81,6 +81,36 @@ function cleanupFixture(fixture) {
   check('B1: blast radius da procedure inclui o repository no top', !!blast && blast.top.some((t) => t.id.endsWith('ClienteRepository.java')), JSON.stringify(blast?.top ?? []));
   check('B2: blast radius reporta totalAffected e truncated', !!blast && blast.totalAffected > 0 && blast.truncated === false);
 
+  // Path finding: "por que mexer em table:CLIENTE afeta a tela React"
+  const pth = queryImpactPath(db, 'table:CLIENTE', 'src/pages/TelaCliente.tsx');
+  const path0 = pth && pth.paths.length > 0 ? pth.paths[0] : [];
+  const vias = path0.map((h) => h.via);
+  check('PF1: caminho CLIENTE→TelaCliente encontrado', !!pth && pth.paths.length > 0, JSON.stringify(pth));
+  check('PF2: caminho tem ≥3 saltos', !!pth && pth.hops >= 3, `hops=${pth?.hops}`);
+  check('PF3: caminho passa pela procedure PKG_CLIENTE.SALVAR', path0.some((h) => h.to === 'plsql:PKG_CLIENTE.SALVAR' || h.from === 'plsql:PKG_CLIENTE.SALVAR'), JSON.stringify(path0));
+  check('PF4: caminho usa via de banco (writes/reads/db-call)', vias.some((v) => ['writes', 'reads', 'db-call'].includes(v)), vias.join(', '));
+  check('PF5: cada salto tem via e confiança', path0.every((h) => !!h.via && (h.confidence === 'resolved' || h.confidence === 'inferred')), JSON.stringify(path0));
+  // direction='depends': caminho inverso (TelaCliente depende de CLIENTE)
+  const dep = queryImpactPath(db, 'src/pages/TelaCliente.tsx', 'table:CLIENTE', { direction: 'depends' });
+  check('PF6: direction=depends acha caminho TelaCliente→CLIENTE', !!dep && dep.paths.length > 0, JSON.stringify(dep?.paths?.length));
+  // Sem caminho: duas entidades não conectadas → paths vazio, sem erro
+  const none = queryImpactPath(db, 'src/pages/TelaCliente.tsx', 'table:CLIENTE', { direction: 'impact' });
+  check('PF7: entidades não conectadas (nessa direção) retornam paths vazio sem erro', !!none && Array.isArray(none.paths), JSON.stringify(none?.paths?.length));
+
+  // PF8: k-shortest devolve rotas ALTERNATIVAS num grafo diamante (lock do bug do ban-key).
+  // Diamante: A→B, A→C, B→D, C→D (X→Y = X depende de Y). Impacto de D alcança A por
+  // duas rotas (D←B←A e D←C←A). max_paths=2 deve retornar as 2.
+  const Database = require('better-sqlite3');
+  const mem = new Database(':memory:');
+  mem.exec(`CREATE TABLE impact_edges (from_id TEXT, to_id TEXT, from_kind TEXT, to_kind TEXT, via TEXT, confidence TEXT);
+            CREATE INDEX i1 ON impact_edges(to_id); CREATE INDEX i2 ON impact_edges(from_id);
+            CREATE TABLE files (rel_path TEXT PRIMARY KEY, module TEXT);`);
+  const ins = mem.prepare("INSERT INTO impact_edges VALUES (?,?,'file','file','import','resolved')");
+  for (const [f, t] of [['file:A', 'file:B'], ['file:A', 'file:C'], ['file:B', 'file:D'], ['file:C', 'file:D']]) ins.run(f, t);
+  const multi = queryImpactPath(mem, 'file:D', 'file:A', { direction: 'impact', maxPaths: 2 });
+  check('PF8: k-shortest devolve 2 rotas distintas no diamante', !!multi && multi.paths.length === 2, JSON.stringify(multi?.paths?.map((p) => p.map((h) => h.to))));
+  mem.close();
+
   // Sanidade dos módulos persistidos (bugs do Explorador: módulo com nome de
   // arquivo tipo "frontend/package.json" e camada errada por arquivo)
   const modRows = db.prepare('SELECT name FROM modules').all().map((r) => r.name);
@@ -103,6 +133,21 @@ function cleanupFixture(fixture) {
     const lvl3 = queryGraphLevel(db, { expanded: [`module:${anyModule.name}`] });
     check('G3: expandir módulo revela arquivos', lvl3.nodes.some((n) => n.kind === 'file'), lvl3.nodes.map((n) => n.id).join(', '));
     check('G4: arestas agregadas têm peso', lvl3.edges.every((e) => e.weight >= 1));
+  }
+
+  // Grafo unificado cross-tier (queryUnifiedGraph)
+  const db2 = openIndexDb(join(fixture, '.tic-code', 'index.db'));
+  if (db2) {
+    const top = queryUnifiedGraph(db2, { expanded: [] });
+    check('U1: grafo unificado retorna nós de layer', top.nodes.some((n) => n.kind === 'layer'), top.nodes.map((n) => n.id).join(', '));
+    check('U2: grafo unificado tem arestas cross-tier', top.edges.length > 0, `edges=${top.edges.length}`);
+    check('U3: arestas do grafo unificado têm via', top.edges.some((e) => !!e.via), top.edges.map((e) => e.via).join(', '));
+    const dbLayer = top.nodes.find((n) => n.id === 'layer:database');
+    check('U4: layer:database presente no topo', !!dbLayer, top.nodes.map((n) => n.id).join(', '));
+    // Expandir database: deve expor nós plsql e table
+    const expanded = queryUnifiedGraph(db2, { expanded: ['layer:database'] });
+    check('U5: expandir layer:database revela nós plsql ou table', expanded.nodes.some((n) => n.kind === 'plsql' || n.kind === 'table'), expanded.nodes.map((n) => n.kind + ':' + n.label).join(', '));
+    db2.close();
   }
 
   db.close();

@@ -33,6 +33,9 @@ src/
     computeDelta.ts           ← self-delta + loop de aprendizado preditivo (sistema vivo)
     notify.ts                 ← alertas outbound (Slack / webhook genérico)
     generateZoomOut.ts        ← visão executiva (fronteiras de domínio)
+    generateGraphReport.ts    ← god nodes + conexões surpreendentes (graph-report.md)
+    detectCommunities.ts      ← comunidades do grafo (Louvain, graphology) — clusters por topologia
+    exportGraph.ts            ← export standalone do grafo (HTML interativo / Mermaid / SVG)
     detectRisks.ts
     detectEndpoints.ts
     detectModules.ts
@@ -40,17 +43,17 @@ src/
     generateModuleContext.ts  ← context.md por módulo (~75k tokens)
     generateMasterIndex.ts    ← index.md (mapa de navegação)
     tokenBudget.ts
-    pipeline.ts               ← orquestra as 41 fases
+    pipeline.ts               ← orquestra as 44 fases
     store/
-      indexDb.ts              ← index.db SQLite (files/edges/symbols/impact_edges/modules/FTS5)
-      impactQueries.ts        ← queryImpactOf / queryBlastRadius (BFS reverso cross-tier)
-      graphQueries.ts         ← agregação hierárquica (layer→module→file→symbol)
+      indexDb.ts              ← index.db SQLite (files/edges/symbols/impact_edges/modules/communities/FTS5)
+      impactQueries.ts        ← queryImpactOf / queryBlastRadius / queryImpactPath (BFS reverso cross-tier + path finding)
+      graphQueries.ts         ← agregação hierárquica (layer→module→file→symbol) + queryCommunities
       snapshots.ts            ← snapshots.json (histórico de health entre análises)
       triageStore.ts          ← triage.json (máquina de estados da skill triage)
       activityLog.ts          ← activity.json (timeline do sistema vivo)
       portfolioStore.ts       ← registro global multi-projeto (~/.tic-analyzer)
   cli/
-    index.ts            ← CLI headless: analyze / health / pr-review / serve (usada pelo Action)
+    index.ts            ← CLI headless: analyze / health / pr-review / serve / export (usada pelo Action)
     prReview.ts         ← comparação base vs head + quality gates + markdown sticky
   mcp/
     server.ts           ← MCP Server HTTP/SSE (localhost:7432) + push SSE em /events
@@ -64,7 +67,7 @@ src/
 ## Verificação
 
 ```bash
-npm run verify   # build + 15 suítes (semantic, store, crosstier, orm, impacto, health, pr-review, serve, governança, vivo, valor, portfólio, incremental, ux, embeddings)
+npm run verify   # build + 18 suítes (semantic, store, crosstier, orm, impacto, graph-insights, export, communities, health, pr-review, serve, governança, vivo, valor, portfólio, incremental, ux, embeddings)
 ```
 
 NUNCA rodar `rebuild:electron` em CI — recompila o better-sqlite3 para a ABI
@@ -127,11 +130,16 @@ Configure em `.claude/settings.json` do projeto analisado:
 { "mcpServers": { "tic-analyzer": { "url": "http://localhost:7432/mcp" } } }
 ```
 
-Ferramentas-chave (54 no total): `get_blast_radius` (resumo de impacto ~200
+Ferramentas-chave (57 no total): `get_blast_radius` (resumo de impacto ~200
 tokens — use PRIMEIRO), `get_impact_of` (impacto de arquivo/método/procedure/
-tabela/coluna), `get_table_impact`, `get_diff_impact` (cross-tier), `get_health`,
-`get_graph_level` (drill-down hierárquico), `trace_flow`, `search_code` (FTS5 +
-vetorial fundidos via RRF), `list_modules`, `get_module`, `get_quick_context`.
+tabela/coluna), `get_impact_path` (caminho entre duas entidades — "por que X
+afeta Y"), `get_table_impact`, `get_diff_impact` (cross-tier), `get_health`,
+`get_graph_level` (drill-down hierárquico), `get_graph_report` (god nodes +
+conexões surpreendentes), `get_communities` (clusters Louvain por topologia),
+`trace_flow`, `search_code` (FTS5 + vetorial fundidos via RRF), `list_modules`,
+`get_module`, `get_quick_context`. Export do grafo (standalone, fora do app):
+CLI `tic-analyzer export <path> --format html|mermaid|svg` ou botão "Exportar"
+no HierGraphViewer (HTML/Mermaid/SVG/PNG).
 Governança/skills (mattpocock/skills): `get_arch_rules`, `get_arch_suggestions`,
 `get_risk_prediction`, `get_agent_brief`, `get_diagnosis`, `get_zoom_out`,
 `get_out_of_scope`, `list_triage`, `update_triage`. Memória persistente:

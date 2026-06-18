@@ -40,6 +40,12 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   getGraphLevel: (projectPath: string, expanded: string[]): Promise<unknown> =>
     ipcRenderer.invoke('get-graph-level', projectPath, expanded),
 
+  getUnifiedGraph: (projectPath: string, expanded: string[]): Promise<unknown> =>
+    ipcRenderer.invoke('get-unified-graph', projectPath, expanded),
+
+  exportGraph: (projectPath: string, format: 'html' | 'mermaid' | 'svg' | 'png', expanded: string[]): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('export-graph', projectPath, format, expanded),
+
   searchCode: (projectPath: string, query: string): Promise<unknown> =>
     ipcRenderer.invoke('search-code', projectPath, query),
 

@@ -13,8 +13,8 @@ import type { ImpactIndex } from '../analyzer/buildImpactIndex';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
 import { getFileSummary } from '../analyzer/store/fileSummary';
 import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount, fuseRRF, type FusedHit } from './queries';
-import { queryImpactOf, queryBlastRadius, type ImpactOfResult, type BlastRadiusResult } from '../analyzer/store/impactQueries';
-import { queryGraphLevel } from '../analyzer/store/graphQueries';
+import { queryImpactOf, queryBlastRadius, queryImpactPath, type ImpactOfResult, type BlastRadiusResult, type ImpactPathResult } from '../analyzer/store/impactQueries';
+import { queryGraphLevel, queryCommunities } from '../analyzer/store/graphQueries';
 import { buildAgentBrief, buildDiagnosis } from './agentBrief';
 import { loadTriage, transitionTriageItem, type TriageState, type TriageCategory, type TriagePriority } from '../analyzer/store/triageStore';
 import { loadActivity } from '../analyzer/store/activityLog';
@@ -161,6 +161,11 @@ export class TicAnalyzerMcpServer {
           inputSchema: { type: 'object', properties: {} }
         },
         {
+          name: 'get_graph_report',
+          description: 'Insights do grafo de impacto: "god nodes" (hubs por onde tudo passa), conexões surpreendentes (arestas que pulam camadas ou ligam módulos pouco acoplados) e perguntas sugeridas. Use para entender a forma do sistema antes de mergulhar em entidades.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
           name: 'get_permissions',
           description: 'Retorna a matriz de permissões: rotas × roles.',
           inputSchema: { type: 'object', properties: {} }
@@ -213,6 +218,20 @@ export class TicAnalyzerMcpServer {
           }
         },
         {
+          name: 'get_impact_path',
+          description: 'Reconstrói a CADEIA de arestas (com via + confiança por salto) que liga DUAS entidades no grafo de impacto cross-tier. Responde "POR QUE mexer em X afeta Y" mostrando o caminho exato (ex.: tela → controller → service → DAO → PKG.SALVAR → tabela). Aceita nome livre ou id canônico nas duas pontas. ~200-400 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              from: { type: 'string', description: 'Entidade de origem (a que muda).' },
+              to: { type: 'string', description: 'Entidade de destino (a afetada).' },
+              max_paths: { type: 'number', description: 'Quantas cadeias alternativas retornar (default 3).' },
+              direction: { type: 'string', enum: ['impact', 'depends'], description: "'impact' (default): caminho de propagação. 'depends': caminho de dependência (from depende de to)." }
+            },
+            required: ['from', 'to']
+          }
+        },
+        {
           name: 'get_table_impact',
           description: 'Atalho: impacto de mudar uma tabela ou coluna do banco — quais procedures, triggers, DAOs Java e telas são afetados. ~300 tokens.',
           inputSchema: {
@@ -233,6 +252,11 @@ export class TicAnalyzerMcpServer {
               expanded: { type: 'array', items: { type: 'string' }, description: 'Ids expandidos: layer:<nome>, module:<nome>, file:<rel_path>.' }
             }
           }
+        },
+        {
+          name: 'get_communities',
+          description: 'Comunidades do grafo (Louvain): clusters por TOPOLOGIA do grafo de impacto (nós que conversam muito), não por pasta. Mostra tamanho/composição de cada comunidade e os acoplamentos cross-cluster mais fortes (pontes entre domínios). Use para entender a modularidade real do sistema. ~300-500 tokens.',
+          inputSchema: { type: 'object', properties: {} }
         },
         {
           name: 'list_http_flows',
@@ -601,6 +625,7 @@ export class TicAnalyzerMcpServer {
         case 'get_diagram': return respond({ content: [{ type: 'text', text: this.readFile('diagram.md') }] });
         case 'get_openapi': return respond({ content: [{ type: 'text', text: this.readFile('openapi.yaml') }] });
         case 'get_gaps': return respond({ content: [{ type: 'text', text: this.readFile('gaps.md') }] });
+        case 'get_graph_report': return respond(textResult(summarizeDoc(this.readFile('graph-report.md'), 'get_graph_report')));
         case 'get_permissions': return respond({ content: [{ type: 'text', text: this.readFile('permissions.md') }] });
         case 'get_inheritance': return respond({ content: [{ type: 'text', text: this.readFile('inheritance.md') }] });
 
@@ -709,6 +734,17 @@ export class TicAnalyzerMcpServer {
           } finally { db.close(); }
         }
 
+        case 'get_impact_path': {
+          const { from, to, max_paths, direction } = args as { from: string; to: string; max_paths?: number; direction?: 'impact' | 'depends' };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const r = queryImpactPath(db, from, to, { maxPaths: max_paths, direction });
+            if (!r) return respond(textResult(`Não foi possível resolver "${from}" e/ou "${to}" no grafo de impacto. Use o caminho do arquivo, "PKG.PROCEDURE", "TABELA" ou "TABELA.COLUNA".`));
+            return respond(textResult(formatImpactPath(r)));
+          } finally { db.close(); }
+        }
+
         case 'get_table_impact': {
           const { table, column } = args as { table: string; column?: string };
           const db = openIndexDb(this.indexDbPath);
@@ -751,6 +787,32 @@ export class TicAnalyzerMcpServer {
               '',
               '> Para detalhar: get_graph_level(expanded=[..., "module:<nome>"]).'
             ].filter(Boolean);
+            return respond(textResult(lines.join('\n')));
+          } finally { db.close(); }
+        }
+
+        case 'get_communities': {
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const r = queryCommunities(db);
+            if (!r) return respond(textResult('index.db antigo (sem comunidades). Execute a análise novamente para detectar clusters (Louvain).'));
+            if (r.communities.length === 0) return respond(textResult('Nenhuma comunidade detectada (grafo de impacto sem arestas).'));
+            const lines = [
+              `# Comunidades do grafo (Louvain) — ${r.communities.length} clusters`,
+              '',
+              'Clusters por topologia (nós que conversam muito), não por pasta.',
+              '',
+              '| # | Comunidade | Tamanho | Composição |',
+              '| --- | --- | --- | --- |',
+              ...r.communities.map((c) => `| ${c.id} | ${c.name} | ${c.size} | ${Object.entries(c.byKind).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}:${v}`).join(', ')} |`)
+            ];
+            if (r.coupling.length > 0) {
+              lines.push('', '## Acoplamentos cross-cluster (pontes entre domínios)', '');
+              for (const c of r.coupling.slice(0, 12)) {
+                lines.push(`- \`${c.fromName}\` ↔ \`${c.toName}\` — ${c.weight} arestas`);
+              }
+            }
             return respond(textResult(lines.join('\n')));
           } finally { db.close(); }
         }
@@ -2484,6 +2546,27 @@ function formatImpactOf(r: ImpactOfResult): string {
     lines.push('', `> Outras entidades com esse nome: ${r.candidates.map(shortId).join(', ')}`);
   }
   return lines.filter((l) => l !== '').join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+function formatImpactPath(r: ImpactPathResult): string {
+  const lines = [`# Caminho de impacto: \`${shortId(r.from)}\` → \`${shortId(r.to)}\``, ''];
+  if (r.paths.length === 0) {
+    lines.push('Nenhum caminho encontrado no grafo de impacto entre as duas entidades.');
+    if (r.truncated) lines.push('⚠️ Busca truncada (>5000 nós) — pode haver caminho além do teto.');
+  } else {
+    lines.push(`**${r.hops} salto(s)** no caminho mais curto${r.paths.length > 1 ? ` — ${r.paths.length} rotas mostradas` : ''}.`);
+    r.paths.forEach((path, i) => {
+      lines.push('', r.paths.length > 1 ? `## Rota ${i + 1} (${path.length} saltos)` : '## Caminho');
+      lines.push(`\`${shortId(r.from)}\``);
+      for (const h of path) {
+        lines.push(`  ${h.confidence === 'inferred' ? '🟡' : '🟢'} --${h.via}--> \`${shortId(h.to)}\``);
+      }
+    });
+    if (r.truncated) lines.push('', '⚠️ Busca truncada (>5000 nós) — rotas adicionais podem existir.');
+  }
+  if (r.fromCandidates?.length) lines.push('', `> Origem ambígua, outras opções: ${r.fromCandidates.map(shortId).join(', ')}`);
+  if (r.toCandidates?.length) lines.push(`> Destino ambíguo, outras opções: ${r.toCandidates.map(shortId).join(', ')}`);
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
 /**

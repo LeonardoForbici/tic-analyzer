@@ -23,6 +23,7 @@ import { loadActivity } from '../analyzer/store/activityLog';
 import { loadArchRules } from '../analyzer/checkArchRules';
 import { dispatchAlerts } from '../analyzer/notify';
 import { renderExecutiveHtml, buildExecReportData } from '../analyzer/generateExecutiveReport';
+import { exportGraphFiles, type GraphExportFormat } from '../analyzer/exportGraph';
 import { upsertProject, loadPortfolio } from '../analyzer/store/portfolioStore';
 
 interface Args {
@@ -60,6 +61,8 @@ function usage(): never {
                File-watch reativo + push SSE em /events + alertas (.tic-rules.json → alerts).
                --debounce N (default 15s) espera N s após o último save; --watch N = rede de segurança periódica
   tic-analyzer report <path> [--out report.html]          Relatório executivo (HTML) para liderança
+  tic-analyzer export <path> [--format html|mermaid|svg]  Exporta o grafo (standalone, fora do app)
+               [--expanded id1,id2] [--out arquivo]       --expanded drilla layers/módulos antes de exportar
   tic-analyzer portfolio [--json]                          Lista o portfólio (todos os projetos analisados)`);
   process.exit(2);
 }
@@ -296,6 +299,31 @@ function cmdReport(args: Args): number {
   return 0;
 }
 
+function cmdExport(args: Args): number {
+  const target = args.positional[0];
+  if (!target) usage();
+  const ticCodeDir = path.join(path.resolve(target), '.tic-code');
+  const db = openIndexDb(path.join(ticCodeDir, INDEX_DB_FILE));
+  if (!db) {
+    console.error('index.db não encontrado. Rode `tic-analyzer analyze` primeiro.');
+    return 2;
+  }
+  const fmtRaw = (args.flags.get('format') as string) ?? 'html';
+  if (!['html', 'mermaid', 'svg'].includes(fmtRaw)) {
+    console.error(`Formato inválido: "${fmtRaw}". Use html, mermaid ou svg.`);
+    return 2;
+  }
+  const expanded = typeof args.flags.get('expanded') === 'string'
+    ? (args.flags.get('expanded') as string).split(',').map((s) => s.trim()).filter(Boolean)
+    : [];
+  const out = typeof args.flags.get('out') === 'string' ? path.resolve(args.flags.get('out') as string) : undefined;
+  try {
+    const r = exportGraphFiles(db, ticCodeDir, { format: fmtRaw as GraphExportFormat, expanded, out });
+    console.error(`Grafo exportado (${fmtRaw}) em ${r.path}`);
+    return 0;
+  } finally { db.close(); }
+}
+
 (async () => {
   const [command, ...rest] = process.argv.slice(2);
   const args = parseArgs(rest);
@@ -305,6 +333,7 @@ function cmdReport(args: Args): number {
     case 'pr-review': process.exit(await cmdPrReview(args));
     case 'serve': process.exit(await cmdServe(args));
     case 'report': process.exit(cmdReport(args));
+    case 'export': process.exit(cmdExport(args));
     case 'portfolio': process.exit(cmdPortfolio(args));
     default: usage();
   }

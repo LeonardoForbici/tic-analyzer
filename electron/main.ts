@@ -5,7 +5,7 @@ import { runPipeline, type PipelineProgress, type PipelineResult } from '../src/
 import { TicAnalyzerMcpServer } from '../src/mcp/server';
 import { openIndexDb, INDEX_DB_FILE } from '../src/analyzer/store/indexDb';
 import { queryImpactOf, queryBlastRadius } from '../src/analyzer/store/impactQueries';
-import { queryGraphLevel } from '../src/analyzer/store/graphQueries';
+import { queryGraphLevel, queryUnifiedGraph } from '../src/analyzer/store/graphQueries';
 import { querySearch, queryVectorSearch, embeddingsCount, fuseRRF } from '../src/mcp/queries';
 import { getEmbedder } from '../src/analyzer/semantic/embeddings';
 import { transitionTriageItem, createManualItem, type TriageState, type TriageCategory, type TriagePriority } from '../src/analyzer/store/triageStore';
@@ -13,6 +13,7 @@ import { renderArchReviewHtml, loadArchRules, rulesTemplate } from '../src/analy
 import { loadActivity } from '../src/analyzer/store/activityLog';
 import { dispatchAlerts } from '../src/analyzer/notify';
 import { renderExecutiveHtml, buildExecReportData } from '../src/analyzer/generateExecutiveReport';
+import { exportGraphFiles, type GraphExportFormat } from '../src/analyzer/exportGraph';
 import { loadPortfolio, upsertProject, removeProject } from '../src/analyzer/store/portfolioStore';
 import { rescaleRoi } from '../src/analyzer/computeRoi';
 
@@ -352,6 +353,52 @@ ipcMain.handle('get-graph-level', async (_event, projectPath: string, expanded: 
     return queryGraphLevel(db, { expanded: Array.isArray(expanded) ? expanded : [] });
   } catch (err) {
     return { error: String(err) };
+  } finally {
+    db.close();
+  }
+});
+
+ipcMain.handle('get-unified-graph', async (_event, projectPath: string, expanded: string[]) => {
+  const db = openIndexDb(path.join(projectPath, '.tic-code', INDEX_DB_FILE));
+  if (!db) return { error: 'index.db não encontrado. Execute a análise novamente.' };
+  try {
+    const hasImpact = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='impact_edges'").get();
+    if (!hasImpact) return { error: 'index.db sem grafo de impacto. Execute a análise novamente.' };
+    return queryUnifiedGraph(db, { expanded: Array.isArray(expanded) ? expanded : [] });
+  } catch (err) {
+    return { error: String(err) };
+  } finally {
+    db.close();
+  }
+});
+
+ipcMain.handle('export-graph', async (_event, projectPath: string, format: GraphExportFormat | 'png' = 'html', expanded: string[] = []) => {
+  const fs = await import('fs');
+  const ticCodeDir = path.join(projectPath, '.tic-code');
+  const db = openIndexDb(path.join(ticCodeDir, INDEX_DB_FILE));
+  if (!db) return { ok: false, error: 'index.db não encontrado — rode Analisar primeiro.' };
+  try {
+    const exp = Array.isArray(expanded) ? expanded : [];
+    // PNG: gera o HTML, renderiza offscreen e captura a tela (mesma técnica do PDF executivo).
+    if (format === 'png') {
+      const { renderGraphHtml } = await import('../src/analyzer/exportGraph');
+      const html = renderGraphHtml(queryGraphLevel(db, { expanded: exp }), path.basename(projectPath));
+      const win = new BrowserWindow({ show: false, width: 1600, height: 1000, webPreferences: { offscreen: true } });
+      try {
+        await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+        await new Promise((r) => setTimeout(r, 1200)); // deixa o layout dagre assentar
+        const img = await win.webContents.capturePage();
+        const out = path.join(ticCodeDir, 'graph.png');
+        fs.writeFileSync(out, img.toPNG());
+        await shell.openPath(out);
+        return { ok: true, path: out };
+      } finally { win.destroy(); }
+    }
+    const r = exportGraphFiles(db, ticCodeDir, { format, expanded: exp });
+    await shell.openPath(r.path);
+    return { ok: true, path: r.path };
+  } catch (err) {
+    return { ok: false, error: String(err) };
   } finally {
     db.close();
   }

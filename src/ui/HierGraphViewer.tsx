@@ -15,7 +15,7 @@ cytoscape.use(dagre);
 interface AggNode {
   id: string;
   label: string;
-  kind: 'layer' | 'module' | 'file' | 'symbol' | 'more';
+  kind: 'layer' | 'module' | 'file' | 'symbol' | 'more' | 'plsql' | 'table' | 'column' | 'method';
   layer?: string;
   role?: string;
   childCount: number;
@@ -23,7 +23,7 @@ interface AggNode {
   outWeight: number;
 }
 
-interface AggEdge { from: string; to: string; weight: number; resolvedWeight: number; }
+interface AggEdge { from: string; to: string; weight: number; resolvedWeight: number; via?: string; }
 interface LevelData { nodes: AggNode[]; edges: AggEdge[]; error?: string; }
 
 // ── Paleta constellation ────────────────────────────────────────────────────
@@ -171,6 +171,68 @@ const CY_STYLE: cytoscape.Stylesheet[] = [
       'font-size': 9,
     },
   },
+  // ── PL/SQL (procedures / packages) ────────────────────────────────────────
+  {
+    selector: 'node[kind = "plsql"]',
+    style: {
+      'width': 14, 'height': 14,
+      'background-color': '#c084fc',
+      'border-color': '#e0b8ff',
+      'border-width': 1.5,
+      'shape': 'round-rectangle' as any,
+      'shadow-blur': 12,
+      'shadow-color': 'rgba(192,132,252,0.5)',
+      'font-size': 9,
+    },
+  },
+  // ── Tabela ────────────────────────────────────────────────────────────────
+  {
+    selector: 'node[kind = "table"]',
+    style: {
+      'width': 15, 'height': 12,
+      'background-color': '#ffb95f',
+      'border-color': '#ffd5a0',
+      'border-width': 1.5,
+      'shape': 'rectangle' as any,
+      'shadow-blur': 10,
+      'shadow-color': 'rgba(255,185,95,0.5)',
+      'font-size': 9,
+    },
+  },
+  // ── Coluna ────────────────────────────────────────────────────────────────
+  {
+    selector: 'node[kind = "column"]',
+    style: {
+      'width': 9, 'height': 9,
+      'background-color': '#facc15',
+      'border-color': '#fde68a',
+      'border-width': 1,
+      'shape': 'rectangle' as any,
+      'shadow-blur': 5,
+      'shadow-color': 'rgba(250,204,21,0.4)',
+      'font-size': 8,
+    },
+  },
+  // ── Method ────────────────────────────────────────────────────────────────
+  {
+    selector: 'node[kind = "method"]',
+    style: {
+      'width': 9, 'height': 9,
+      'background-color': '#4edea3',
+      'border-color': '#a7f3d0',
+      'border-width': 1,
+      'shadow-blur': 5,
+      'shadow-color': 'rgba(78,222,163,0.4)',
+      'font-size': 8,
+    },
+  },
+  // ── Arestas por via (modo unificado — sobrescrevem ast/heuristic) ─────────
+  { selector: 'edge.via-db-call', style: { 'line-color': '#00dbe9', 'opacity': 0.75 } },
+  { selector: 'edge.via-writes', style: { 'line-color': '#ffb95f', 'opacity': 0.75 } },
+  { selector: 'edge.via-reads', style: { 'line-color': '#60a5fa', 'opacity': 0.75 } },
+  { selector: 'edge.via-trigger', style: { 'line-color': '#fb7185', 'line-style': 'dashed', 'opacity': 0.8 } },
+  { selector: 'edge.via-calls', style: { 'line-color': '#c084fc', 'opacity': 0.7 } },
+  { selector: 'edge.via-import', style: { 'line-color': 'rgba(255,255,255,0.28)', 'opacity': 0.65 } },
   // ── Architectural role colors ──────────────────────────────────────────────
   { selector: 'node[role = "Controller"]', style: { 'background-color': '#60a5fa', 'shape': 'round-rectangle' as any } },
   { selector: 'node[role = "Service"]', style: { 'background-color': '#4edea3' } },
@@ -269,6 +331,7 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [graphWidth, setGraphWidth] = useState(GRAPH_WIDTH_FALLBACK);
 
+  const [graphMode, setGraphMode] = useState<'hierarchy' | 'unified'>('hierarchy');
   const [expanded, setExpanded] = useState<string[]>([]);
   const [data, setData] = useState<LevelData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -291,18 +354,22 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
 
   useParticleField(particleCanvasRef, graphWidth, GRAPH_HEIGHT);
 
-  // Carrega dados quando expanded muda
+  // Carrega dados quando expanded ou graphMode muda
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    (window.ticAnalyzer.getGraphLevel(projectPath, expanded) as Promise<LevelData>).then((d) => {
+    setData(null);
+    const call = graphMode === 'unified'
+      ? window.ticAnalyzer.getUnifiedGraph(projectPath, expanded)
+      : window.ticAnalyzer.getGraphLevel(projectPath, expanded);
+    (call as Promise<LevelData>).then((d) => {
       if (!alive) return;
       setData(d);
       setLoading(false);
       setSelected(null);
     });
     return () => { alive = false; };
-  }, [projectPath, expanded]);
+  }, [projectPath, expanded, graphMode]);
 
   // Inicializa Cytoscape uma vez
   useEffect(() => {
@@ -336,10 +403,13 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
 
     cy.add(data.edges.map((e) => {
       const ratio = e.weight > 0 ? e.resolvedWeight / e.weight : 0;
+      const cls = graphMode === 'unified' && e.via
+        ? `via-${e.via.replace(/[^a-z-]/g, '')}`
+        : (ratio >= 0.5 ? 'ast' : 'heuristic');
       return {
         group: 'edges' as const,
-        data: { id: `${e.from}→${e.to}`, source: e.from, target: e.to, weight: e.weight },
-        classes: ratio >= 0.5 ? 'ast' : 'heuristic',
+        data: { id: `${e.from}→${e.to}`, source: e.from, target: e.to, weight: e.weight, via: e.via ?? '' },
+        classes: cls,
       };
     }));
 
@@ -363,6 +433,7 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
       if (['layer', 'module', 'file'].includes(kind)) expand(id);
     });
 
+
     cy.off('tap').on('tap', 'node', (e) => {
       const nodeData = e.target.data() as AggNode;
       setSelected(nodeData);
@@ -376,7 +447,7 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
     cy.on('tap', (e) => {
       if (e.target === cy) { cy.elements().removeClass('faded'); setSelected(null); }
     });
-  }, [data, layoutMode, expand]);
+  }, [data, layoutMode, expand, graphMode]);
 
   // Limpa faded quando focus mode desliga
   useEffect(() => {
@@ -422,6 +493,22 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
     <div style={{ fontFamily: F.body, color: C.textPrimary, display: 'flex', flexDirection: 'column', gap: 10 }}>
       {/* ── Toolbar ─────────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Modo: Hierarquia | Grafo Unificado */}
+        <div style={{ display: 'flex', gap: 0, borderRadius: 6, overflow: 'hidden', border: `1px solid ${C.border}` }}>
+          <button
+            onClick={() => { setGraphMode('hierarchy'); setExpanded([]); }}
+            style={{ ...btnBase, borderRadius: 0, border: 'none', background: graphMode === 'hierarchy' ? C.accent : C.surfaceHigh, color: graphMode === 'hierarchy' ? C.accentDim : C.textMuted, fontWeight: graphMode === 'hierarchy' ? 700 : 400 }}>
+            <Icon name="account_tree" size={13} color={graphMode === 'hierarchy' ? C.accentDim : C.textMuted} />
+            Hierarquia
+          </button>
+          <button
+            onClick={() => { setGraphMode('unified'); setExpanded([]); }}
+            style={{ ...btnBase, borderRadius: 0, border: 'none', borderLeft: `1px solid ${C.border}`, background: graphMode === 'unified' ? C.accent : C.surfaceHigh, color: graphMode === 'unified' ? C.accentDim : C.textMuted, fontWeight: graphMode === 'unified' ? 700 : 400 }}>
+            <Icon name="hub" size={13} color={graphMode === 'unified' ? C.accentDim : C.textMuted} />
+            Grafo Unificado
+          </button>
+        </div>
+
         {/* Breadcrumb */}
         <div style={{ display: 'flex', gap: 4, alignItems: 'center', flex: '1 1 auto', flexWrap: 'wrap' }}>
           {breadcrumb.map((b, i) => {
@@ -496,6 +583,28 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
           <Icon name="fit_screen" size={13} color={C.textMuted} />
           Fit
         </button>
+
+        {/* Export standalone (html/mermaid/svg/png) — abre o artefato gerado */}
+        <select
+          defaultValue=""
+          title="Exportar o grafo atual como artefato compartilhável"
+          onChange={async (e) => {
+            const fmt = e.target.value as 'html' | 'mermaid' | 'svg' | 'png';
+            e.target.value = '';
+            if (!fmt) return;
+            const r = await window.ticAnalyzer.exportGraph(projectPath, fmt, expanded);
+            if (!r.ok) alert(`Falha ao exportar: ${r.error ?? 'erro desconhecido'}`);
+          }}
+          style={{
+            padding: '3px 8px', background: C.surfaceHigh, border: `1px solid ${C.border}`,
+            borderRadius: 6, color: C.textMuted, fontFamily: F.code, fontSize: 11, cursor: 'pointer',
+          }}>
+          <option value="">Exportar…</option>
+          <option value="html">HTML interativo</option>
+          <option value="mermaid">Mermaid (.mmd)</option>
+          <option value="svg">SVG</option>
+          <option value="png">PNG</option>
+        </select>
       </div>
 
       {/* Stats hint */}
@@ -535,23 +644,43 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
 
         {/* Legenda */}
         <div style={{
-          position: 'absolute', left: 12, bottom: 12, display: 'flex', gap: 14,
+          position: 'absolute', left: 12, bottom: 12, display: 'flex', gap: 12, flexWrap: 'wrap',
           fontSize: 10, color: C.textMuted, fontFamily: F.code,
           background: 'rgba(6,13,26,0.75)', padding: '5px 10px', borderRadius: 6,
-          backdropFilter: 'blur(4px)',
+          backdropFilter: 'blur(4px)', maxWidth: 420,
         }}>
-          {Object.entries(LAYER_COLORS).filter(([k]) => k !== 'default').map(([layer, color]) => (
-            <span key={layer} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block', boxShadow: `0 0 6px ${color}` }} />
-              {layer}
-            </span>
-          ))}
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 16, height: 1, background: 'rgba(255,255,255,0.35)', display: 'inline-block' }} /> AST
-          </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 16, height: 1, borderTop: '1px dashed rgba(255,185,95,0.5)', display: 'inline-block' }} /> heurística
-          </span>
+          {graphMode === 'hierarchy' ? (
+            <>
+              {Object.entries(LAYER_COLORS).filter(([k]) => k !== 'default').map(([layer, color]) => (
+                <span key={layer} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block', boxShadow: `0 0 6px ${color}` }} />
+                  {layer}
+                </span>
+              ))}
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 16, height: 1, background: 'rgba(255,255,255,0.35)', display: 'inline-block' }} /> AST
+              </span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 16, height: 1, borderTop: '1px dashed rgba(255,185,95,0.5)', display: 'inline-block' }} /> heurística
+              </span>
+            </>
+          ) : (
+            <>
+              {([['plsql','#c084fc','proc/pkg'],['table','#ffb95f','tabela'],['column','#facc15','coluna'],['method','#4edea3','método'],['file','#e8b84b','arquivo']] as [string,string,string][]).map(([kind, color, label]) => (
+                <span key={kind} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: kind === 'table' || kind === 'column' ? 1 : kind === 'plsql' ? 2 : '50%', background: color, display: 'inline-block', boxShadow: `0 0 5px ${color}` }} />
+                  {label}
+                </span>
+              ))}
+              <span style={{ color: C.border }}>·</span>
+              {([['#00dbe9','db-call'],['#ffb95f','writes'],['#60a5fa','reads'],['#fb7185','trigger'],['#c084fc','calls']] as [string,string][]).map(([color, label]) => (
+                <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 14, height: 1.5, background: color, display: 'inline-block', borderRadius: 1 }} />
+                  {label}
+                </span>
+              ))}
+            </>
+          )}
         </div>
 
         {/* Role legend (bottom-right) */}
@@ -598,6 +727,12 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
                     fontWeight: 700, fontFamily: F.code }}>
                   ⤵ Expandir
                 </button>
+              )}
+              {graphMode === 'unified' && selected.kind === 'plsql' && (
+                <span style={{ fontSize: 10, color: '#c084fc', fontFamily: F.code }}>procedure/pkg</span>
+              )}
+              {graphMode === 'unified' && selected.kind === 'table' && (
+                <span style={{ fontSize: 10, color: '#ffb95f', fontFamily: F.code }}>tabela DB</span>
               )}
               <button
                 onClick={() => setSelected(null)}

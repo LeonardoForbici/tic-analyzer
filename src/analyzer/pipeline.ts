@@ -28,6 +28,7 @@ import type { SearchIndexEntry } from './buildSearchIndex';
 import { generateMultiGraph } from './generateMultiGraph';
 import { buildImpactIndex } from './buildImpactIndex';
 import { buildImpactGraph } from './buildImpactGraph';
+import { detectCommunities } from './detectCommunities';
 import { computeMetrics } from './computeMetrics';
 import { detectLayerViolations } from './detectLayerViolations';
 import { generateMetricsReport } from './generateMetricsReport';
@@ -48,6 +49,7 @@ import { appendEvents, makeEvent } from './store/activityLog';
 import { computeSelfDelta, computePredictionFeedback, type PredictionAccuracy } from './computeDelta';
 import { syncTriageItems, type TriageCandidate } from './store/triageStore';
 import { generateZoomOut } from './generateZoomOut';
+import { generateGraphReport } from './generateGraphReport';
 
 export type PhaseStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -88,6 +90,10 @@ export interface PipelineResult {
   deadComponents: number;
   /** Arestas do grafo de impacto unificado (file/method/plsql/table/column). */
   impactEdges?: number;
+  /** Nº de god nodes (hubs) destacados no relatório de insights do grafo. */
+  godNodes?: number;
+  /** Nº de comunidades (clusters Louvain) detectadas no grafo de impacto. */
+  communities?: number;
   /** Health score do projeto (0–100) e grade (A–E). */
   healthScore?: number;
   healthGrade?: string;
@@ -133,6 +139,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'multigraph', label: 'Gerando multi-grafo (frontend→endpoint→backend→PL/SQL)', status: 'pending' },
   { id: 'impact', label: 'Construindo índice de impacto', status: 'pending' },
   { id: 'impact-graph', label: 'Consolidando grafo de impacto unificado', status: 'pending' },
+  { id: 'communities', label: 'Detectando comunidades do grafo (Louvain)', status: 'pending' },
   { id: 'metrics', label: 'Computando métricas de qualidade', status: 'pending' },
   { id: 'arch-rules', label: 'Validando regras de arquitetura (.tic-rules.json)', status: 'pending' },
   { id: 'predict', label: 'Predição de risco (churn × acoplamento)', status: 'pending' },
@@ -148,6 +155,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'health', label: 'Computando health score do projeto', status: 'pending' },
   { id: 'triage', label: 'Sincronizando fila de triagem', status: 'pending' },
   { id: 'zoom-out', label: 'Gerando visão executiva (zoom-out)', status: 'pending' },
+  { id: 'graph-report', label: 'Analisando god nodes e conexões surpreendentes', status: 'pending' },
   { id: 'activity', label: 'Registrando atividade (delta + predição)', status: 'pending' },
   { id: 'search-index', label: 'Construindo índice de busca por código', status: 'pending' },
   { id: 'persist-index', label: 'Gravando índice consultável (SQLite)', status: 'pending' },
@@ -454,6 +462,16 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
     markDone('impact-graph');
     report('impact-graph', 100, `${impactEdges.length.toLocaleString()} arestas de impacto unificadas`);
 
+    // ── 16c. COMUNIDADES (Louvain) — clusters por topologia do grafo ─────────────
+    report('communities', 77, 'Agrupando nós por topologia (Louvain)...');
+    const communityResult = detectCommunities(impactEdges);
+    const communityName = new Map(communityResult.communities.map((c) => [c.id, c.name]));
+    const communities = [...communityResult.byNode.entries()].map(([nodeId, community]) => ({
+      nodeId, community, name: communityName.get(community) ?? String(community)
+    }));
+    markDone('communities');
+    report('communities', 100, `${communityResult.communities.length} comunidades, ${communityResult.surprising.length} acoplamentos atípicos`);
+
     // ── 17. MÉTRICAS ─────────────────────────────────────────────────────────────
     report('metrics', 78, 'Computando complexidade ciclomática e dívida técnica...');
     const metrics = computeMetrics(files, graph, modules);
@@ -663,6 +681,14 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
     markDone('zoom-out');
     report('zoom-out', 100, 'zoom-out.md gerado');
 
+    // ── 24c'. INSIGHTS DO GRAFO (god nodes + conexões surpreendentes) ────────────
+    report('graph-report', 94, 'Identificando hubs e conexões atípicas do grafo de impacto...');
+    const fileToModule = new Map<string, string>();
+    for (const m of modules) for (const f of m.files) fileToModule.set(f.relativePath, m.name);
+    const graphReport = generateGraphReport(ticCodeDir, projectName, impactEdges, fileToModule);
+    markDone('graph-report');
+    report('graph-report', 100, `${graphReport.godNodes.length} god nodes, ${graphReport.surprising.length} conexões surpreendentes`);
+
     // ── 24d. ATIVIDADE (self-delta + loop preditivo) — o batimento do sistema ────
     report('activity', 94, 'Computando o que mudou desde a última análise...');
     const curDelta = {
@@ -702,7 +728,7 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
     );
 
     report('persist-index', 97, 'Gravando índice consultável (SQLite)...');
-    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges, columnAccess: orm.columnAccess, modules, impactEdges, embeddings });
+    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges, columnAccess: orm.columnAccess, modules, impactEdges, embeddings, communities });
 
     // Populate architectural roles from detectPatterns results
     {
@@ -801,6 +827,8 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
       angularModules: angularModules.length,
       deadComponents: deadComponents.length,
       impactEdges: impactEdges.length,
+      godNodes: graphReport.godNodes.length,
+      communities: communityResult.communities.length,
       healthScore: health.score,
       healthGrade: health.grade,
       archViolations: archViolations.length,

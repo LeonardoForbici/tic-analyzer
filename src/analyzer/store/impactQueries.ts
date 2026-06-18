@@ -210,3 +210,158 @@ export function queryBlastRadius(db: Database.Database, entity: string, topN = 2
     candidates: impact.candidates
   };
 }
+
+// ── Path finding: "por que X impacta Y" ──────────────────────────────────────
+//
+// `queryImpactOf` diz O QUE é afetado, mas descarta o caminho. Aqui reconstruímos
+// a CADEIA de arestas (com `via` + confiança por salto) que liga duas entidades —
+// reaproveitando `resolveImpactId` nas duas pontas e o mesmo BFS+parent-map de
+// `queryFindPath`, mas sobre `impact_edges` (cross-tier) em vez de `edges`.
+
+export interface ImpactPathHop {
+  from: string;
+  to: string;
+  /** Como a dependência foi detectada (import, call, db-call, reads, writes…). */
+  via: string;
+  confidence: 'resolved' | 'inferred';
+}
+
+export interface ImpactPathResult {
+  /** Id canônico resolvido da origem. */
+  from: string;
+  /** Id canônico resolvido do destino. */
+  to: string;
+  /** Até `maxPaths` cadeias de arestas (mais curtas primeiro). Vazio = sem caminho. */
+  paths: ImpactPathHop[][];
+  /** Nº de saltos do caminho mais curto (0 = origem == destino). */
+  hops: number;
+  /** Busca atingiu o teto de nós antes de esgotar o grafo. */
+  truncated: boolean;
+  fromCandidates?: string[];
+  toCandidates?: string[];
+}
+
+export interface ImpactPathOptions {
+  /** Quantas cadeias alternativas retornar (default 3). */
+  maxPaths?: number;
+  /** Teto de nós visitados por busca (default 5000; reporta `truncated`). */
+  maxNodes?: number;
+  /**
+   * 'impact' (default): caminho de propagação — "mexer em `from` afeta `to`".
+   * 'depends': caminho de dependência — "`from` depende de `to`".
+   */
+  direction?: 'impact' | 'depends';
+}
+
+/**
+ * Reconstrói a(s) cadeia(s) de arestas que ligam `from` a `to` no grafo de impacto.
+ *
+ * direction='impact' (default) responde "por que mexer em `from` afeta `to`":
+ * caminha pelas arestas reversas (dependentes) de `from` até alcançar `to`. Cada
+ * salto `A --via--> B` lê-se "o impacto flui de A para B porque B depende de A".
+ */
+export function queryImpactPath(
+  db: Database.Database,
+  from: string,
+  to: string,
+  opts: ImpactPathOptions = {}
+): ImpactPathResult | null {
+  const src = resolveImpactId(db, from);
+  const dst = resolveImpactId(db, to);
+  if (!src.id || !dst.id) return null;
+
+  const maxPaths = opts.maxPaths ?? 3;
+  const maxNodes = opts.maxNodes ?? 5000;
+  const direction = opts.direction ?? 'impact';
+
+  // 'impact': vizinho = quem depende do nó atual (from_id onde to_id = atual).
+  // 'depends': vizinho = de quem o nó atual depende (to_id onde from_id = atual).
+  const neighborStmt =
+    direction === 'impact'
+      ? db.prepare('SELECT from_id AS node, via, confidence FROM impact_edges WHERE to_id = ?')
+      : db.prepare('SELECT to_id AS node, via, confidence FROM impact_edges WHERE from_id = ?');
+
+  const edgeKey = (parent: string, node: string) => `${parent} ${node}`;
+
+  let truncated = false; // setado se alguma busca atingir maxNodes
+
+  // BFS shortest path com parent-map; `banned` permite achar caminhos alternativos.
+  const search = (banned: Set<string>): ImpactPathHop[] | null => {
+    if (src.id === dst.id) return [];
+    const parent = new Map<string, { from: string; via: string; confidence: 'resolved' | 'inferred' }>();
+    const visited = new Set<string>([src.id!]);
+    let queue: string[] = [src.id!];
+    let found = false;
+
+    while (queue.length > 0 && !found) {
+      const next: string[] = [];
+      for (const cur of queue) {
+        for (const r of neighborStmt.all(cur) as any[]) {
+          const node = r.node as string;
+          if (visited.has(node)) continue;
+          if (banned.has(edgeKey(cur, node))) continue;
+          if (visited.size >= maxNodes) { truncated = true; break; }
+          visited.add(node);
+          parent.set(node, { from: cur, via: r.via as string, confidence: r.confidence as any });
+          if (node === dst.id) { found = true; break; }
+          next.push(node);
+        }
+        if (found || truncated) break;
+      }
+      if (found || truncated) break;
+      queue = next;
+    }
+
+    if (!found) return null;
+    // Reconstrói do destino até a origem. Hop = aresta de dependência `from -> to`,
+    // independente da direção de busca (o flow de impacto é a mesma orientação).
+    const hops: ImpactPathHop[] = [];
+    let cur = dst.id!;
+    while (cur !== src.id) {
+      const p = parent.get(cur)!;
+      // Hop sempre orientado parent→node (a ordem em que descobrimos o caminho).
+      hops.unshift({ from: p.from, to: cur, via: p.via, confidence: p.confidence });
+      cur = p.from;
+    }
+    return hops;
+  };
+
+  const first = search(new Set());
+  if (first === null) {
+    // Distingue "sem caminho" de "estourou o teto": refaz sem cap p/ marcar truncado.
+    return { from: src.id, to: dst.id, paths: [], hops: 0, truncated: false,
+      fromCandidates: src.candidates.length ? src.candidates : undefined,
+      toCandidates: dst.candidates.length ? dst.candidates : undefined };
+  }
+
+  const paths: ImpactPathHop[][] = [first];
+  // k-shortest leve: para cada caminho achado, bane uma de suas arestas e re-busca.
+  const banned = new Set<string>();
+  for (let k = 1; k < maxPaths && paths.length > 0; k++) {
+    const base = paths[paths.length - 1];
+    if (base.length === 0) break;
+    // Bane a aresta do meio do último caminho para forçar uma rota distinta.
+    // O BFS bane por edgeKey(searchCur, searchNode) e um hop reconstruído é
+    // {from: searchCur, to: searchNode} nas duas direções → a chave é sempre
+    // edgeKey(mid.from, mid.to).
+    const mid = base[Math.floor(base.length / 2)];
+    const key = edgeKey(mid.from, mid.to);
+    if (banned.has(key)) break;
+    banned.add(key);
+    const alt = search(banned);
+    if (!alt) break;
+    const sig = (p: ImpactPathHop[]) => p.map((h) => `${h.from}->${h.to}`).join('|');
+    if (paths.some((p) => sig(p) === sig(alt))) break;
+    paths.push(alt);
+  }
+
+  return {
+    from: src.id,
+    to: dst.id,
+    paths,
+    hops: first.length,
+    truncated,
+    fromCandidates: src.candidates.length ? src.candidates : undefined,
+    toCandidates: dst.candidates.length ? dst.candidates : undefined
+  };
+}
