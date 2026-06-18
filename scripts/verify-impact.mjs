@@ -97,6 +97,20 @@ function cleanupFixture(fixture) {
   const none = queryImpactPath(db, 'src/pages/TelaCliente.tsx', 'table:CLIENTE', { direction: 'impact' });
   check('PF7: entidades não conectadas (nessa direção) retornam paths vazio sem erro', !!none && Array.isArray(none.paths), JSON.stringify(none?.paths?.length));
 
+  // PF8: k-shortest devolve rotas ALTERNATIVAS num grafo diamante (lock do bug do ban-key).
+  // Diamante: A→B, A→C, B→D, C→D (X→Y = X depende de Y). Impacto de D alcança A por
+  // duas rotas (D←B←A e D←C←A). max_paths=2 deve retornar as 2.
+  const Database = require('better-sqlite3');
+  const mem = new Database(':memory:');
+  mem.exec(`CREATE TABLE impact_edges (from_id TEXT, to_id TEXT, from_kind TEXT, to_kind TEXT, via TEXT, confidence TEXT);
+            CREATE INDEX i1 ON impact_edges(to_id); CREATE INDEX i2 ON impact_edges(from_id);
+            CREATE TABLE files (rel_path TEXT PRIMARY KEY, module TEXT);`);
+  const ins = mem.prepare("INSERT INTO impact_edges VALUES (?,?,'file','file','import','resolved')");
+  for (const [f, t] of [['file:A', 'file:B'], ['file:A', 'file:C'], ['file:B', 'file:D'], ['file:C', 'file:D']]) ins.run(f, t);
+  const multi = queryImpactPath(mem, 'file:D', 'file:A', { direction: 'impact', maxPaths: 2 });
+  check('PF8: k-shortest devolve 2 rotas distintas no diamante', !!multi && multi.paths.length === 2, JSON.stringify(multi?.paths?.map((p) => p.map((h) => h.to))));
+  mem.close();
+
   // Sanidade dos módulos persistidos (bugs do Explorador: módulo com nome de
   // arquivo tipo "frontend/package.json" e camada errada por arquivo)
   const modRows = db.prepare('SELECT name FROM modules').all().map((r) => r.name);

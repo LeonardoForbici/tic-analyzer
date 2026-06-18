@@ -341,11 +341,11 @@ export function queryImpactPath(
     const base = paths[paths.length - 1];
     if (base.length === 0) break;
     // Bane a aresta do meio do último caminho para forçar uma rota distinta.
+    // O BFS bane por edgeKey(searchCur, searchNode) e um hop reconstruído é
+    // {from: searchCur, to: searchNode} nas duas direções → a chave é sempre
+    // edgeKey(mid.from, mid.to).
     const mid = base[Math.floor(base.length / 2)];
-    const key =
-      direction === 'impact'
-        ? edgeKey(mid.to, mid.from) // busca reversa: (cur=to, node=from)
-        : edgeKey(mid.from, mid.to);
+    const key = edgeKey(mid.from, mid.to);
     if (banned.has(key)) break;
     banned.add(key);
     const alt = search(banned);
