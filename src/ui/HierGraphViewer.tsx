@@ -496,6 +496,28 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
           <Icon name="fit_screen" size={13} color={C.textMuted} />
           Fit
         </button>
+
+        {/* Export standalone (html/mermaid/svg/png) — abre o artefato gerado */}
+        <select
+          defaultValue=""
+          title="Exportar o grafo atual como artefato compartilhável"
+          onChange={async (e) => {
+            const fmt = e.target.value as 'html' | 'mermaid' | 'svg' | 'png';
+            e.target.value = '';
+            if (!fmt) return;
+            const r = await window.ticAnalyzer.exportGraph(projectPath, fmt, expanded);
+            if (!r.ok) alert(`Falha ao exportar: ${r.error ?? 'erro desconhecido'}`);
+          }}
+          style={{
+            padding: '3px 8px', background: C.surfaceHigh, border: `1px solid ${C.border}`,
+            borderRadius: 6, color: C.textMuted, fontFamily: F.code, fontSize: 11, cursor: 'pointer',
+          }}>
+          <option value="">Exportar…</option>
+          <option value="html">HTML interativo</option>
+          <option value="mermaid">Mermaid (.mmd)</option>
+          <option value="svg">SVG</option>
+          <option value="png">PNG</option>
+        </select>
       </div>
 
       {/* Stats hint */}

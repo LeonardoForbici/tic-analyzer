@@ -22,6 +22,7 @@ declare global {
       getGitDiff: (projectPath: string) => Promise<{ files: string[]; error?: string }>;
       getImpactOf: (projectPath: string, entity: string) => Promise<ImpactOfResponse>;
       getGraphLevel: (projectPath: string, expanded: string[]) => Promise<unknown>;
+      exportGraph: (projectPath: string, format: 'html' | 'mermaid' | 'svg' | 'png', expanded: string[]) => Promise<{ ok: boolean; path?: string; error?: string }>;
       searchCode: (projectPath: string, query: string) => Promise<SearchCodeResponse>;
       updateTriage: (projectPath: string, id: string, changes: unknown) => Promise<unknown>;
       createTriage: (projectPath: string, input: unknown) => Promise<unknown>;
