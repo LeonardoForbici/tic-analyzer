@@ -5,7 +5,7 @@ import { runPipeline, type PipelineProgress, type PipelineResult } from '../src/
 import { TicAnalyzerMcpServer } from '../src/mcp/server';
 import { openIndexDb, INDEX_DB_FILE } from '../src/analyzer/store/indexDb';
 import { queryImpactOf, queryBlastRadius } from '../src/analyzer/store/impactQueries';
-import { queryGraphLevel } from '../src/analyzer/store/graphQueries';
+import { queryGraphLevel, queryUnifiedGraph } from '../src/analyzer/store/graphQueries';
 import { querySearch, queryVectorSearch, embeddingsCount, fuseRRF } from '../src/mcp/queries';
 import { getEmbedder } from '../src/analyzer/semantic/embeddings';
 import { transitionTriageItem, createManualItem, type TriageState, type TriageCategory, type TriagePriority } from '../src/analyzer/store/triageStore';
@@ -351,6 +351,20 @@ ipcMain.handle('get-graph-level', async (_event, projectPath: string, expanded: 
     const hasLayer = hasModules && (db.prepare('PRAGMA table_info(files)').all() as any[]).some((c) => c.name === 'layer');
     if (!hasLayer) return { error: 'index.db antigo (sem agregação por módulo/camada). Execute a análise novamente.' };
     return queryGraphLevel(db, { expanded: Array.isArray(expanded) ? expanded : [] });
+  } catch (err) {
+    return { error: String(err) };
+  } finally {
+    db.close();
+  }
+});
+
+ipcMain.handle('get-unified-graph', async (_event, projectPath: string, expanded: string[]) => {
+  const db = openIndexDb(path.join(projectPath, '.tic-code', INDEX_DB_FILE));
+  if (!db) return { error: 'index.db não encontrado. Execute a análise novamente.' };
+  try {
+    const hasImpact = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='impact_edges'").get();
+    if (!hasImpact) return { error: 'index.db sem grafo de impacto. Execute a análise novamente.' };
+    return queryUnifiedGraph(db, { expanded: Array.isArray(expanded) ? expanded : [] });
   } catch (err) {
     return { error: String(err) };
   } finally {

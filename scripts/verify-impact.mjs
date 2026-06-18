@@ -17,7 +17,7 @@ const need = (p) => { if (!existsSync(p)) { console.error(`✗ dist ausente: ${p
 
 const { openIndexDb } = require(need(join(root, 'dist/src/analyzer/store/indexDb.js')));
 const { queryImpactOf, queryBlastRadius, resolveImpactId, queryImpactPath } = require(need(join(root, 'dist/src/analyzer/store/impactQueries.js')));
-const { queryGraphLevel } = require(need(join(root, 'dist/src/analyzer/store/graphQueries.js')));
+const { queryGraphLevel, queryUnifiedGraph } = require(need(join(root, 'dist/src/analyzer/store/graphQueries.js')));
 const { runPipeline } = require(need(join(root, 'dist/src/analyzer/pipeline.js')));
 
 const failures = [];
@@ -133,6 +133,21 @@ function cleanupFixture(fixture) {
     const lvl3 = queryGraphLevel(db, { expanded: [`module:${anyModule.name}`] });
     check('G3: expandir módulo revela arquivos', lvl3.nodes.some((n) => n.kind === 'file'), lvl3.nodes.map((n) => n.id).join(', '));
     check('G4: arestas agregadas têm peso', lvl3.edges.every((e) => e.weight >= 1));
+  }
+
+  // Grafo unificado cross-tier (queryUnifiedGraph)
+  const db2 = openIndexDb(join(fixture, '.tic-code', 'index.db'));
+  if (db2) {
+    const top = queryUnifiedGraph(db2, { expanded: [] });
+    check('U1: grafo unificado retorna nós de layer', top.nodes.some((n) => n.kind === 'layer'), top.nodes.map((n) => n.id).join(', '));
+    check('U2: grafo unificado tem arestas cross-tier', top.edges.length > 0, `edges=${top.edges.length}`);
+    check('U3: arestas do grafo unificado têm via', top.edges.some((e) => !!e.via), top.edges.map((e) => e.via).join(', '));
+    const dbLayer = top.nodes.find((n) => n.id === 'layer:database');
+    check('U4: layer:database presente no topo', !!dbLayer, top.nodes.map((n) => n.id).join(', '));
+    // Expandir database: deve expor nós plsql e table
+    const expanded = queryUnifiedGraph(db2, { expanded: ['layer:database'] });
+    check('U5: expandir layer:database revela nós plsql ou table', expanded.nodes.some((n) => n.kind === 'plsql' || n.kind === 'table'), expanded.nodes.map((n) => n.kind + ':' + n.label).join(', '));
+    db2.close();
   }
 
   db.close();

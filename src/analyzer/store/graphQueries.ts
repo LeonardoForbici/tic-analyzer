@@ -13,7 +13,7 @@
  */
 import type Database from 'better-sqlite3';
 
-export type AggNodeKind = 'layer' | 'module' | 'file' | 'symbol' | 'more';
+export type AggNodeKind = 'layer' | 'module' | 'file' | 'symbol' | 'more' | 'plsql' | 'table' | 'column' | 'method';
 
 export interface AggNode {
   id: string;
@@ -30,10 +30,12 @@ export interface AggNode {
 export interface AggEdge {
   from: string;
   to: string;
-  /** Nº de arestas arquivo→arquivo agregadas neste par. */
+  /** Nº de arestas agregadas neste par. */
   weight: number;
   /** Quantas delas são `resolved` (AST) — o resto é heurístico. */
   resolvedWeight: number;
+  /** Tipo de relação dominante (import / db-call / writes / reads / trigger / calls). Preenchido no modo unificado. */
+  via?: string;
 }
 
 export interface GraphLevelRequest {
@@ -339,4 +341,196 @@ function moduleContainer(
   if (!layer) return null;
   const id = expandedLayers.has(layer) ? `module:${mod}` : `layer:${layer}`;
   return nodes.has(id) ? id : null;
+}
+
+// ── Grafo unificado cross-tier ─────────────────────────────────────────────
+
+const VIA_PRIORITY: Record<string, number> = {
+  trigger: 6, writes: 5, reads: 4, 'db-call': 3, calls: 2, import: 1, depends: 0,
+};
+
+function dominantVia(vias: Map<string, number>): string {
+  let best = 'depends';
+  let bestScore = -1;
+  for (const [v, count] of vias) {
+    const score = (VIA_PRIORITY[v] ?? 0) + count * 0.01;
+    if (score > bestScore) { bestScore = score; best = v; }
+  }
+  return best;
+}
+
+/**
+ * Grafo unificado cross-tier: mostra nós de TODOS os tipos (layer/module/file/plsql/table/column/method)
+ * com arestas coloridas por tipo de relação (import/db-call/writes/reads/trigger).
+ * Reusa o mesmo contrato GraphLevelResult do queryGraphLevel — o HierGraphViewer pode
+ * consumir qualquer um sem adaptação.
+ */
+export function queryUnifiedGraph(db: Database.Database, req: GraphLevelRequest): GraphLevelResult {
+  const expandedLayers = new Set<string>();
+  const expandedModules = new Set<string>();
+  for (const id of req.expanded) {
+    if (id.startsWith('layer:')) expandedLayers.add(id.slice(6));
+    else if (id.startsWith('module:')) expandedModules.add(id.slice(7));
+  }
+
+  // ── Metadados dos módulos (camadas de arquivos) ──────────────────────────
+  const modules = db.prepare('SELECT name, file_count, layer FROM modules').all() as Array<{ name: string; file_count: number; layer: string }>;
+  const layerOf = new Map<string, string>();
+  const layerModules = new Map<string, typeof modules>();
+  for (const m of modules) {
+    layerOf.set(m.name, m.layer);
+    const arr = layerModules.get(m.layer) ?? [];
+    arr.push(m);
+    layerModules.set(m.layer, arr);
+  }
+  for (const m of expandedModules) {
+    const l = layerOf.get(m);
+    if (l) expandedLayers.add(l);
+  }
+
+  // ── Maps arquivo → módulo/layer ──────────────────────────────────────────
+  const fileModuleMap = new Map<string, string>();
+  const fileLayerMap = new Map<string, string>();
+  for (const r of db.prepare('SELECT rel_path, module, layer FROM files').all() as Array<{ rel_path: string; module: string | null; layer: string | null }>) {
+    if (r.module) fileModuleMap.set(r.rel_path, r.module);
+    if (r.layer) fileLayerMap.set(r.rel_path, r.layer);
+  }
+
+  const nodes = new Map<string, AggNode>();
+  // Aresta: chave from→to (sem via), armazena vias separadas para escolher a dominante
+  const edgeMap = new Map<string, { from: string; to: string; weight: number; resolvedWeight: number; vias: Map<string, number> }>();
+
+  function upsertEdge(from: string, to: string, via: string, resolved: boolean) {
+    if (from === to) return;
+    const key = `${from}→${to}`;
+    const cur = edgeMap.get(key);
+    if (cur) {
+      cur.weight++;
+      if (resolved) cur.resolvedWeight++;
+      cur.vias.set(via, (cur.vias.get(via) ?? 0) + 1);
+    } else {
+      edgeMap.set(key, { from, to, weight: 1, resolvedWeight: resolved ? 1 : 0, vias: new Map([[via, 1]]) });
+    }
+  }
+
+  // ── Nós visíveis ─────────────────────────────────────────────────────────
+  const hasNonFile = !!db.prepare("SELECT 1 FROM impact_edges WHERE from_kind != 'file' OR to_kind != 'file' LIMIT 1").get();
+  const allLayers = new Set(layerModules.keys());
+  if (hasNonFile && !allLayers.has('database')) allLayers.add('database');
+
+  for (const layer of allLayers) {
+    const mods = layerModules.get(layer) ?? [];
+
+    if (!expandedLayers.has(layer)) {
+      nodes.set(`layer:${layer}`, {
+        id: `layer:${layer}`, label: layer, kind: 'layer', layer,
+        childCount: mods.reduce((s, m) => s + m.file_count, 0),
+        inWeight: 0, outWeight: 0,
+      });
+      continue;
+    }
+
+    if (layer === 'database') {
+      // Módulos de arquivo na camada database (ex. .pkb, .trg)
+      for (const m of mods) {
+        if (!expandedModules.has(m.name)) {
+          nodes.set(`module:${m.name}`, { id: `module:${m.name}`, label: m.name, kind: 'module', layer, childCount: m.file_count, inWeight: 0, outWeight: 0 });
+        } else {
+          const files = db.prepare('SELECT rel_path, in_degree, out_degree, layer, role FROM files WHERE module = ? AND (in_degree + out_degree) > 0 ORDER BY (in_degree + out_degree) DESC LIMIT ?')
+            .all(m.name, MAX_CHILDREN) as Array<{ rel_path: string; in_degree: number; out_degree: number; layer: string | null; role: string | null }>;
+          for (const f of files) {
+            const id = `file:${f.rel_path}`;
+            nodes.set(id, { id, label: f.rel_path.split('/').pop() ?? f.rel_path, kind: 'file', layer: f.layer ?? layer, role: f.role ?? undefined, childCount: 0, inWeight: f.in_degree, outWeight: f.out_degree });
+          }
+          const hidden = m.file_count - files.length;
+          if (hidden > 0) nodes.set(`more:${m.name}`, { id: `more:${m.name}`, label: `…${hidden} mais`, kind: 'more', layer, childCount: hidden, inWeight: 0, outWeight: 0 });
+        }
+      }
+
+      // Nós não-arquivo (plsql/table/column/method) da camada database
+      const NON_FILE_KINDS = "('plsql','table','column','method')";
+      const dbNodes = db.prepare(
+        `SELECT DISTINCT id, kind FROM (
+           SELECT from_id id, from_kind kind FROM impact_edges WHERE from_kind IN ${NON_FILE_KINDS}
+           UNION SELECT to_id, to_kind FROM impact_edges WHERE to_kind IN ${NON_FILE_KINDS}
+         ) ORDER BY kind, id LIMIT ${MAX_CHILDREN}`
+      ).all() as Array<{ id: string; kind: string }>;
+      for (const r of dbNodes) {
+        if (!nodes.has(r.id)) {
+          const label = r.id.includes(':') ? r.id.slice(r.id.indexOf(':') + 1) : r.id;
+          nodes.set(r.id, { id: r.id, label, kind: r.kind as AggNodeKind, layer: 'database', childCount: 0, inWeight: 0, outWeight: 0 });
+        }
+      }
+      const totalDb = (db.prepare(
+        `SELECT COUNT(DISTINCT id) c FROM (
+           SELECT from_id id FROM impact_edges WHERE from_kind IN ${NON_FILE_KINDS}
+           UNION SELECT to_id FROM impact_edges WHERE to_kind IN ${NON_FILE_KINDS}
+         )`
+      ).get() as { c: number }).c;
+      const dbShown = dbNodes.length;
+      if (totalDb > dbShown) {
+        nodes.set('more:database', { id: 'more:database', label: `…${totalDb - dbShown} mais`, kind: 'more', layer: 'database', childCount: totalDb - dbShown, inWeight: 0, outWeight: 0 });
+      }
+    } else {
+      // Camada de arquivo (frontend/backend)
+      for (const m of mods) {
+        if (!expandedModules.has(m.name)) {
+          nodes.set(`module:${m.name}`, { id: `module:${m.name}`, label: m.name, kind: 'module', layer, childCount: m.file_count, inWeight: 0, outWeight: 0 });
+        } else {
+          const files = db.prepare('SELECT rel_path, in_degree, out_degree, layer, role FROM files WHERE module = ? AND (in_degree + out_degree) > 0 ORDER BY (in_degree + out_degree) DESC LIMIT ?')
+            .all(m.name, MAX_CHILDREN) as Array<{ rel_path: string; in_degree: number; out_degree: number; layer: string | null; role: string | null }>;
+          for (const f of files) {
+            const id = `file:${f.rel_path}`;
+            nodes.set(id, { id, label: f.rel_path.split('/').pop() ?? f.rel_path, kind: 'file', layer: f.layer ?? layer, role: f.role ?? undefined, childCount: 0, inWeight: f.in_degree, outWeight: f.out_degree });
+          }
+          const hidden = m.file_count - files.length;
+          if (hidden > 0) nodes.set(`more:${m.name}`, { id: `more:${m.name}`, label: `…${hidden} mais`, kind: 'more', layer, childCount: hidden, inWeight: 0, outWeight: 0 });
+        }
+      }
+    }
+  }
+
+  // ── Arestas de impacto cross-tier ─────────────────────────────────────────
+
+  function containerOf(id: string, kind: string): string | null {
+    if (kind === 'file') {
+      if (nodes.has(id)) return id;
+      const relPath = id.slice(5);
+      const mod = fileModuleMap.get(relPath);
+      if (mod) {
+        if (nodes.has(`module:${mod}`)) return `module:${mod}`;
+        if (nodes.has(`more:${mod}`)) return `more:${mod}`;
+        const layer = layerOf.get(mod) ?? fileLayerMap.get(relPath);
+        if (layer && nodes.has(`layer:${layer}`)) return `layer:${layer}`;
+      } else {
+        const layer = fileLayerMap.get(relPath);
+        if (layer && nodes.has(`layer:${layer}`)) return `layer:${layer}`;
+      }
+      return null;
+    }
+    // Nó não-arquivo (plsql, table, column, method)
+    if (nodes.has(id)) return id;
+    if (nodes.has('more:database')) return 'more:database';
+    if (nodes.has('layer:database')) return 'layer:database';
+    return null;
+  }
+
+  for (const e of db.prepare('SELECT from_id, from_kind, to_id, to_kind, via, confidence FROM impact_edges').all() as Array<{ from_id: string; from_kind: string; to_id: string; to_kind: string; via: string; confidence: string }>) {
+    const from = containerOf(e.from_id, e.from_kind);
+    const to = containerOf(e.to_id, e.to_kind);
+    if (from && to) upsertEdge(from, to, e.via ?? 'depends', e.confidence === 'resolved');
+  }
+
+  // Pesos in/out + converte para AggEdge[]
+  const edges: AggEdge[] = [];
+  for (const [, e] of edgeMap) {
+    const via = dominantVia(e.vias);
+    edges.push({ from: e.from, to: e.to, weight: e.weight, resolvedWeight: e.resolvedWeight, via });
+    const f = nodes.get(e.from);
+    const t = nodes.get(e.to);
+    if (f) f.outWeight += e.weight;
+    if (t) t.inWeight += e.weight;
+  }
+
+  return { nodes: [...nodes.values()], edges };
 }
