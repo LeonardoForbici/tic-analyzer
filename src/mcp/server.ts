@@ -14,7 +14,7 @@ import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
 import { getFileSummary } from '../analyzer/store/fileSummary';
 import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount, fuseRRF, type FusedHit } from './queries';
 import { queryImpactOf, queryBlastRadius, queryImpactPath, type ImpactOfResult, type BlastRadiusResult, type ImpactPathResult } from '../analyzer/store/impactQueries';
-import { queryGraphLevel } from '../analyzer/store/graphQueries';
+import { queryGraphLevel, queryCommunities } from '../analyzer/store/graphQueries';
 import { buildAgentBrief, buildDiagnosis } from './agentBrief';
 import { loadTriage, transitionTriageItem, type TriageState, type TriageCategory, type TriagePriority } from '../analyzer/store/triageStore';
 import { loadActivity } from '../analyzer/store/activityLog';
@@ -252,6 +252,11 @@ export class TicAnalyzerMcpServer {
               expanded: { type: 'array', items: { type: 'string' }, description: 'Ids expandidos: layer:<nome>, module:<nome>, file:<rel_path>.' }
             }
           }
+        },
+        {
+          name: 'get_communities',
+          description: 'Comunidades do grafo (Louvain): clusters por TOPOLOGIA do grafo de impacto (nós que conversam muito), não por pasta. Mostra tamanho/composição de cada comunidade e os acoplamentos cross-cluster mais fortes (pontes entre domínios). Use para entender a modularidade real do sistema. ~300-500 tokens.',
+          inputSchema: { type: 'object', properties: {} }
         },
         {
           name: 'list_http_flows',
@@ -782,6 +787,32 @@ export class TicAnalyzerMcpServer {
               '',
               '> Para detalhar: get_graph_level(expanded=[..., "module:<nome>"]).'
             ].filter(Boolean);
+            return respond(textResult(lines.join('\n')));
+          } finally { db.close(); }
+        }
+
+        case 'get_communities': {
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const r = queryCommunities(db);
+            if (!r) return respond(textResult('index.db antigo (sem comunidades). Execute a análise novamente para detectar clusters (Louvain).'));
+            if (r.communities.length === 0) return respond(textResult('Nenhuma comunidade detectada (grafo de impacto sem arestas).'));
+            const lines = [
+              `# Comunidades do grafo (Louvain) — ${r.communities.length} clusters`,
+              '',
+              'Clusters por topologia (nós que conversam muito), não por pasta.',
+              '',
+              '| # | Comunidade | Tamanho | Composição |',
+              '| --- | --- | --- | --- |',
+              ...r.communities.map((c) => `| ${c.id} | ${c.name} | ${c.size} | ${Object.entries(c.byKind).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}:${v}`).join(', ')} |`)
+            ];
+            if (r.coupling.length > 0) {
+              lines.push('', '## Acoplamentos cross-cluster (pontes entre domínios)', '');
+              for (const c of r.coupling.slice(0, 12)) {
+                lines.push(`- \`${c.fromName}\` ↔ \`${c.toName}\` — ${c.weight} arestas`);
+              }
+            }
             return respond(textResult(lines.join('\n')));
           } finally { db.close(); }
         }

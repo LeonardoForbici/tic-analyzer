@@ -110,6 +110,14 @@ CREATE TABLE embeddings (
   file TEXT PRIMARY KEY,
   vec BLOB NOT NULL
 );
+
+-- Comunidades do grafo (Louvain) — clusters por topologia, não por pasta.
+CREATE TABLE communities (
+  node_id TEXT PRIMARY KEY,   -- id canônico do impacto (file:/method:/plsql:/table:/column:)
+  community INTEGER NOT NULL,  -- id numérico do cluster
+  name TEXT                    -- rótulo heurístico do cluster
+);
+CREATE INDEX idx_communities_community ON communities(community);
 `;
 
 export interface IndexDbInput {
@@ -125,6 +133,8 @@ export interface IndexDbInput {
   impactEdges?: ImpactEdge[];
   /** Embeddings por arquivo (Fase 4). Ausente quando o modelo não está disponível. */
   embeddings?: Array<{ file: string; vector: Float32Array }>;
+  /** Comunidades do grafo (Louvain): node id → cluster id + nome. */
+  communities?: Array<{ nodeId: string; community: number; name: string }>;
 }
 
 /** (Re)constrói o index.db a partir dos resultados já computados na pipeline. */
@@ -171,6 +181,7 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
     const insertSearch = db.prepare('INSERT INTO search_fts (file, snippet, terms) VALUES (?, ?, ?)');
     const insertColumn = db.prepare('INSERT INTO column_access (from_file, "table", column, mode, confidence) VALUES (?, ?, ?, ?, ?)');
     const insertEmbedding = db.prepare('INSERT OR REPLACE INTO embeddings (file, vec) VALUES (?, ?)');
+    const insertCommunity = db.prepare('INSERT OR REPLACE INTO communities (node_id, community, name) VALUES (?, ?, ?)');
 
     const writeAll = db.transaction(() => {
       for (const n of input.graph.nodes) {
@@ -204,6 +215,9 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
       }
       for (const e of input.embeddings ?? []) {
         insertEmbedding.run(e.file, vectorToBlob(e.vector));
+      }
+      for (const c of input.communities ?? []) {
+        insertCommunity.run(c.nodeId, c.community, c.name);
       }
     });
     writeAll();

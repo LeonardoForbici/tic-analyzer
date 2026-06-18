@@ -49,6 +49,80 @@ export interface GraphLevelResult {
 /** Máximo de filhos mostrados ao expandir um container (resto vira nó "…N more"). */
 const MAX_CHILDREN = 150;
 
+export interface CommunitySummary {
+  id: number;
+  name: string;
+  size: number;
+  /** Distribuição por tipo de nó (file/method/plsql/table/column). */
+  byKind: Record<string, number>;
+}
+
+export interface CommunityCoupling {
+  from: number;
+  to: number;
+  fromName: string;
+  toName: string;
+  weight: number;
+}
+
+export interface CommunitiesResult {
+  communities: CommunitySummary[];
+  /** Acoplamentos entre comunidades mais fortes (arestas cross-cluster). */
+  coupling: CommunityCoupling[];
+}
+
+/**
+ * Comunidades do grafo (Louvain), lidas da tabela `communities`. Feature-detect:
+ * retorna null para index.db antigo (sem a tabela). O acoplamento cross-cluster
+ * é recomputado de impact_edges para destacar pontes entre comunidades.
+ */
+export function queryCommunities(db: Database.Database, topN = 25): CommunitiesResult | null {
+  const hasTable = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='communities'").get();
+  if (!hasTable) return null;
+
+  const rows = db.prepare('SELECT node_id, community, name FROM communities').all() as Array<{ node_id: string; community: number; name: string }>;
+  if (rows.length === 0) return { communities: [], coupling: [] };
+
+  const nameById = new Map<number, string>();
+  const sizeById = new Map<number, number>();
+  const byKind = new Map<number, Record<string, number>>();
+  const commOfNode = new Map<string, number>();
+  for (const r of rows) {
+    nameById.set(r.community, r.name);
+    sizeById.set(r.community, (sizeById.get(r.community) ?? 0) + 1);
+    commOfNode.set(r.node_id, r.community);
+    const kind = r.node_id.slice(0, r.node_id.indexOf(':'));
+    const k = byKind.get(r.community) ?? {};
+    k[kind] = (k[kind] ?? 0) + 1;
+    byKind.set(r.community, k);
+  }
+
+  const communities: CommunitySummary[] = [...sizeById.entries()]
+    .map(([id, size]) => ({ id, name: nameById.get(id) ?? String(id), size, byKind: byKind.get(id) ?? {} }))
+    .sort((a, b) => b.size - a.size)
+    .slice(0, topN);
+
+  // Acoplamento cross-cluster a partir do grafo de impacto.
+  const crossWeight = new Map<string, number>();
+  const edges = db.prepare('SELECT from_id, to_id FROM impact_edges').all() as Array<{ from_id: string; to_id: string }>;
+  for (const e of edges) {
+    const ca = commOfNode.get(e.from_id);
+    const cb = commOfNode.get(e.to_id);
+    if (ca === undefined || cb === undefined || ca === cb) continue;
+    const key = ca < cb ? `${ca}-${cb}` : `${cb}-${ca}`;
+    crossWeight.set(key, (crossWeight.get(key) ?? 0) + 1);
+  }
+  const coupling: CommunityCoupling[] = [...crossWeight.entries()]
+    .map(([key, weight]) => {
+      const [from, to] = key.split('-').map(Number);
+      return { from, to, fromName: nameById.get(from) ?? String(from), toName: nameById.get(to) ?? String(to), weight };
+    })
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, topN);
+
+  return { communities, coupling };
+}
+
 export function queryGraphLevel(db: Database.Database, req: GraphLevelRequest): GraphLevelResult {
   const expandedLayers = new Set<string>();
   const expandedModules = new Set<string>();
