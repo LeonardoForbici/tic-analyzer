@@ -48,6 +48,10 @@ runs:
         restore-keys: |
           npm-${{ runner.os }}-
 
+    - name: Remove lock file temporário do workspace
+      shell: bash
+      run: rm -f "${{ github.workspace }}/.tic-action-lock.json"
+
     - name: Build analyzer (sem electron-builder — better-sqlite3 usa prebuild Node)
       shell: bash
       working-directory: ${{ github.action_path }}
