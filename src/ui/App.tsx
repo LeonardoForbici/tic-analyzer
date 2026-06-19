@@ -5,6 +5,7 @@ import { ActivityFeed, type ActivityEvent } from './ActivityFeed';
 import { ValueDashboard } from './ValueDashboard';
 import { PortfolioDashboard } from './PortfolioDashboard';
 import { GovernanceDashboard } from './GovernanceDashboard';
+import { SkillsConsole } from './SkillsConsole';
 import { MemoryViewer } from './MemoryViewer';
 import { SearchCodeViewer } from './SearchCodeViewer';
 import { HttpFlowsViewer } from './HttpFlowsViewer';
@@ -46,8 +47,20 @@ declare global {
       onProgress: (cb: (p: Progress) => void) => () => void;
       onAnalysisDone: (cb: (r: AnalysisResult) => void) => void;
       listHttpFlows: (projectPath: string) => Promise<unknown>;
+      getAgentBrief: (projectPath: string, entity: string) => Promise<{ markdown?: string; entity?: string; error?: string }>;
+      getDiagnosis: (projectPath: string, from: string, to?: string) => Promise<{ markdown?: string; error?: string }>;
+      getZoomOut: (projectPath: string, entity?: string) => Promise<{ markdown?: string; error?: string }>;
+      getSkillsOverview: (projectPath: string) => Promise<SkillsOverview>;
     };
   }
+}
+
+export interface SkillsOverview {
+  archSuggestions: Array<{ strength?: string; kind?: string; files?: string[]; problem?: string; solution?: string; benefits?: string }>;
+  riskPrediction: Array<{ file: string; score: number; reasons?: string[] }>;
+  outOfScope: Array<{ id: string; decision: string; reason?: string; date?: string }>;
+  triageCounts: { total: number; readyForAgent: number; needsTriage: number };
+  hasZoomOut: boolean;
 }
 
 interface TokenEntry { timestamp: number; tool: string; inputTokens: number; outputTokens: number; totalTokens: number; }
@@ -79,7 +92,7 @@ interface ImpactOfResponse {
 export interface SearchHitUI { file: string; snippet: string; score: number; origin: 'fts' | 'vec' | 'both' }
 export interface SearchCodeResponse { hits?: SearchHitUI[]; mode?: string; error?: string }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
-type Tab = 'overview' | 'health' | 'value' | 'governance' | 'activity' | 'explorer' | 'search' | 'memory' | 'impact' | 'metrics' | 'files' | 'portfolio' | 'docs' | 'http';
+type Tab = 'overview' | 'health' | 'value' | 'governance' | 'skills' | 'activity' | 'explorer' | 'search' | 'memory' | 'impact' | 'metrics' | 'files' | 'portfolio' | 'docs' | 'http';
 
 // ── Design System ─────────────────────────────────────────────────────────────
 const C = {
@@ -649,6 +662,7 @@ function DocsTab() {
               { name: 'Visão Geral', desc: 'Resumo dos resultados: total de arquivos, linhas, módulos, hotspots, violações arquiteturais. Também é onde você inicia e para o MCP Server.', dica: 'O contador de Hotspots e Violações em vermelho indica onde focar a atenção.' },
               { name: 'Saúde', desc: 'Health score 0–100 (grade A–E) com gauge, penalidades por dimensão e gráfico de tendência entre análises.', dica: 'Rode análises periódicas — a linha de tendência mostra se o projeto está melhorando ou piorando.' },
               { name: 'Governança', desc: 'KPIs de engenharia, fila de triagem com máquina de estados, compliance das regras .tic-rules.json e histórico de PRs.', dica: 'Riscos critical/high viram itens de triagem automaticamente — use get_agent_brief(id) via MCP.' },
+              { name: 'Engenharia', desc: 'Console das skills (mattpocock/skills): Zoom-out, Agent Brief, Diagnóstico em 6 fases, oportunidades de arquitetura, risco preditivo e decisões fora de escopo — geradas pelo engine local, sem IA.', dica: 'Gere o AGENT-BRIEF de qualquer entidade e copie o markdown direto para uma issue ou para um agente.' },
               { name: 'Valor', desc: 'Custo da dívida técnica em dinheiro, dev-days, ownership/bus-factor e risco de conhecimento.', dica: 'Bus-factor 1 ⚠️ = se a pessoa sair, o conhecimento vai junto.' },
               { name: 'Atividade', desc: 'Linha do tempo do que mudou a cada análise: health, riscos, regras, módulos, predições. Atualiza ao vivo.', dica: 'Ligue "Ao Vivo" no topo: o app re-analisa sozinho ao salvar um arquivo.' },
               { name: 'Explorador', desc: 'Drill-down hierárquico: aplicação → camadas → módulos → arquivos → símbolos. Duplo-clique expande.', dica: 'Verde = dependência resolvida por AST; âmbar = heurística.' },
@@ -756,6 +770,7 @@ const NAV_ITEMS: Array<{ id: Tab; label: string; icon: string; requiresDone?: bo
   { id: 'health',      label: 'Saúde',        icon: 'health_metrics',    requiresDone: true },
   { id: 'value',       label: 'Valor',        icon: 'payments',          requiresDone: true },
   { id: 'governance',  label: 'Governança',   icon: 'account_balance',   requiresDone: true },
+  { id: 'skills',      label: 'Engenharia',   icon: 'engineering',       requiresDone: true },
   { id: 'activity',    label: 'Atividade',    icon: 'history',           requiresDone: true },
   { id: 'explorer',    label: 'Explorador',   icon: 'explore',           requiresDone: true },
   { id: 'search',      label: 'Busca',        icon: 'search',            requiresDone: true },
@@ -1512,6 +1527,12 @@ export function App() {
               {activeTab === 'governance' && (
                 <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
                   <GovernanceDashboard ticCodeDir={result!.outputPath} projectPath={projectPath} />
+                </div>
+              )}
+
+              {activeTab === 'skills' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <SkillsConsole projectPath={projectPath} />
                 </div>
               )}
 

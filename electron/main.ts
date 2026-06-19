@@ -5,6 +5,9 @@ import { runPipeline, type PipelineProgress, type PipelineResult } from '../src/
 import { TicAnalyzerMcpServer } from '../src/mcp/server';
 import { openIndexDb, INDEX_DB_FILE } from '../src/analyzer/store/indexDb';
 import { queryImpactOf, queryBlastRadius } from '../src/analyzer/store/impactQueries';
+import { buildAgentBrief, buildDiagnosis } from '../src/mcp/agentBrief';
+import { loadTriage } from '../src/analyzer/store/triageStore';
+import { queryMemory } from '../src/analyzer/store/memoryStore';
 import { queryGraphLevel, queryUnifiedGraph } from '../src/analyzer/store/graphQueries';
 import { querySearch, queryVectorSearch, embeddingsCount, fuseRRF } from '../src/mcp/queries';
 import { getEmbedder } from '../src/analyzer/semantic/embeddings';
@@ -488,6 +491,117 @@ ipcMain.handle('open-arch-report', async (_event, projectPath: string) => {
   } catch (err) {
     return { ok: false, error: String(err) };
   }
+});
+
+// ── Skills de engenharia (mattpocock/skills) — acesso humano na UI ───────────────
+// Mesma lógica das tools MCP, mas expostas ao renderer para inspeção direta.
+
+const ticDir = (projectPath: string) => path.join(projectPath, '.tic-code');
+const readTicJson = async (projectPath: string, file: string): Promise<unknown> => {
+  try {
+    const fs = await import('fs');
+    return JSON.parse(fs.readFileSync(path.join(ticDir(projectPath), file), 'utf8'));
+  } catch { return null; }
+};
+const readTicFile = async (projectPath: string, file: string): Promise<string | null> => {
+  try {
+    const fs = await import('fs');
+    return fs.readFileSync(path.join(ticDir(projectPath), file), 'utf8');
+  } catch { return null; }
+};
+
+// AGENT-BRIEF (skill triage) — aceita id de item de triagem ou entidade do grafo.
+ipcMain.handle('get-agent-brief', async (_event, projectPath: string, entity: string) => {
+  const dir = ticDir(projectPath);
+  const db = openIndexDb(path.join(dir, INDEX_DB_FILE));
+  if (!db) return { error: 'index.db não encontrado — rode a análise primeiro.' };
+  try {
+    const triage = loadTriage(dir).find((t) => t.id === entity);
+    const target = triage?.entity ?? triage?.title ?? entity;
+    const archData = (await readTicJson(projectPath, 'arch-violations.json')) as { outOfScope?: unknown[] } | null;
+    const brief = buildAgentBrief(db, dir, target, {
+      category: triage?.category,
+      summary: triage?.title,
+      detail: triage?.detail,
+      outOfScope: (archData?.outOfScope ?? []) as never,
+    });
+    if (!brief) return { error: `Entidade "${entity}" não encontrada no grafo de impacto.` };
+    const memories = queryMemory(dir, target);
+    if (memories.length === 0) return { markdown: brief, entity: target };
+    const memLines = [`\n## Tentativas Anteriores`, `*${memories.length} entrada(s) na memória persistente*`, ''];
+    for (const m of memories.slice(0, 5)) {
+      const tag = m.result ? ` → **${m.result}**` : '';
+      memLines.push(`- **[${m.kind}]** ${m.summary}${tag} *(${m.ts.slice(0, 10)})*`);
+      if (m.detail) memLines.push(`  > ${m.detail}`);
+    }
+    return { markdown: brief + memLines.join('\n'), entity: target };
+  } catch (err) {
+    return { error: String(err) };
+  } finally { db.close(); }
+});
+
+// DIAGNOSE (skill diagnosing-bugs) — 6 fases falsificáveis.
+ipcMain.handle('get-diagnosis', async (_event, projectPath: string, from: string, to?: string) => {
+  const dir = ticDir(projectPath);
+  const db = openIndexDb(path.join(dir, INDEX_DB_FILE));
+  if (!db) return { error: 'index.db não encontrado — rode a análise primeiro.' };
+  try {
+    const diag = buildDiagnosis(db, dir, from, to);
+    if (!diag) return { error: `Entidade "${from}" não encontrada no grafo.` };
+    return { markdown: diag };
+  } catch (err) {
+    return { error: String(err) };
+  } finally { db.close(); }
+});
+
+// ZOOM-OUT (skill zoom-out) — sistema inteiro (zoom-out.md) ou foco por entidade.
+ipcMain.handle('get-zoom-out', async (_event, projectPath: string, entity?: string) => {
+  if (!entity) {
+    const md = await readTicFile(projectPath, 'zoom-out.md');
+    return { markdown: md ?? 'Visão macro indisponível — rode a análise para gerar zoom-out.md.' };
+  }
+  const dir = ticDir(projectPath);
+  const db = openIndexDb(path.join(dir, INDEX_DB_FILE));
+  if (!db) return { error: 'index.db não encontrado — rode a análise primeiro.' };
+  try {
+    const r = queryImpactOf(db, entity, { maxDepth: 3 });
+    if (!r) return { error: `Entidade "${entity}" não encontrada.` };
+    const file = r.entity.startsWith('file:') ? r.entity.slice(5) : null;
+    const home = file ? (db.prepare('SELECT module, layer FROM files WHERE rel_path = ?').get(file) as { module?: string; layer?: string } | undefined) : null;
+    const byModule = Object.entries(r.byModule).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const lines = [
+      `# Zoom-out: \`${r.entity.slice(r.entity.indexOf(':') + 1)}\``,
+      '',
+      home ? `Pertence ao módulo **${home.module ?? '—'}** (camada ${home.layer ?? '—'}).` : `Entidade da camada de dados/banco.`,
+      '',
+      '## Quem depende desta parte (agregado por módulo)',
+      ...(byModule.length > 0 ? byModule.map(([m, c]) => `- **${m}** — ${c} ponto(s) de dependência`) : ['- Ninguém depende diretamente (folha do grafo).']),
+      '',
+      `No total, ${r.totalVisited} entidade(s) em até 3 saltos (${Object.entries(r.byKind).map(([k, v]) => `${k}: ${v}`).join(', ')}).`,
+    ];
+    return { markdown: lines.join('\n') };
+  } catch (err) {
+    return { error: String(err) };
+  } finally { db.close(); }
+});
+
+// Visão geral das skills: arch-suggestions, risk-prediction, out-of-scope, triagem.
+ipcMain.handle('get-skills-overview', async (_event, projectPath: string) => {
+  const archData = (await readTicJson(projectPath, 'arch-violations.json')) as { outOfScope?: unknown[] } | null;
+  const archSuggestions = (await readTicJson(projectPath, 'arch-suggestions.json')) as unknown[] | null;
+  const riskPrediction = (await readTicJson(projectPath, 'risk-prediction.json')) as unknown[] | null;
+  const triage = loadTriage(ticDir(projectPath));
+  return {
+    archSuggestions: Array.isArray(archSuggestions) ? archSuggestions : [],
+    riskPrediction: Array.isArray(riskPrediction) ? riskPrediction : [],
+    outOfScope: Array.isArray(archData?.outOfScope) ? archData!.outOfScope : [],
+    triageCounts: {
+      total: triage.length,
+      readyForAgent: triage.filter((t) => t.state === 'ready-for-agent').length,
+      needsTriage: triage.filter((t) => t.state === 'needs-triage').length,
+    },
+    hasZoomOut: !!(await readTicFile(projectPath, 'zoom-out.md')),
+  };
 });
 
 // ── App lifecycle ────────────────────────────────────────────────────────────────
