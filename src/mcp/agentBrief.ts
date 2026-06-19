@@ -66,6 +66,14 @@ export function buildAgentBrief(db: Database.Database, ticCodeDir: string, entit
   const modulesLine = Object.entries(impact.byModule).sort((a, b) => b[1] - a[1]).slice(0, 6)
     .map(([m, c]) => `${m} (${c})`).join(', ');
 
+  // Reforço: risco previsto da entidade (churn × complexidade × acoplamento) —
+  // amarra a skill triage à improve-codebase-architecture. Vira aviso no brief.
+  const riskByFile = loadRiskMap(ticCodeDir);
+  const entityRisk = entityFile ? riskByFile.get(entityFile) : undefined;
+  const riskLine = entityRisk
+    ? `\n> ⚠️ **Risco previsto: ${entityRisk.score}/100** — ${entityRisk.reasons.length ? entityRisk.reasons.join(', ') : 'histórico instável'}. Trate esta mudança com testes de regressão reforçados.`
+    : '';
+
   return [
     TRIAGE_DISCLAIMER,
     '',
@@ -73,6 +81,7 @@ export function buildAgentBrief(db: Database.Database, ticCodeDir: string, entit
     '',
     `**Category:** ${ctx.category ?? 'bug'}`,
     `**Summary:** ${ctx.summary ?? `Tratar mudança em \`${shortId(impact.entity)}\` sem quebrar os ${impact.totalVisited} dependentes cross-tier`}`,
+    riskLine,
     '',
     '**Current behavior:**',
     ctx.detail ?? `\`${shortId(impact.entity)}\` é usado por ${impact.totalVisited} entidades (${Object.entries(impact.byKind).map(([k, v]) => `${k}: ${v}`).join(', ')}).${modulesLine ? ` Módulos afetados: ${modulesLine}.` : ''}`,

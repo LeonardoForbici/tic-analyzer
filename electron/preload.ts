@@ -114,4 +114,16 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
 
   listHttpFlows: (projectPath: string): Promise<unknown> =>
     ipcRenderer.invoke('list-http-flows', projectPath),
+
+  getAgentBrief: (projectPath: string, entity: string): Promise<{ markdown?: string; entity?: string; error?: string }> =>
+    ipcRenderer.invoke('get-agent-brief', projectPath, entity),
+
+  getDiagnosis: (projectPath: string, from: string, to?: string): Promise<{ markdown?: string; error?: string }> =>
+    ipcRenderer.invoke('get-diagnosis', projectPath, from, to),
+
+  getZoomOut: (projectPath: string, entity?: string): Promise<{ markdown?: string; error?: string }> =>
+    ipcRenderer.invoke('get-zoom-out', projectPath, entity),
+
+  getSkillsOverview: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('get-skills-overview', projectPath),
 });
