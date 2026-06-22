@@ -87,6 +87,9 @@ export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
         .map((fm) => ({
           file: fm.file,
           complexity: fm.cyclomaticComplexity,
+          cognitive: fm.cognitiveComplexity,
+          maxNesting: fm.maxNesting,
+          complexitySource: fm.complexitySource,
           debtScore: fm.debtScore,
           couplingIn: fm.couplingIn
         }))

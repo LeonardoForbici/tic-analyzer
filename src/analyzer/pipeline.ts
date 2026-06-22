@@ -27,6 +27,7 @@ import type { SearchIndexEntry } from './buildSearchIndex';
 import { generateMultiGraph } from './generateMultiGraph';
 import { buildImpactIndex } from './buildImpactIndex';
 import { computeMetrics } from './computeMetrics';
+import { computeAstMetrics } from './semantic/computeAstMetrics';
 import { detectLayerViolations } from './detectLayerViolations';
 import { generateMetricsReport } from './generateMetricsReport';
 import { analyzeGitHistory } from './analyzeGitHistory';
@@ -343,12 +344,14 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     report('impact', 100, `${impactedFiles} arquivos com dependentes mapeados`);
 
     // ── 17. MÉTRICAS ─────────────────────────────────────────────────────────────
-    report('metrics', 78, 'Computando complexidade ciclomática e dívida técnica...');
-    const metrics = computeMetrics(files, graph, modules);
+    report('metrics', 78, 'Computando complexidade real (AST) e dívida técnica...');
+    const astMetrics = await computeAstMetrics(files);
+    const metrics = computeMetrics(files, graph, modules, astMetrics);
     const violations = detectLayerViolations(files, graph);
     generateMetricsReport(ticCodeDir, metrics, violations);
     markDone('metrics');
-    report('metrics', 100, `${metrics.hotspotCount} hotspots, ${violations.length} violações arquiteturais`);
+    const astCount = metrics.files.filter((f) => f.complexitySource === 'ast').length;
+    report('metrics', 100, `${metrics.hotspotCount} hotspots, ${astCount} arquivos com complexidade AST, ${violations.length} violações arquiteturais`);
 
     // ── 17b. HISTÓRICO GIT (análise temporal/comportamental) ─────────────────────
     report('git-history', 80, 'Lendo git log (churn, change coupling, autoria)...');
