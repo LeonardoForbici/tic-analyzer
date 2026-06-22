@@ -183,6 +183,18 @@ export class TicAnalyzerMcpServer {
           inputSchema: { type: 'object', properties: {} }
         },
         {
+          name: 'list_complex_functions',
+          description: 'Lista as funções mais complexas do projeto, POR FUNÇÃO via AST (Java/TS/JS): complexidade ciclomática McCabe, cognitiva (estilo SonarSource) e profundidade de aninhamento. Use offendersOnly para ver só as que excedem os limites e module para filtrar. É a granularidade acionável — aponta o método a refatorar, não só o arquivo. ~400 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              module: { type: 'string', description: 'Nome do módulo para filtrar (opcional).' },
+              offendersOnly: { type: 'boolean', description: 'Se true, retorna apenas funções que excedem os limites de complexidade.' },
+              limit: { type: 'number', description: 'Máximo de funções a retornar (padrão 25).' }
+            }
+          }
+        },
+        {
           name: 'get_behavioral_hotspots',
           description: 'Retorna os hotspots COMPORTAMENTAIS: arquivos que combinam alta complexidade com alta frequência de mudança no histórico do git (análise temporal, estilo CodeScene). É onde os bugs nascem — priorize refatoração aqui.',
           inputSchema: { type: 'object', properties: {} }
@@ -508,6 +520,49 @@ export class TicAnalyzerMcpServer {
           // Extrai apenas a seção de hotspots (compacto)
           const hotspotsSection = content.split('## 📊')[0];
           return respond({ content: [{ type: 'text', text: hotspotsSection || content.slice(0, 2000) }] });
+        }
+
+        case 'list_complex_functions': {
+          const { module: modArg, offendersOnly, limit } = (args ?? {}) as { module?: string; offendersOnly?: boolean; limit?: number };
+          const fnPath = path.join(this.ticCodePath, 'complex-functions.json');
+          if (!fs.existsSync(fnPath)) {
+            return respond({ content: [{ type: 'text', text: 'complex-functions.json não encontrado. Execute a análise novamente (requer linguagens com AST: Java/TS/JS).' }] });
+          }
+          type Fn = { file: string; module: string; name: string; line: number; cyclomatic: number; cognitive: number; maxNesting: number; offender: boolean };
+          const data = JSON.parse(fs.readFileSync(fnPath, 'utf8')) as {
+            thresholds: { cyclomatic: number; cognitive: number; maxNesting: number };
+            totalFunctions: number;
+            offenderCount: number;
+            functions: Fn[];
+          };
+          let fns = data.functions;
+          if (modArg) {
+            const needle = modArg.toLowerCase();
+            fns = fns.filter((f) => f.module.toLowerCase().includes(needle));
+          }
+          if (offendersOnly) fns = fns.filter((f) => f.offender);
+          const max = typeof limit === 'number' && limit > 0 ? limit : 25;
+          const shown = fns.slice(0, max);
+
+          if (shown.length === 0) {
+            return respond({ content: [{ type: 'text', text: offendersOnly
+              ? `✅ Nenhuma função excede os limites${modArg ? ` no módulo "${modArg}"` : ''} (CC>${data.thresholds.cyclomatic}, cognitiva>${data.thresholds.cognitive}, aninhamento>${data.thresholds.maxNesting}).`
+              : `Nenhuma função complexa encontrada${modArg ? ` no módulo "${modArg}"` : ''}.` }] });
+          }
+
+          const t = data.thresholds;
+          const title = offendersOnly ? 'Funções que Excedem Limites' : 'Funções mais Complexas';
+          const fnLines = [
+            `# ${title}${modArg ? ` — módulo \`${modArg}\`` : ''}`,
+            '',
+            `> ${data.totalFunctions} funções analisadas · ${data.offenderCount} acima do limite (CC>${t.cyclomatic} · Cognitiva>${t.cognitive} · Aninhamento>${t.maxNesting})`,
+            '',
+            '| Função | Arquivo | CC | Cognitiva | Aninhamento |',
+            '| --- | --- | --- | --- | --- |',
+            ...shown.map((f) => `| \`${f.name}:${f.line}\` | \`${f.file}\` | ${f.offender ? '🔴 ' : ''}${f.cyclomatic} | ${f.cognitive} | ${f.maxNesting} |`)
+          ];
+          if (fns.length > shown.length) fnLines.push(`\n*... e mais ${fns.length - shown.length} função(ões)*`);
+          return respond({ content: [{ type: 'text', text: fnLines.join('\n') }] });
         }
 
         case 'get_behavioral_hotspots':

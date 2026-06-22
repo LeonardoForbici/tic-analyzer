@@ -80,6 +80,18 @@ export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
       hotspotCount: data.metrics.hotspotCount,
       totalDebt: data.metrics.totalDebt,
       violationCount: data.violations.length,
+      functionCount: data.metrics.functions.length,
+      offenderFunctionCount: data.metrics.offenderFunctionCount,
+      complexFunctions: data.metrics.functions.slice(0, 30).map((fn) => ({
+        file: fn.file,
+        module: fn.module,
+        name: fn.name,
+        line: fn.line,
+        cyclomatic: fn.cyclomatic,
+        cognitive: fn.cognitive,
+        maxNesting: fn.maxNesting,
+        offender: fn.offender
+      })),
       topHotspots: data.fileMetrics
         .filter((fm) => fm.hotspot)
         .sort((a, b) => b.debtScore - a.debtScore)

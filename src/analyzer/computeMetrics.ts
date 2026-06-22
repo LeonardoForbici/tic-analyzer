@@ -3,6 +3,7 @@ import type { ScannedFile } from './scanFiles';
 import type { DependencyGraph } from './buildDependencyGraph';
 import type { ProjectModule } from './detectModules';
 import type { AstFileMetric } from './semantic/computeAstMetrics';
+import { isOffenderFunction, FUNCTION_COMPLEXITY_THRESHOLDS } from './semantic/computeAstMetrics';
 
 export interface FileMetrics {
   file: string;
@@ -35,11 +36,29 @@ export interface ModuleMetrics {
   hotspots: string[];
 }
 
+/** Uma função (top-level) com sua complexidade e localização no projeto. */
+export interface ProjectFunction {
+  file: string;
+  module: string;
+  name: string;
+  line: number;
+  cyclomatic: number;
+  cognitive: number;
+  maxNesting: number;
+  /** Excede algum limite de complexidade (acionável). */
+  offender: boolean;
+}
+
 export interface ProjectMetrics {
   files: FileMetrics[];
   modules: ModuleMetrics[];
   totalDebt: number;
   hotspotCount: number;
+  /** Funções top-level não-triviais, ordenadas por CC desc (origem = AST). */
+  functions: ProjectFunction[];
+  /** Funções que excedem algum limite de complexidade. */
+  offenderFunctionCount: number;
+  thresholds: typeof FUNCTION_COMPLEXITY_THRESHOLDS;
 }
 
 const CODE_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.java', '.py', '.cs', '.go', '.rb', '.php']);
@@ -57,7 +76,12 @@ export function computeMetrics(
     couplingOut[node.path] = node.outDegree;
   }
 
+  // Mapa arquivo → módulo, para atribuir cada função ao seu módulo.
+  const fileToModule = new Map<string, string>();
+  for (const mod of modules) for (const f of mod.files) fileToModule.set(f.relativePath, mod.name);
+
   const fileMetrics: FileMetrics[] = [];
+  const functions: ProjectFunction[] = [];
 
   for (const file of files) {
     if (!CODE_EXTS.has(file.extension)) continue;
@@ -69,6 +93,21 @@ export function computeMetrics(
     // Prefere a complexidade AST real quando há funções detectadas; senão, regex.
     const ast = astMetrics?.get(file.relativePath);
     const useAst = !!ast && ast.functionCount > 0;
+    if (useAst) {
+      const moduleName = fileToModule.get(file.relativePath) ?? '(raiz)';
+      for (const fn of ast!.functions) {
+        functions.push({
+          file: file.relativePath,
+          module: moduleName,
+          name: fn.name,
+          line: fn.line,
+          cyclomatic: fn.cyclomatic,
+          cognitive: fn.cognitive,
+          maxNesting: fn.maxNesting,
+          offender: isOffenderFunction(fn)
+        });
+      }
+    }
     const complexity = useAst ? ast!.cyclomatic : computeCyclomaticComplexity(content);
     const cognitive = useAst ? ast!.cognitive : 0;
     const maxNesting = useAst ? ast!.maxNesting : 0;
@@ -123,11 +162,16 @@ export function computeMetrics(
     };
   });
 
+  functions.sort((a, b) => b.cyclomatic - a.cyclomatic || b.cognitive - a.cognitive);
+
   return {
     files: fileMetrics,
     modules: moduleMetrics,
     totalDebt: fileMetrics.reduce((s, f) => s + f.debtScore, 0),
-    hotspotCount: fileMetrics.filter((f) => f.hotspot).length
+    hotspotCount: fileMetrics.filter((f) => f.hotspot).length,
+    functions,
+    offenderFunctionCount: functions.filter((f) => f.offender).length,
+    thresholds: FUNCTION_COMPLEXITY_THRESHOLDS
   };
 }
 

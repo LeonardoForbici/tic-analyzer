@@ -35,8 +35,30 @@ export interface AstFileMetric {
   cognitive: number;
   maxNesting: number;
   functionCount: number;
+  /** Funções top-level não-triviais (CC ≥ 2), ordenáveis pelo consumidor. */
+  functions: FunctionMetric[];
   /** Pior função do arquivo (maior CC), para apontar o ofensor. */
   worstFunction?: FunctionMetric;
+}
+
+/** Limites a partir dos quais uma função é considerada ofensora (acionável). */
+export const FUNCTION_COMPLEXITY_THRESHOLDS = {
+  cyclomatic: 10,
+  cognitive: 15,
+  maxNesting: 4
+};
+
+/** Verdadeiro se a função excede algum limite de complexidade. */
+export function isOffenderFunction(m: {
+  cyclomatic: number;
+  cognitive: number;
+  maxNesting: number;
+}): boolean {
+  return (
+    m.cyclomatic > FUNCTION_COMPLEXITY_THRESHOLDS.cyclomatic ||
+    m.cognitive > FUNCTION_COMPLEXITY_THRESHOLDS.cognitive ||
+    m.maxNesting > FUNCTION_COMPLEXITY_THRESHOLDS.maxNesting
+  );
 }
 
 // Nós que delimitam uma função/método nas linguagens suportadas.
@@ -112,26 +134,29 @@ export async function computeAstMetrics(
 
 /** Mede um arquivo já parseado. Exportado para testes/uso direto. */
 export function measureFile(root: SyntaxNode, file: string): AstFileMetric | null {
-  const allFunctions = root.descendantsOfType([...FUNCTION_TYPES]);
-  if (allFunctions.length === 0) {
-    return { file, cyclomatic: 0, cognitive: 0, maxNesting: 0, functionCount: 0 };
+  // Apenas funções top-level: a unidade acionável. Callbacks aninhados já
+  // contam dentro da subárvore da função que os contém (sem dupla contagem).
+  const topLevel = root
+    .descendantsOfType([...FUNCTION_TYPES])
+    .filter((fn) => !hasAncestorFunction(fn));
+  if (topLevel.length === 0) {
+    return { file, cyclomatic: 0, cognitive: 0, maxNesting: 0, functionCount: 0, functions: [] };
   }
 
   let cyclomatic = 0;
   let cognitive = 0;
   let maxNesting = 0;
   let worst: FunctionMetric | undefined;
+  const functions: FunctionMetric[] = [];
 
-  for (const fn of allFunctions) {
+  for (const fn of topLevel) {
     const m = measureFunction(fn);
+    cyclomatic += m.cyclomatic;
+    cognitive += m.cognitive;
+    if (m.maxNesting > maxNesting) maxNesting = m.maxNesting;
     if (!worst || m.cyclomatic > worst.cyclomatic) worst = m;
-    // Apenas funções top-level somam para o agregado do arquivo (funções
-    // aninhadas já contam dentro da subárvore da função que as contém).
-    if (!hasAncestorFunction(fn)) {
-      cyclomatic += m.cyclomatic;
-      cognitive += m.cognitive;
-      if (m.maxNesting > maxNesting) maxNesting = m.maxNesting;
-    }
+    // Retém apenas funções não-triviais para a lista (getters/setters CC=1 fora).
+    if (m.cyclomatic >= 2) functions.push(m);
   }
 
   return {
@@ -139,7 +164,8 @@ export function measureFile(root: SyntaxNode, file: string): AstFileMetric | nul
     cyclomatic,
     cognitive,
     maxNesting,
-    functionCount: allFunctions.length,
+    functionCount: topLevel.length,
+    functions,
     worstFunction: worst
   };
 }

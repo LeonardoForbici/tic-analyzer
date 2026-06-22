@@ -27,7 +27,7 @@ if (!existsSync(distAst) || !existsSync(distScan)) {
 }
 
 const { scanFiles } = require(distScan);
-const { computeAstMetrics } = require(distAst);
+const { computeAstMetrics, isOffenderFunction } = require(distAst);
 const { grammarsAvailable } = require(distTs);
 
 const fixture = join(root, 'test', 'fixtures', 'complexity');
@@ -73,6 +73,24 @@ function check(name, cond, detail = '') {
     check('pior função = rank', w && w.name === 'rank', `worst=${w && w.name}`);
     check('(b) rank ciclomática McCabe = 6', w && w.cyclomatic === 6, `cc=${w && w.cyclomatic}`);
     check('(c) rank cognitiva > ciclomática', w && w.cognitive > w.cyclomatic, `cognitive=${w && w.cognitive} cc=${w && w.cyclomatic}`);
+  }
+
+  // (f) lista de funções por arquivo (não só a pior)
+  if (java) {
+    check('(f) Complex.java expõe lista de funções', Array.isArray(java.functions) && java.functions.length >= 1, `functions=${java && java.functions && java.functions.length}`);
+    check('(f) classify NÃO é ofensora (abaixo dos limites)', java.worstFunction && !isOffenderFunction(java.worstFunction), `cc=${java.worstFunction?.cyclomatic} cog=${java.worstFunction?.cognitive} nest=${java.worstFunction?.maxNesting}`);
+  }
+
+  // (g) detecção de ofensora: deep() excede cognitiva (21>15) e aninhamento (6>4)
+  const off = metrics.get('Offender.java');
+  check('Offender.java tem métrica AST', !!off);
+  if (off) {
+    const w = off.worstFunction;
+    check('pior função = deep', w && w.name === 'deep', `worst=${w && w.name}`);
+    check('(g) deep ciclomática = 7', w && w.cyclomatic === 7, `cc=${w && w.cyclomatic}`);
+    check('(g) deep maxNesting = 6', w && w.maxNesting === 6, `nest=${w && w.maxNesting}`);
+    check('(g) deep cognitiva > 15', w && w.cognitive > 15, `cog=${w && w.cognitive}`);
+    check('(g) deep é ofensora', w && isOffenderFunction(w));
   }
 
   // (e) fallback: linguagem sem gramática não entra no Map
