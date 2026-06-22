@@ -110,25 +110,22 @@ o MCP embeda a query e ranqueia por cosseno. Onde o host do modelo é bloqueado
 
 ## Complexidade por função
 
-As métricas de qualidade são calculadas **por função** via AST real
-(`tree-sitter`) para Java, TypeScript, JS e TSX/JSX — não por arquivo nem por
-regex. Para cada função top-level são medidas:
+As métricas de qualidade são medidas **por função** sobre a AST real (não por
+regex), para as linguagens com gramática (**Java, TypeScript, JavaScript, TSX/JSX**):
 
-- **Ciclomática (McCabe)** — `1 + nº de pontos de decisão` (if/for/while/case/
-  catch/ternário/`&&`/`||`).
-- **Cognitiva** — penaliza o **aninhamento**: cada estrutura de controle soma
-  `1 + nível de aninhamento corrente`. Captura o custo de leitura que a
-  ciclomática pura ignora.
-- **Profundidade de aninhamento** — quão fundo entram os blocos.
+- **Ciclomática (McCabe)** — `1 + nº de pontos de decisão` (if, for, while, case,
+  catch, `&&`, `||`, ternário).
+- **Cognitiva** — penaliza o **aninhamento**: cada estrutura de controle soma o
+  nível de profundidade corrente, capturando o custo de leitura que a ciclomática
+  pura ignora.
+- **Profundidade de aninhamento** — quão fundo o código encadeia decisões.
+- **Funções ofensoras** — sinalizadas quando excedem os limites
+  (`CC > 10`, cognitiva `> 15` ou aninhamento `> 4`), para priorizar refatoração.
 
-Funções que excedem os limites (`CC>10`, `cognitiva>15` ou `aninhamento>4`) são
-marcadas como **ofensoras** — a lista acionável do que refatorar primeiro.
-Linguagens sem gramática (Python/Go/C#/...) usam o fallback regex por arquivo.
-
-A tool MCP `list_complex_functions` devolve essa lista (filtros `module` e
-`offendersOnly`), e o artefato `complex-functions.json` é gerado em `.tic-code/`.
-Verificação: `npm run verify` roda `verify-ast-metrics` sobre
-`test/fixtures/complexity`.
+Linguagens sem gramática (Python/Go/C#/Rust/PHP/Kotlin) caem no **fallback regex**
+por arquivo. Os resultados aparecem em `metrics-summary.md`, em
+`complex-functions.json`, na aba **Métricas › Funções** do app e na ferramenta MCP
+`list_complex_functions` (com filtros `module` e `offendersOnly`).
 
 ---
 
