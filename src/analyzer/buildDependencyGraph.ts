@@ -30,6 +30,8 @@ export interface DependencyGraph {
   semanticClasses?: ClassInfoLite[];
   /** Arestas método→método resolvidas (Java) — granularidade de método no trace. */
   methodEdges?: MethodEdge[];
+  /** Arquivos que reusaram símbolos do cache AST (re-análise incremental). */
+  astCacheHits?: number;
 }
 
 /**
@@ -37,7 +39,12 @@ export interface DependencyGraph {
  * (TS/JS/TSX/Java) e cai para extração por regex apenas em linguagens sem
  * grammar (Python/Go/C#/Rust/PHP) ou em arquivos que falharam o parse.
  */
-export async function buildDependencyGraph(files: ScannedFile[], rootPath: string): Promise<DependencyGraph> {
+export interface DependencyGraphOptions {
+  /** Arquivos alterados (mtime) — habilita reuso do cache de símbolos AST. */
+  changedFiles?: Set<string>;
+}
+
+export async function buildDependencyGraph(files: ScannedFile[], rootPath: string, opts: DependencyGraphOptions = {}): Promise<DependencyGraph> {
   const fileSet = new Set(files.map((f) => f.relativePath));
   const edgeMap = new Map<string, GraphEdge>();
   const externalDepsSet = new Set<string>();
@@ -51,22 +58,70 @@ export async function buildDependencyGraph(files: ScannedFile[], rootPath: strin
   };
 
   // ── 1. Camada semântica (AST) ──────────────────────────────────────────────
-  const semantic = await buildSemanticGraph(files, rootPath);
+  const semantic = await buildSemanticGraph(files, rootPath, { changedFiles: opts.changedFiles });
   for (const e of semantic.edges) addEdge(e.from, e.to, e.kind, e.confidence);
   for (const dep of semantic.externalDeps) externalDepsSet.add(dep);
 
   // ── 2. Fallback regex (linguagens sem grammar ou parse falho) ──────────────
   // Cai para regex em: Python/Go/C#/Rust/PHP/Kotlin (sem grammar) e em arquivos
   // de linguagem suportada que não foram parseados (grammars ausentes ou erro).
+  // Java/Kotlin entram no fallback quando o AST falhou — garante grafo não-vazio
+  // resolvendo imports por nome qualificado (FQN) contra os arquivos do projeto.
   const regexExts = new Set(['.py', '.go', '.cs', '.rs', '.php', '.kt']);
+
+  // Índice FQN→arquivo e pacote→arquivos (FQN = pacote declarado + nome do arquivo,
+  // convenção Java: classe pública = nome do arquivo).
+  const javaFqnToFile = new Map<string, string>();
+  const javaPkgToFiles = new Map<string, string[]>();
+  const contentCache = new Map<string, string>();
+  const readCached = (file: ScannedFile): string | null => {
+    if (contentCache.has(file.relativePath)) return contentCache.get(file.relativePath)!;
+    try { const c = fs.readFileSync(file.absolutePath, 'utf8'); contentCache.set(file.relativePath, c); return c; }
+    catch { return null; }
+  };
+  const javaFiles = files.filter((f) => f.extension === '.java' || f.extension === '.kt');
+  for (const file of javaFiles) {
+    const content = readCached(file);
+    if (content == null) continue;
+    const pkgMatch = content.match(/^\s*package\s+([\w.]+)/m);
+    const pkg = pkgMatch ? pkgMatch[1] : '';
+    const typeName = path.basename(file.relativePath).replace(/\.(java|kt)$/, '');
+    const fqn = pkg ? `${pkg}.${typeName}` : typeName;
+    javaFqnToFile.set(fqn, file.relativePath);
+    if (pkg) {
+      const list = javaPkgToFiles.get(pkg) ?? [];
+      list.push(file.relativePath);
+      javaPkgToFiles.set(pkg, list);
+    }
+  }
+
   for (const file of files) {
+    const isJavaLike = file.extension === '.java' || file.extension === '.kt';
     const langSupported = langForExtension(file.extension) !== null;
     const needsFallback = regexExts.has(file.extension) || (langSupported && !semantic.parsedFiles.has(file.relativePath));
     if (!needsFallback) continue;
 
-    let content: string;
-    try { content = fs.readFileSync(file.absolutePath, 'utf8'); }
-    catch { continue; }
+    const content = readCached(file);
+    if (content == null) continue;
+
+    // Java/Kotlin: resolve imports por FQN/pacote contra arquivos do projeto.
+    if (isJavaLike) {
+      const simpleNames = javaReferencedSimpleNames(content);
+      for (const m of content.matchAll(/^\s*import\s+(?:static\s+)?([\w.]+?)(\.\*)?\s*;?\s*$/gm)) {
+        const base = m[1];
+        if (m[2]) {
+          for (const target of javaPkgToFiles.get(base) ?? []) {
+            const tName = path.basename(target).replace(/\.(java|kt)$/, '');
+            if (target !== file.relativePath && simpleNames.has(tName)) addEdge(file.relativePath, target, 'import', 'inferred');
+          }
+        } else {
+          const found = javaFqnToFile.get(base);
+          if (found && found !== file.relativePath) addEdge(file.relativePath, found, 'import', 'inferred');
+          else if (!found) externalDepsSet.add(base.split('.').slice(0, 2).join('.'));
+        }
+      }
+      continue;
+    }
 
     for (const imp of extractImports(content, file.extension)) {
       if (imp.startsWith('.')) {
@@ -116,8 +171,19 @@ export async function buildDependencyGraph(files: ScannedFile[], rootPath: strin
     centralFiles,
     externalDeps: [...externalDepsSet].sort().slice(0, 100),
     semanticClasses: semantic.classes,
-    methodEdges: semantic.methodEdges
+    methodEdges: semantic.methodEdges,
+    astCacheHits: semantic.cacheHits
   };
+}
+
+/** Nomes simples (CamelCase iniciando em maiúscula) referenciados no código Java —
+ *  usados para materializar arestas de imports wildcard sem ligar o pacote inteiro. */
+function javaReferencedSimpleNames(content: string): Set<string> {
+  const names = new Set<string>();
+  // remove a linha de imports/package para não capturar o próprio FQN
+  const body = content.replace(/^\s*(?:import|package)\s+[^\n]*$/gm, '');
+  for (const m of body.matchAll(/\b([A-Z][A-Za-z0-9_]+)\b/g)) names.add(m[1]);
+  return names;
 }
 
 function extractImports(content: string, ext: string): string[] {

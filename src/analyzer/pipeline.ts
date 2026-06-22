@@ -6,6 +6,7 @@ import { detectModules } from './detectModules';
 import { detectRisks } from './detectRisks';
 import { detectEndpoints } from './detectEndpoints';
 import { buildDependencyGraph, type DependencyGraph } from './buildDependencyGraph';
+import { detectOswLinks } from './detectOswLinks';
 import { generateQuickContext } from './generateQuickContext';
 import { generateModuleContext } from './generateModuleContext';
 import { generateMasterIndex } from './generateMasterIndex';
@@ -26,6 +27,8 @@ import { getEmbedder } from './semantic/embeddings';
 import type { SearchIndexEntry } from './buildSearchIndex';
 import { generateMultiGraph } from './generateMultiGraph';
 import { buildImpactIndex } from './buildImpactIndex';
+import { buildImpactGraph } from './buildImpactGraph';
+import { detectCommunities } from './detectCommunities';
 import { computeMetrics } from './computeMetrics';
 import { computeAstMetrics } from './semantic/computeAstMetrics';
 import { detectLayerViolations } from './detectLayerViolations';
@@ -39,6 +42,17 @@ import { exportAnalysis } from './exportAnalysis';
 import { buildSearchIndex } from './buildSearchIndex';
 import { writeIndexDb, INDEX_DB_FILE } from './store/indexDb';
 import { loadFileCache, computeChangedFiles, saveFileCache } from './buildFileCache';
+import { computeHealthScore } from './computeHealthScore';
+import { appendSnapshot, loadSnapshots } from './store/snapshots';
+import { loadArchRules, checkArchRules, buildFileInfoLookup, writeRulesExample, findDeepeningCandidates } from './checkArchRules';
+import { collectChurn, predictRisk, type RiskPrediction } from './computeRiskPrediction';
+import { collectAuthorship, computeOwnership } from './computeOwnership';
+import { computeRoi } from './computeRoi';
+import { appendEvents, makeEvent } from './store/activityLog';
+import { computeSelfDelta, computePredictionFeedback, type PredictionAccuracy } from './computeDelta';
+import { syncTriageItems, type TriageCandidate } from './store/triageStore';
+import { generateZoomOut } from './generateZoomOut';
+import { generateGraphReport } from './generateGraphReport';
 
 export type PhaseStatus = 'pending' | 'running' | 'done' | 'error';
 
@@ -81,10 +95,35 @@ export interface PipelineResult {
   behavioralHotspots: number;
   functionsAnalyzed: number;
   offenderFunctions: number;
+  /** Arestas do grafo de impacto unificado (file/method/plsql/table/column). */
+  impactEdges?: number;
+  /** Nº de god nodes (hubs) destacados no relatório de insights do grafo. */
+  godNodes?: number;
+  /** Nº de comunidades (clusters Louvain) detectadas no grafo de impacto. */
+  communities?: number;
+  /** Health score do projeto (0–100) e grade (A–E). */
+  healthScore?: number;
+  healthGrade?: string;
+  /** Governança: violações de regra (.tic-rules.json) e predição de risco. */
+  archViolations?: number;
+  riskPredictions?: number;
+  roiDebtCost?: number;
+  roiHoursSaved?: number;
+  /** Arquivos que reusaram símbolos do cache AST na re-análise incremental. */
+  astCacheHits?: number;
+  triageItems?: number;
+  activityEvents?: number;
+  /** Duração (ms) por fase — para identificar gargalos em projetos grandes. */
+  phaseTimings?: Record<string, number>;
   error?: string;
 }
 
 export type ProgressCallback = (progress: PipelineProgress) => void;
+
+export interface PipelineOptions {
+  /** Pula a geração de CLAUDE.md/copilot-instructions.md no projeto analisado (CI não deve sujar o checkout). */
+  skipAiFiles?: boolean;
+}
 
 const PHASES: PipelinePhase[] = [
   { id: 'scan', label: 'Escaneando arquivos', status: 'pending' },
@@ -106,8 +145,14 @@ const PHASES: PipelinePhase[] = [
   { id: 'gaps', label: 'Gerando relatório de gaps', status: 'pending' },
   { id: 'multigraph', label: 'Gerando multi-grafo (frontend→endpoint→backend→PL/SQL)', status: 'pending' },
   { id: 'impact', label: 'Construindo índice de impacto', status: 'pending' },
+  { id: 'impact-graph', label: 'Consolidando grafo de impacto unificado', status: 'pending' },
+  { id: 'communities', label: 'Detectando comunidades do grafo (Louvain)', status: 'pending' },
   { id: 'metrics', label: 'Computando métricas de qualidade', status: 'pending' },
   { id: 'git-history', label: 'Analisando histórico git (hotspots comportamentais, coupling, bus factor)', status: 'pending' },
+  { id: 'arch-rules', label: 'Validando regras de arquitetura (.tic-rules.json)', status: 'pending' },
+  { id: 'predict', label: 'Predição de risco (churn × acoplamento)', status: 'pending' },
+  { id: 'ownership', label: 'Mapeando ownership e bus-factor', status: 'pending' },
+  { id: 'roi', label: 'Calculando ROI (tempo & custo)', status: 'pending' },
   { id: 'inheritance', label: 'Detectando hierarquia de classes', status: 'pending' },
   { id: 'patterns', label: 'Identificando padrões arquiteturais', status: 'pending' },
   { id: 'db-schema', label: 'Detectando schema de banco de dados', status: 'pending' },
@@ -115,13 +160,48 @@ const PHASES: PipelinePhase[] = [
   { id: 'batch-jobs', label: 'Detectando @Scheduled, @Async e batch jobs', status: 'pending' },
   { id: 'angular-modules', label: 'Detectando módulos Angular e NgRx', status: 'pending' },
   { id: 'dead-components', label: 'Detectando componentes sem uso (dead code)', status: 'pending' },
+  { id: 'health', label: 'Computando health score do projeto', status: 'pending' },
+  { id: 'triage', label: 'Sincronizando fila de triagem', status: 'pending' },
+  { id: 'zoom-out', label: 'Gerando visão executiva (zoom-out)', status: 'pending' },
+  { id: 'graph-report', label: 'Analisando god nodes e conexões surpreendentes', status: 'pending' },
+  { id: 'activity', label: 'Registrando atividade (delta + predição)', status: 'pending' },
   { id: 'search-index', label: 'Construindo índice de busca por código', status: 'pending' },
   { id: 'persist-index', label: 'Gravando índice consultável (SQLite)', status: 'pending' },
   { id: 'export-json', label: 'Exportando analysis.json', status: 'pending' },
   { id: 'ai-files', label: 'Gerando arquivos para IA', status: 'pending' }
 ];
 
-export async function runPipeline(projectPath: string, onProgress: ProgressCallback): Promise<PipelineResult> {
+/**
+ * Rede de segurança para workspaces com frontend e backend em pastas-irmãs.
+ * Se a pasta selecionada parece só um lado (frontend OU backend) e a pasta-pai
+ * contém irmãs dos dois tipos, sobe para a pai para que a ligação cross-tier
+ * (frontend→endpoint) seja detectável. O fluxo recomendado continua sendo
+ * selecionar a pasta-pai diretamente.
+ */
+const FRONTEND_DIRS = /^(frontend|ui|web|client|app|webapp)$/i;
+const BACKEND_DIRS = /^(backend|api|server|service|services|core)$/i;
+export function findScanRoot(selectedPath: string): string {
+  try {
+    const base = path.basename(selectedPath);
+    const selfIsOneSide = FRONTEND_DIRS.test(base) || BACKEND_DIRS.test(base);
+    if (!selfIsOneSide) return selectedPath;
+    const parent = path.dirname(selectedPath);
+    if (!parent || parent === selectedPath) return selectedPath;
+    const siblings = fs.readdirSync(parent, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+    const hasFront = siblings.some((s) => FRONTEND_DIRS.test(s));
+    const hasBack = siblings.some((s) => BACKEND_DIRS.test(s));
+    return hasFront && hasBack ? parent : selectedPath;
+  } catch {
+    return selectedPath;
+  }
+}
+
+export async function runPipeline(projectPathInput: string, onProgress: ProgressCallback, opts: PipelineOptions = {}): Promise<PipelineResult> {
+  const scanRoot = findScanRoot(projectPathInput.replace(/[\\/]$/, ''));
+  const scanRootAdjusted = scanRoot !== projectPathInput.replace(/[\\/]$/, '');
+  const projectPath = scanRoot;
   const normalized = projectPath.replace(/[\\/]$/, '');
   if (normalized.endsWith('.tic-code')) {
     return {
@@ -138,7 +218,11 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
   const ticCodeDir = path.join(projectPath, '.tic-code');
   const modulesDir = path.join(ticCodeDir, 'modules');
 
+  const phaseStart = new Map<string, number>();
+  const phaseTimings: Record<string, number> = {};
+
   const report = (phaseId: string, percent: number, detail: string) => {
+    if (!phaseStart.has(phaseId)) phaseStart.set(phaseId, Date.now());
     const phase = phases.find((p) => p.id === phaseId);
     if (phase) {
       phase.status = percent === 100 ? 'done' : 'running';
@@ -150,6 +234,8 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
   const markDone = (phaseId: string) => {
     const phase = phases.find((p) => p.id === phaseId);
     if (phase) phase.status = 'done';
+    const start = phaseStart.get(phaseId);
+    if (start !== undefined && !(phaseId in phaseTimings)) phaseTimings[phaseId] = Date.now() - start;
   };
 
   try {
@@ -159,8 +245,20 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     // ── CACHE ─────────────────────────────────────────────────────────────────────
     const previousCache = loadFileCache(ticCodeDir);
 
+    // Estado ANTERIOR (lido antes de qualquer overwrite) — base do self-delta e
+    // do loop de aprendizado preditivo na fase 'activity'.
+    const readPrev = (file: string): any => {
+      try { return JSON.parse(fs.readFileSync(path.join(ticCodeDir, file), 'utf8')); } catch { return null; }
+    };
+    const previousAnalysis = readPrev('analysis.json');
+    const previousPrediction: RiskPrediction[] = Array.isArray(readPrev('risk-prediction.json')) ? readPrev('risk-prediction.json') : [];
+    const previousSnapshots = loadSnapshots(ticCodeDir);
+    const previousAccuracy = readPrev('prediction-accuracy.json');
+
     // ── 1. SCAN ──────────────────────────────────────────────────────────────────
-    report('scan', 5, 'Iniciando scan...');
+    report('scan', 5, scanRootAdjusted
+      ? `Analisando a pasta-pai (${path.basename(projectPath)}) para incluir frontend + backend...`
+      : 'Iniciando scan...');
     const files = scanFiles(projectPath, {
       onProgress: (count, current) => {
         if (count % 1000 === 0) report('scan', 5, `${count.toLocaleString()} arquivos — ${current}`);
@@ -180,12 +278,29 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
 
     // ── 3. GRAFO ─────────────────────────────────────────────────────────────────
     report('graph', 18, 'Construindo grafo de dependências (AST + símbolos)...');
-    const graph = await buildDependencyGraph(files, projectPath);
+    // Incremental: na re-análise, arquivos não alterados reusam os símbolos AST
+    // cacheados (pula o tree-sitter, a fase mais cara). 1ª análise = completa.
+    const graph = await buildDependencyGraph(files, projectPath, isIncremental ? { changedFiles } : {});
+
+    // Telas .osw (JSON do frontend) → controller de código (kitAssembly.osw →
+    // KitAssemblyController.tsx). Mescladas no grafo para fluírem ao impacto.
+    const oswEdges = detectOswLinks(files);
+    if (oswEdges.length > 0) {
+      const nodeByPath = new Map(graph.nodes.map((n) => [n.path, n]));
+      for (const e of oswEdges) {
+        graph.edges.push(e);
+        const from = nodeByPath.get(e.from);
+        const to = nodeByPath.get(e.to);
+        if (from) from.outDegree++;
+        if (to) to.inDegree++;
+      }
+    }
     // Salva para o visualizador interativo
     fs.writeFileSync(path.join(ticCodeDir, 'dep-graph.json'), JSON.stringify({ nodes: graph.nodes.slice(0, 3000), edges: graph.edges.slice(0, 5000) }), 'utf8');
     markDone('graph');
     const resolvedEdges = graph.edges.filter((e) => e.confidence === 'resolved').length;
-    report('graph', 100, `${graph.nodes.length.toLocaleString()} nós, ${graph.edges.length.toLocaleString()} arestas (${resolvedEdges.toLocaleString()} resolvidas)`);
+    const astNote = graph.astCacheHits ? ` · ${graph.astCacheHits.toLocaleString()} do cache AST` : '';
+    report('graph', 100, `${graph.nodes.length.toLocaleString()} nós, ${graph.edges.length.toLocaleString()} arestas (${resolvedEdges.toLocaleString()} resolvidas)${astNote}`);
 
     // ── 4. RISCOS ────────────────────────────────────────────────────────────────
     report('risks', 26, 'Detectando riscos técnicos...');
@@ -346,6 +461,26 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('impact');
     report('impact', 100, `${impactedFiles} arquivos com dependentes mapeados`);
 
+    // ── 16b. GRAFO DE IMPACTO UNIFICADO ──────────────────────────────────────────
+    report('impact-graph', 76, 'Consolidando impacto cross-tier (arquivo/método/PL-SQL/tabela/coluna)...');
+    const impactEdges = buildImpactGraph({
+      graph, methodEdges: graph.methodEdges, callGraph,
+      plsqlObjects, plsqlCalls, dbCalls: dbCallsData,
+      tableAccess: orm.tableAccess, columnAccess: orm.columnAccess
+    });
+    markDone('impact-graph');
+    report('impact-graph', 100, `${impactEdges.length.toLocaleString()} arestas de impacto unificadas`);
+
+    // ── 16c. COMUNIDADES (Louvain) — clusters por topologia do grafo ─────────────
+    report('communities', 77, 'Agrupando nós por topologia (Louvain)...');
+    const communityResult = detectCommunities(impactEdges);
+    const communityName = new Map(communityResult.communities.map((c) => [c.id, c.name]));
+    const communities = [...communityResult.byNode.entries()].map(([nodeId, community]) => ({
+      nodeId, community, name: communityName.get(community) ?? String(community)
+    }));
+    markDone('communities');
+    report('communities', 100, `${communityResult.communities.length} comunidades, ${communityResult.surprising.length} acoplamentos atípicos`);
+
     // ── 17. MÉTRICAS ─────────────────────────────────────────────────────────────
     report('metrics', 78, 'Computando complexidade real (AST) e dívida técnica...');
     const astMetrics = await computeAstMetrics(files);
@@ -367,6 +502,63 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     report('git-history', 100, gitHistory.available
       ? `${gitHistory.analyzedCommits.toLocaleString()} commits, ${gitReport.behavioralHotspots} hotspots comportamentais, ${gitHistory.coupling.length} acoplamentos temporais`
       : `indisponível (${gitHistory.reason})`);
+
+    // ── 17b. REGRAS DE ARQUITETURA (.tic-rules.json) ─────────────────────────────
+    report('arch-rules', 80, 'Validando regras de arquitetura do projeto...');
+    const rulesConfig = loadArchRules(projectPath);
+    const fileInfo = buildFileInfoLookup(files, modules);
+    const archViolations = rulesConfig ? checkArchRules(rulesConfig.rules, graph.edges, fileInfo) : [];
+    if (!rulesConfig) writeRulesExample(ticCodeDir);
+    fs.writeFileSync(path.join(ticCodeDir, 'arch-violations.json'), JSON.stringify({
+      rules: rulesConfig?.rules ?? [],
+      outOfScope: rulesConfig?.outOfScope ?? [],
+      violations: archViolations
+    }), 'utf8');
+    const archErrors = archViolations.filter((v) => v.severity === 'error').length;
+    // Candidatos a deepening (skill improve-codebase-architecture)
+    const deepening = findDeepeningCandidates({
+      fileMetrics: metrics.files,
+      circulars: violations.filter((v) => /circular/i.test(v.type)).map((v) => ({ from: v.from, to: v.to })),
+      totalEdges: graph.edges.length,
+      moduleOf: fileInfo.moduleOf
+    });
+    fs.writeFileSync(path.join(ticCodeDir, 'arch-suggestions.json'), JSON.stringify(deepening), 'utf8');
+    markDone('arch-rules');
+    report('arch-rules', 100, rulesConfig
+      ? `${rulesConfig.rules.length} regra(s): ${archErrors} error, ${archViolations.length - archErrors} warn`
+      : 'sem .tic-rules.json (exemplo gerado em .tic-code/tic-rules.example.json)');
+
+    // ── 17c. PREDIÇÃO DE RISCO (churn × acoplamento) ─────────────────────────────
+    report('predict', 81, 'Cruzando churn do git com complexidade e acoplamento...');
+    const churn = collectChurn(projectPath);
+    const riskPredictions = churn ? predictRisk(churn, metrics.files) : [];
+    fs.writeFileSync(path.join(ticCodeDir, 'risk-prediction.json'), JSON.stringify(riskPredictions), 'utf8');
+    markDone('predict');
+    report('predict', 100, churn
+      ? `${riskPredictions.length} arquivos com risco preditivo mapeado`
+      : 'sem histórico git — predição pulada');
+
+    // ── 17d. OWNERSHIP / BUS-FACTOR ──────────────────────────────────────────────
+    report('ownership', 82, 'Mapeando autoria, bus-factor e onboarding...');
+    const authorship = collectAuthorship(projectPath);
+    const ownership = authorship
+      ? computeOwnership(authorship, metrics.files, modules)
+      : { modules: [], knowledgeRisk: [], startHere: [], fileOwner: {} };
+    fs.writeFileSync(path.join(ticCodeDir, 'ownership.json'), JSON.stringify(ownership), 'utf8');
+    markDone('ownership');
+    report('ownership', 100, authorship
+      ? `${ownership.modules.length} módulos, ${ownership.knowledgeRisk.length} arquivo(s) de conhecimento em risco`
+      : 'sem histórico git — ownership pulado');
+
+    // ── 17e. ROI (débito → tempo & dinheiro) ─────────────────────────────────────
+    report('roi', 83, 'Convertendo débito técnico em tempo e custo...');
+    const prHistory = (() => {
+      try { return JSON.parse(fs.readFileSync(path.join(ticCodeDir, 'pr-history.json'), 'utf8')); } catch { return []; }
+    })();
+    const roi = computeRoi(metrics.files, modules, Array.isArray(prHistory) ? prHistory : [], rulesConfig?.roi);
+    fs.writeFileSync(path.join(ticCodeDir, 'roi.json'), JSON.stringify(roi), 'utf8');
+    markDone('roi');
+    report('roi', 100, `dívida ≈ ${roi.devDays} dev-days (${roi.currency} ${roi.debtCost.toLocaleString()})`);
 
     // ── 18. HERANÇA ───────────────────────────────────────────────────────────────
     report('inheritance', 84, 'Detectando hierarquia de classes...');
@@ -447,6 +639,104 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('dead-components');
     report('dead-components', 100, `${deadComponents.length} componentes sem importadores detectados`);
 
+    // ── 24a. HEALTH SCORE + SNAPSHOT ─────────────────────────────────────────────
+    report('health', 94, 'Computando health score do projeto...');
+    const health = computeHealthScore({
+      totalFiles: files.length, totalLines, metrics, risks, violations, extraViolations: archErrors,
+      deadComponents: deadComponents.length, deadPlsql: deadPlsql.length, edges: graph.edges
+    });
+    appendSnapshot(ticCodeDir, projectPath, {
+      totalFiles: files.length,
+      totalLines,
+      score: health.score,
+      grade: health.grade,
+      breakdown: health.breakdown,
+      counts: {
+        risks: risks.length,
+        violations: violations.length,
+        hotspots: metrics.hotspotCount,
+        deadComponents: deadComponents.length,
+        deadPlsql: deadPlsql.length,
+        resolvedEdges,
+        totalEdges: graph.edges.length,
+        endpoints: endpoints.length,
+        modules: modules.length,
+        impactEdges: impactEdges.length,
+        remediationHours: roi.remediationHours,
+        debtCost: roi.debtCost
+      }
+    });
+    markDone('health');
+    report('health', 100, `Health score: ${health.score}/100 (grade ${health.grade})`);
+
+    // ── 24b. TRIAGEM (skill triage: itens automáticos preservando estado) ────────
+    report('triage', 94, 'Sincronizando fila de triagem...');
+    const triageCandidates: TriageCandidate[] = [];
+    for (const r of risks.filter((r) => r.level === 'critical' || r.level === 'high')) {
+      triageCandidates.push({
+        id: `risk::${r.file}::${r.title}`,
+        title: `${r.title} em ${r.file.split('/').pop()}`,
+        category: 'bug',
+        priority: r.level === 'critical' ? 'critical' : 'high',
+        source: 'risk',
+        entity: `file:${r.file}`,
+        detail: r.detail
+      });
+    }
+    for (const v of archViolations.filter((v) => v.severity === 'error')) {
+      triageCandidates.push({
+        id: `arch-rule::${v.ruleId}::${v.from}::${v.to}`,
+        title: `Regra "${v.ruleId}" violada: ${v.from.split('/').pop()} → ${v.to.split('/').pop()}`,
+        category: 'bug',
+        priority: 'high',
+        source: 'arch-rule',
+        entity: `file:${v.from}`,
+        detail: v.description
+      });
+    }
+    const triageStats = syncTriageItems(ticCodeDir, triageCandidates);
+    markDone('triage');
+    report('triage', 100, `${triageStats.created} item(ns) novo(s), ${triageStats.total} na fila`);
+
+    // ── 24c. ZOOM-OUT (visão executiva) ──────────────────────────────────────────
+    report('zoom-out', 94, 'Gerando visão executiva por fronteiras de domínio...');
+    generateZoomOut(ticCodeDir, projectName, modules, graph.edges, files);
+    markDone('zoom-out');
+    report('zoom-out', 100, 'zoom-out.md gerado');
+
+    // ── 24c'. INSIGHTS DO GRAFO (god nodes + conexões surpreendentes) ────────────
+    report('graph-report', 94, 'Identificando hubs e conexões atípicas do grafo de impacto...');
+    const fileToModule = new Map<string, string>();
+    for (const m of modules) for (const f of m.files) fileToModule.set(f.relativePath, m.name);
+    const graphReport = generateGraphReport(ticCodeDir, projectName, impactEdges, fileToModule);
+    markDone('graph-report');
+    report('graph-report', 100, `${graphReport.godNodes.length} god nodes, ${graphReport.surprising.length} conexões surpreendentes`);
+
+    // ── 24d. ATIVIDADE (self-delta + loop preditivo) — o batimento do sistema ────
+    report('activity', 94, 'Computando o que mudou desde a última análise...');
+    const curDelta = {
+      snapshot: { score: health.score, counts: { risks: risks.length, violations: violations.length, modules: modules.length, hotspots: metrics.hotspotCount } },
+      analysis: {
+        risks: { items: risks.map((r) => ({ level: r.level, title: r.title, file: r.file })) },
+        archViolations: { items: archViolations.map((v) => ({ ruleId: v.ruleId, severity: v.severity, from: v.from, to: v.to })) },
+        modules: modules.map((m) => ({ name: m.name }))
+      }
+    };
+    const prevDelta = previousAnalysis && previousSnapshots.length > 0
+      ? { snapshot: { score: previousSnapshots[previousSnapshots.length - 1].score, counts: { risks: 0, violations: 0, modules: 0, hotspots: 0 } }, analysis: previousAnalysis }
+      : null;
+    const deltaEvents = computeSelfDelta(prevDelta, curDelta);
+    const newRiskFiles = new Set(deltaEvents.filter((e) => e.type === 'risk-new' && e.entity).map((e) => e.entity!.replace(/^file:/, '')));
+    const { events: predEvents, accuracy } = computePredictionFeedback(previousPrediction, churn, newRiskFiles, previousAccuracy as PredictionAccuracy | null, ticCodeDir);
+    fs.writeFileSync(path.join(ticCodeDir, 'prediction-accuracy.json'), JSON.stringify(accuracy), 'utf8');
+    const summary = makeEvent('analysis', 'info',
+      `Análise concluída — health ${health.score}/100 (${health.grade})`,
+      `${files.length.toLocaleString()} arquivos · ${deltaEvents.length} mudança(s) detectada(s)`);
+    const allEvents = [summary, ...deltaEvents, ...predEvents];
+    appendEvents(ticCodeDir, allEvents);
+    markDone('activity');
+    report('activity', 100, `${deltaEvents.length} mudança(s), ${predEvents.length} predição(ões) confirmada(s)`);
+
     // ── 24b. SEARCH INDEX ─────────────────────────────────────────────────────────
     report('search-index', 95, 'Indexando termos de código para busca semântica...');
     const searchEntries = buildSearchIndex(files, ticCodeDir);
@@ -461,7 +751,27 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     );
 
     report('persist-index', 97, 'Gravando índice consultável (SQLite)...');
-    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges, columnAccess: orm.columnAccess, embeddings });
+    const dbStats = writeIndexDb(path.join(ticCodeDir, INDEX_DB_FILE), { files, graph, callGraph, searchEntries, methodEdges: graph.methodEdges, columnAccess: orm.columnAccess, modules, impactEdges, embeddings, communities });
+
+    // Populate architectural roles from detectPatterns results
+    {
+      const Database = (await import('better-sqlite3')).default;
+      const roleDb = new Database(path.join(ticCodeDir, INDEX_DB_FILE));
+      try {
+        const updateRole = roleDb.prepare('UPDATE files SET role = ? WHERE rel_path = ?');
+        const roleMap = new Map<string, string>();
+        for (const match of patternMatches) {
+          if (!roleMap.has(match.file)) roleMap.set(match.file, match.pattern);
+        }
+        const setRoles = roleDb.transaction(() => {
+          for (const [file, role] of roleMap) updateRole.run(role, file);
+        });
+        setRoles();
+      } finally {
+        roleDb.close();
+      }
+    }
+
     markDone('persist-index');
     const vecNote = embeddings ? `, ${embeddings.length} embeddings` : ' (embeddings off: modelo indisponível, FTS ativo)';
     report('persist-index', 100, `index.db: ${dbStats.nodes.toLocaleString()} nós, ${dbStats.edges.toLocaleString()} arestas (sem teto)${vecNote}`);
@@ -471,7 +781,11 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     exportAnalysis(ticCodeDir, {
       projectName, projectPath, files, totalLines, stack, modules, endpoints, graph, risks,
       metrics, fileMetrics: metrics.files, violations, patternMatches, inheritanceTree,
-      dbSchema, impactIndex, quickContextTokens,
+      dbSchema, impactIndex, quickContextTokens, health,
+      archViolations: { items: archViolations, errorCount: archErrors, warnCount: archViolations.length - archErrors, ruleCount: rulesConfig?.rules.length ?? 0 },
+      riskPrediction: riskPredictions.slice(0, 20),
+      roi,
+      ownership: { modules: ownership.modules, knowledgeRisk: ownership.knowledgeRisk, startHere: ownership.startHere },
       transactionBoundaries, batchJobs, angularModules, ngrxItems, deadComponents
     });
     markDone('export-json');
@@ -480,12 +794,39 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     // ── SALVA CACHE ───────────────────────────────────────────────────────────────
     saveFileCache(ticCodeDir, files);
 
+    // ── DREAM CYCLE (manutenção incremental da memória) ───────────────────────────
+    // Dedup e detecção de contradições no memoryStore — determinístico, sem LLM.
+    try {
+      const { loadMemory, runMemoryMaintenance, appendMemory: addMem } = await import('./store/memoryStore');
+      const { appendEvents: addEvt, makeEvent: mkEvt } = await import('./store/activityLog');
+      const memEntries = loadMemory(ticCodeDir);
+      if (memEntries.length > 0) {
+        const { deduped, contradictions } = runMemoryMaintenance(memEntries);
+        if (deduped.length < memEntries.length) {
+          const { default: fsMod } = await import('fs');
+          const { join: joinPath } = await import('path');
+          fsMod.writeFileSync(joinPath(ticCodeDir, 'memory.json'), JSON.stringify(deduped, null, 2), 'utf8');
+        }
+        for (const c of contradictions) {
+          addEvt(ticCodeDir, [mkEvt('memory-contradiction', 'warn',
+            `Memória contraditória: ${c.entity}`,
+            `${c.entries.length} outcomes opostos registrados — revise com recall("${c.entity}")`,
+            c.entity)]);
+        }
+      }
+    } catch { /* best-effort: nunca quebra a análise */ }
+
     // ── 22. ARQUIVOS PARA IA ─────────────────────────────────────────────────────
-    report('ai-files', 94, 'Gerando copilot-instructions.md e CLAUDE.md...');
-    writeCopilotInstructions(projectPath, projectName, files.length, modules);
-    writeClaudeMd(projectPath, projectName, files.length, modules);
-    markDone('ai-files');
-    report('ai-files', 100, 'Concluído!');
+    if (opts.skipAiFiles) {
+      markDone('ai-files');
+      report('ai-files', 100, 'Concluído! (arquivos de IA pulados — modo CI)');
+    } else {
+      report('ai-files', 94, 'Gerando copilot-instructions.md e CLAUDE.md...');
+      writeCopilotInstructions(projectPath, projectName, files.length, modules);
+      writeClaudeMd(projectPath, projectName, files.length, modules);
+      markDone('ai-files');
+      report('ai-files', 100, 'Concluído!');
+    }
 
     return {
       success: true,
@@ -511,7 +852,20 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       gitCommits: gitHistory.available ? gitHistory.analyzedCommits : 0,
       behavioralHotspots: gitReport.behavioralHotspots,
       functionsAnalyzed: metrics.functions.length,
-      offenderFunctions: metrics.offenderFunctionCount
+      offenderFunctions: metrics.offenderFunctionCount,
+      impactEdges: impactEdges.length,
+      godNodes: graphReport.godNodes.length,
+      communities: communityResult.communities.length,
+      healthScore: health.score,
+      healthGrade: health.grade,
+      archViolations: archViolations.length,
+      riskPredictions: riskPredictions.length,
+      roiDebtCost: roi.debtCost,
+      roiHoursSaved: roi.hoursSaved,
+      astCacheHits: graph.astCacheHits ?? 0,
+      triageItems: triageStats.total,
+      activityEvents: allEvents.length,
+      phaseTimings
     };
 
   } catch (err) {
@@ -609,16 +963,45 @@ function computeDeadPlsql(plsqlObjects: PlsqlObject[], plsqlCalls: PlsqlCall[], 
   });
 }
 
+/**
+ * Grava `content` em `filePath` de forma segura: se o arquivo já existe e não
+ * contém os marcadores TIC, o conteúdo TIC é ADICIONADO no final — as
+ * configurações do usuário acima do bloco são preservadas intactas.
+ * Se os marcadores já existem, apenas o bloco interno é substituído.
+ */
+function writeGuardedBlock(filePath: string, content: string): void {
+  const START = '<!-- TIC:START -->';
+  const END = '<!-- TIC:END -->';
+  const block = `${START}\n${content}\n${END}`;
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, block + '\n', 'utf8');
+    return;
+  }
+  const existing = fs.readFileSync(filePath, 'utf8');
+  const startIdx = existing.indexOf(START);
+  const endIdx = existing.indexOf(END);
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    // Substitui apenas o bloco TIC; preserva tudo fora dele.
+    const before = existing.slice(0, startIdx);
+    const after = existing.slice(endIdx + END.length);
+    fs.writeFileSync(filePath, before + block + after, 'utf8');
+  } else {
+    // Arquivo existe mas sem bloco TIC — append no final.
+    const sep = existing.endsWith('\n') ? '\n' : '\n\n';
+    fs.writeFileSync(filePath, existing + sep + block + '\n', 'utf8');
+  }
+}
+
 function writeCopilotInstructions(projectPath: string, projectName: string, totalFiles: number, modules: ReturnType<typeof detectModules>): void {
   const githubDir = path.join(projectPath, '.github');
   fs.mkdirSync(githubDir, { recursive: true });
   const moduleList = modules.slice(0, 10).map((m) => `  - \`${m.name}\` (${m.fileCount} arquivos)`).join('\n');
   const content = `# ${projectName} — GitHub Copilot Instructions (TIC Analyzer)\n\n> Projeto com ${totalFiles.toLocaleString()} arquivos. Modo Large Project ativo.\n\n## Instruções Operacionais\n\nAntes de sugerir alterações:\n\n1. **Leia apenas** \`.tic-code/quick-context.md\` para contexto geral\n2. **Para módulo específico:** leia \`.tic-code/modules/{nome}/context.md\`\n3. **Para impacto de mudança:** leia \`.tic-code/impact-index.json\` (ou use MCP tool get_impact)\n4. **Para métricas:** leia \`.tic-code/metrics-summary.md\`\n\n## Módulos Disponíveis\n\n${moduleList}\n\n> Lista completa: \`.tic-code/index.md\`\n`;
-  fs.writeFileSync(path.join(githubDir, 'copilot-instructions.md'), content, 'utf8');
+  writeGuardedBlock(path.join(githubDir, 'copilot-instructions.md'), content);
 }
 
 function writeClaudeMd(projectPath: string, projectName: string, totalFiles: number, modules: ReturnType<typeof detectModules>): void {
   const moduleList = modules.slice(0, 10).map((m) => `- \`.tic-code/modules/${m.name}/context.md\` — ${m.fileCount} arquivos`).join('\n');
-  const content = `# ${projectName} — Claude Code Context (TIC Analyzer)\n\n> ${totalFiles.toLocaleString()} arquivos. Large Project Mode.\n\n## Navegação\n\n1. Visão geral: \`.tic-code/quick-context.md\`\n2. Módulo específico: \`.tic-code/modules/{nome}/context.md\`\n3. Mapa completo: \`.tic-code/index.md\`\n4. Impacto de mudança: MCP tool \`get_impact(file)\` (~200 tokens)\n5. Métricas: \`.tic-code/metrics-summary.md\`\n6. Padrões: \`.tic-code/patterns.md\`\n7. Herança: \`.tic-code/inheritance.md\`\n\n## Módulos Principais\n\n${moduleList}\n\n## MCP Server\n\nSe TIC Analyzer rodando em \`localhost:7432\`:\n- \`list_modules()\`, \`get_module("nome")\`, \`get_quick_context()\`\n- \`get_impact("arquivo.ts")\` — quem depende deste arquivo\n- \`get_metrics("módulo")\` — complexidade e dívida técnica\n- \`get_hotspots()\` — arquivos críticos do projeto\n- \`get_patterns()\` — padrões arquiteturais detectados\n`;
-  fs.writeFileSync(path.join(projectPath, 'CLAUDE.md'), content, 'utf8');
+  const content = `# ${projectName} — Claude Code Context (TIC Analyzer)\n\n> ${totalFiles.toLocaleString()} arquivos. Large Project Mode.\n\n## REGRA: MCP primeiro, arquivos depois\n\nANTES de ler arquivos do projeto, consulte o MCP (\`localhost:7432\`) — ele já tem a análise completa e gasta uma fração dos tokens:\n\n1. **Impacto de mudança** (arquivo, método, procedure PL/SQL, tabela ou coluna):\n   - \`get_blast_radius("PKG.PROC" | "TABELA" | "TABELA.COLUNA" | "Arquivo.java")\` — resumo ~200 tokens. Use PRIMEIRO.\n   - \`get_impact_of(entity)\` — detalhe por profundidade/módulo se o resumo não bastar\n   - \`get_table_impact(tabela[, coluna])\` — quem é afetado por mudar a tabela/coluna\n   - \`get_diff_impact()\` — impacto cross-tier de tudo que está no git diff\n2. **Localizar código**: \`search_code(query)\` (FTS + vetorial fundidos)\n3. **Entender fluxo**: \`trace_flow(entidade)\` — cadeia tela→endpoint→service→procedure→tabela\n4. **Contexto**: \`get_quick_context()\` (visão geral), \`get_module("nome")\` (módulo)\n5. **Qualidade**: \`get_metrics()\`, \`get_hotspots()\`, \`get_violations()\`\n6. **Memória**: \`recall(entity)\` (histórico de tentativas/decisões), \`remember(entity, kind, summary)\` (registrar)\n\n## Navegação por arquivos (sem MCP)\n\n1. Visão geral: \`.tic-code/quick-context.md\`\n2. Módulo específico: \`.tic-code/modules/{nome}/context.md\`\n3. Mapa completo: \`.tic-code/index.md\`\n\n## Módulos Principais\n\n${moduleList}\n`;
+  writeGuardedBlock(path.join(projectPath, 'CLAUDE.md'), content);
 }

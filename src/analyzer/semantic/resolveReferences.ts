@@ -15,7 +15,7 @@
 import type { FileSymbols, CallRef } from './extractSymbols';
 import { SymbolTable } from './symbolTable';
 
-export type EdgeKind = 'import' | 'call' | 'extends' | 'implements';
+export type EdgeKind = 'import' | 'call' | 'extends' | 'implements' | 'osw-ref';
 export type Confidence = 'resolved' | 'inferred';
 
 export interface SemanticEdge {
@@ -90,9 +90,32 @@ export function resolveReferences(
 // ── Java ──────────────────────────────────────────────────────────────────────
 
 function resolveJavaFile(sym: FileSymbols, table: SymbolTable, edges: EdgeSet, externalDeps: Set<string>, methodEdges: MethodEdge[]): void {
+  // Nomes simples referenciados no corpo (tipos, campos, receptores de chamada) —
+  // usados para materializar arestas de imports wildcard sem explodir o grafo.
+  const referencedSimpleNames = new Set<string>();
+  for (const decl of sym.types) {
+    if (decl.extendsName) referencedSimpleNames.add(decl.extendsName);
+    for (const i of decl.implementsNames) referencedSimpleNames.add(i);
+    for (const f of decl.fields) referencedSimpleNames.add(f.type);
+  }
+
   // imports
   for (const imp of sym.imports) {
-    if (imp.isWildcard) continue;
+    if (imp.isWildcard) {
+      // `import a.b.*` → aresta para tipos do pacote `a.b` referenciados por nome
+      // simples no arquivo (mantém o grafo conectado sem ligar o pacote inteiro).
+      const pkg = imp.source.replace(/\.\*$/, '');
+      let matchedAny = false;
+      for (const name of referencedSimpleNames) {
+        const target = table.byFqn.get(`${pkg}.${name}`);
+        if (target && target.file !== sym.file) {
+          edges.add(sym.file, target.file, 'import', 'inferred');
+          matchedAny = true;
+        }
+      }
+      if (!matchedAny) externalDeps.add(rootPackage(pkg));
+      continue;
+    }
     const target = table.byFqn.get(imp.source);
     if (target && target.file !== sym.file) edges.add(sym.file, target.file, 'import', 'resolved');
     else if (!target) externalDeps.add(rootPackage(imp.source));

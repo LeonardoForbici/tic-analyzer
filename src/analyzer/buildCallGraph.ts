@@ -107,7 +107,8 @@ export function buildCallGraph(
         const backId = beId(ep.file);
         if (!matched.has(backId)) {
           matched.add(backId);
-          addEdge({ from: frontId, to: backId, type: 'HTTP_CALL', confidence: call.confidence });
+          const label = `${(call.method ?? ep.method ?? 'ANY').toUpperCase()} ${call.urlPattern}`;
+          addEdge({ from: frontId, to: backId, type: 'HTTP_CALL', confidence: call.confidence, label });
         }
       }
     }
@@ -182,12 +183,27 @@ function matchByUrl(call: FrontendCall, endpoints: EndpointFound[]): EndpointFou
   return null;
 }
 
+// Generic words that appear in many filenames but carry no domain meaning.
+// Matching on these would create false HTTP_CALL edges (e.g. list-service.ts → ListController.java).
+const GENERIC_KEYWORDS = new Set([
+  'list','get','set','add','create','update','delete','remove','fetch','load',
+  'save','find','search','query','request','response','result','data','item',
+  'items','detail','details','info','base','common','default','main','index',
+  'home','page','view','form','modal','table','row','col','cell','card','panel',
+  'user','users','admin','auth','login','logout','register','reset','config',
+  'setting','settings','util','utils','helper','helpers','type','types','model',
+  'models','store','service','controller','resource','api','client','repo',
+  'repository','handler','component','module','hook','mixin','guard','pipe',
+]);
+
 function matchByName(frontendFile: string, endpoints: EndpointFound[]): EndpointFound | null {
   const kw = domainKeyword(basename(frontendFile));
-  if (!kw || kw.length < 3) return null;
+  // Require ≥ 5 chars and reject generic words to avoid false positives.
+  if (!kw || kw.length < 5 || GENERIC_KEYWORDS.has(kw)) return null;
   for (const ep of endpoints) {
     const epKw = domainKeyword(basename(ep.file));
-    if (epKw && (epKw.startsWith(kw) || kw.startsWith(epKw))) return ep;
+    // Require exact match (not startsWith) to prevent partial-word collisions.
+    if (epKw && epKw === kw) return ep;
   }
   return null;
 }
@@ -205,8 +221,18 @@ function pathsMatch(callPath: string, epPath: string): boolean {
   const epNorm = epPath.replace(/\{[^}]+\}|:[^/]+/g, '*');
   const a = callPath.split('/').filter(Boolean);
   const b = epNorm.split('/').filter(Boolean);
-  if (a.length !== b.length) return false;
-  return a.every((part, i) => b[i] === '*' || b[i] === part);
+  if (a.length === 0 || b.length === 0) return false;
+  // match exato (mesma contagem de segmentos)
+  if (a.length === b.length) return a.every((part, i) => b[i] === '*' || b[i] === part);
+  // match por sufixo: backend pode ter prefixo extra (ex: /api/v2/users vs users).
+  // Alinha pelo fim; exige ao menos 1 segmento e que o último não seja curinga puro.
+  const [shorter, longer] = a.length < b.length ? [a, b] : [b, a];
+  const off = longer.length - shorter.length;
+  const ok = shorter.every((part, i) => {
+    const lp = longer[off + i];
+    return lp === '*' || part === '*' || lp === part;
+  });
+  return ok && shorter[shorter.length - 1] !== '*';
 }
 
 // "pessoa-service.ts" → "pessoa", "PessoaController.java" → "pessoa"

@@ -4,13 +4,23 @@ import * as http from 'http';
 import { execSync } from 'child_process';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 import type { ImpactIndex } from '../analyzer/buildImpactIndex';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
-import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount } from './queries';
+import { getFileSummary } from '../analyzer/store/fileSummary';
+import { queryImpact, queryFindPath, querySearch, queryCallGraph, queryCrossTierTrace, queryTableColumns, queryVectorSearch, embeddingsCount, fuseRRF, type FusedHit } from './queries';
+import { queryImpactOf, queryBlastRadius, queryImpactPath, type ImpactOfResult, type BlastRadiusResult, type ImpactPathResult } from '../analyzer/store/impactQueries';
+import { queryGraphLevel, queryCommunities } from '../analyzer/store/graphQueries';
+import { buildAgentBrief, buildDiagnosis } from './agentBrief';
+import { loadTriage, transitionTriageItem, type TriageState, type TriageCategory, type TriagePriority } from '../analyzer/store/triageStore';
+import { loadActivity } from '../analyzer/store/activityLog';
+import { appendMemory, queryMemory, type MemoryKind, type MemoryResult } from '../analyzer/store/memoryStore';
+import { suggestReviewers } from '../analyzer/computeOwnership';
+import { loadPortfolio } from '../analyzer/store/portfolioStore';
 import { getEmbedder } from '../analyzer/semantic/embeddings';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
@@ -49,6 +59,8 @@ function estimateTokens(text: string): number {
 
 export class TicAnalyzerMcpServer {
   private httpServer?: http.Server;
+  private sseClients = new Set<http.ServerResponse>();
+  private sseSessions = new Map<string, { transport: SSEServerTransport; server: Server }>();
   private projectPath: string;
   private ticCodePath: string;
   private tokenLog: TokenEntry[] = [];
@@ -113,8 +125,15 @@ export class TicAnalyzerMcpServer {
         },
         {
           name: 'get_module',
-          description: 'Retorna o contexto completo de um módulo (~75k tokens).',
-          inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] }
+          description: 'Retorna o contexto de um módulo. detail="summary" (default, ~1k tokens) traz o início do contexto; detail="full" traz tudo.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              detail: { type: 'string', enum: ['summary', 'full'], description: 'summary (default) ou full' }
+            },
+            required: ['name']
+          }
         },
         {
           name: 'get_quick_context',
@@ -142,14 +161,22 @@ export class TicAnalyzerMcpServer {
           inputSchema: { type: 'object', properties: {} }
         },
         {
+          name: 'get_graph_report',
+          description: 'Insights do grafo de impacto: "god nodes" (hubs por onde tudo passa), conexões surpreendentes (arestas que pulam camadas ou ligam módulos pouco acoplados) e perguntas sugeridas. Use para entender a forma do sistema antes de mergulhar em entidades.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
           name: 'get_permissions',
           description: 'Retorna a matriz de permissões: rotas × roles.',
           inputSchema: { type: 'object', properties: {} }
         },
         {
           name: 'get_multigraph',
-          description: 'Retorna o multi-grafo: Frontend → Endpoint → Backend → PL/SQL.',
-          inputSchema: { type: 'object', properties: {} }
+          description: 'Retorna o multi-grafo: Frontend → Endpoint → Backend → PL/SQL. detail="summary" (default) traz contagens + amostra; detail="full" traz o grafo inteiro.',
+          inputSchema: {
+            type: 'object',
+            properties: { detail: { type: 'string', enum: ['summary', 'full'], description: 'summary (default) ou full' } }
+          }
         },
         {
           name: 'get_business_rules',
@@ -166,6 +193,208 @@ export class TicAnalyzerMcpServer {
             },
             required: ['file']
           }
+        },
+        {
+          name: 'get_impact_of',
+          description: 'Impacto cross-tier de QUALQUER entidade: arquivo, método, procedure/function PL/SQL, tabela ou coluna. Atravessa camadas (coluna → procedure → DAO Java → endpoint → tela React). Aceita nome livre ("PKG_CLIENTE.SALVAR", "CLIENTES", "CLIENTES.CPF", "UserService.java") ou id canônico ("table:CLIENTES"). ~400-800 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity: { type: 'string', description: 'Nome ou id da entidade (arquivo/procedure/tabela/coluna).' },
+              max_depth: { type: 'number', description: 'Profundidade máxima de saltos (opcional).' }
+            },
+            required: ['entity']
+          }
+        },
+        {
+          name: 'get_blast_radius',
+          description: 'Resumo ULTRA-COMPACTO do impacto de uma entidade (~200 tokens): contagens por tipo/módulo + top 20 afetados por criticidade. Use PRIMEIRO, antes de get_impact_of ou de ler arquivos, para decidir se precisa de detalhe.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity: { type: 'string', description: 'Nome ou id da entidade (arquivo/procedure/tabela/coluna).' }
+            },
+            required: ['entity']
+          }
+        },
+        {
+          name: 'get_impact_path',
+          description: 'Reconstrói a CADEIA de arestas (com via + confiança por salto) que liga DUAS entidades no grafo de impacto cross-tier. Responde "POR QUE mexer em X afeta Y" mostrando o caminho exato (ex.: tela → controller → service → DAO → PKG.SALVAR → tabela). Aceita nome livre ou id canônico nas duas pontas. ~200-400 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              from: { type: 'string', description: 'Entidade de origem (a que muda).' },
+              to: { type: 'string', description: 'Entidade de destino (a afetada).' },
+              max_paths: { type: 'number', description: 'Quantas cadeias alternativas retornar (default 3).' },
+              direction: { type: 'string', enum: ['impact', 'depends'], description: "'impact' (default): caminho de propagação. 'depends': caminho de dependência (from depende de to)." }
+            },
+            required: ['from', 'to']
+          }
+        },
+        {
+          name: 'get_table_impact',
+          description: 'Atalho: impacto de mudar uma tabela ou coluna do banco — quais procedures, triggers, DAOs Java e telas são afetados. ~300 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              table: { type: 'string', description: 'Nome da tabela (ex: "CLIENTES").' },
+              column: { type: 'string', description: 'Coluna específica (opcional, ex: "CPF").' }
+            },
+            required: ['table']
+          }
+        },
+        {
+          name: 'get_graph_level',
+          description: 'Grafo hierárquico agregado (app → layer → module → file → symbol). Sem "expanded": visão por camadas. Expanda passando ids (ex: ["layer:backend","module:cliente"]). Peso da aresta = nº de dependências arquivo→arquivo agregadas. ~300-600 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              expanded: { type: 'array', items: { type: 'string' }, description: 'Ids expandidos: layer:<nome>, module:<nome>, file:<rel_path>.' }
+            }
+          }
+        },
+        {
+          name: 'get_communities',
+          description: 'Comunidades do grafo (Louvain): clusters por TOPOLOGIA do grafo de impacto (nós que conversam muito), não por pasta. Mostra tamanho/composição de cada comunidade e os acoplamentos cross-cluster mais fortes (pontes entre domínios). Use para entender a modularidade real do sistema. ~300-500 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'list_http_flows',
+          description: 'Lista chamadas HTTP cross-tier detectadas: quais componentes frontend chamam quais endpoints backend (fetch, axios, HttpClient). ~300 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_arch_rules',
+          description: 'Regras de arquitetura do projeto (.tic-rules.json) e violações atuais (architecture drift). ~300 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_arch_suggestions',
+          description: 'Oportunidades de melhoria arquitetural (skill improve-codebase-architecture): módulos pass-through (deletion test), acoplamento alto, god modules e circulares — com sugestão de padrão. ~400 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_risk_prediction',
+          description: 'Manutenção preditiva: onde o próximo bug tende a nascer (churn do git × complexidade × acoplamento), com score 0-100 e motivos. ~300 tokens.',
+          inputSchema: { type: 'object', properties: { limit: { type: 'number', description: 'Top N (default 10).' } } }
+        },
+        {
+          name: 'get_agent_brief',
+          description: 'AGENT-BRIEF (skill triage de mattpocock/skills): brief completo e acionável de uma entidade — Category, Summary, Current/Desired behavior, Key interfaces, Acceptance criteria e Out of scope — preenchido pelo grafo de impacto. Pronto para issue ou para um agente implementar. ~600 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: { entity: { type: 'string', description: 'Arquivo/procedure/tabela/coluna ou id de item de triagem.' } },
+            required: ['entity']
+          }
+        },
+        {
+          name: 'get_diagnosis',
+          description: 'Diagnose disciplinado (skill diagnose): para um sintoma entre duas entidades, devolve as 6 fases — feedback loop primeiro, reprodução pelo caminho do grafo, 3-5 hipóteses falsificáveis ranqueadas por risco preditivo, instrumentação 1-a-1 com prefixo de log, fix+regressão e post-mortem. ~700 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              from: { type: 'string', description: 'Entidade onde o sintoma aparece (ex: tela, endpoint).' },
+              to: { type: 'string', description: 'Entidade suspeita do outro lado (ex: procedure, tabela). Opcional.' }
+            },
+            required: ['from']
+          }
+        },
+        {
+          name: 'get_zoom_out',
+          description: 'Zoom-out (skill zoom-out): visão macro por fronteiras de domínio. Sem parâmetro = sistema inteiro (Mermaid de camadas/módulos). Com entity = onde aquela parte se encaixa: módulo dono, quem a chama (agregado por módulo) e conexões — vocabulário de domínio, sem arquivos soltos. ~400 tokens.',
+          inputSchema: { type: 'object', properties: { entity: { type: 'string', description: 'Entidade para zoom-out focado (opcional).' } } }
+        },
+        {
+          name: 'get_out_of_scope',
+          description: 'Catálogo de decisões out-of-scope registradas (.tic-rules.json) — o que o time já decidiu NÃO fazer, para não rediscutir. ~150 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'list_triage',
+          description: 'Fila de triagem (skill triage): itens com categoria (bug/enhancement), estado (needs-triage/needs-info/ready-for-agent/ready-for-human/wontfix) e prioridade. Filtre por state/category. ~300 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              state: { type: 'string', description: 'Filtrar por estado (opcional).' },
+              category: { type: 'string', description: 'Filtrar por categoria (opcional).' }
+            }
+          }
+        },
+        {
+          name: 'update_triage',
+          description: 'Transiciona um item da fila de triagem (transições validadas pela máquina de estados da skill). Ex: update_triage(id, state="ready-for-agent").',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              state: { type: 'string', description: 'Novo estado (opcional).' },
+              category: { type: 'string', description: 'bug | enhancement (opcional).' },
+              priority: { type: 'string', description: 'critical|high|medium|low (opcional).' }
+            },
+            required: ['id']
+          }
+        },
+        {
+          name: 'remember',
+          description: 'Registra uma decisão, tentativa de fix ou nota na memória persistente do projeto para uma entidade (arquivo, módulo, procedure, tabela). Use quando tentar algo e quiser deixar registrado para futuras sessões.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity: { type: 'string', description: 'Entidade afetada (ex: "file:src/api/user.ts", "proc:PKG.SALVAR", nome de módulo).' },
+              kind: { type: 'string', description: 'decision | fix-attempt | outcome | note' },
+              summary: { type: 'string', description: 'Resumo em 1-2 frases.' },
+              detail: { type: 'string', description: 'Detalhe opcional.' },
+              result: { type: 'string', description: 'worked | failed | unknown (opcional, para fix-attempt/outcome).' },
+              refs: { type: 'array', items: { type: 'string' }, description: 'Arquivos ou URLs de referência (opcional).' }
+            },
+            required: ['entity', 'kind', 'summary']
+          }
+        },
+        {
+          name: 'recall',
+          description: 'Consulta a memória persistente do projeto para uma entidade: histórico de tentativas, decisões e outcomes registrados por agentes ou pela pipeline. Incluído automaticamente em get_agent_brief. ~300 tokens.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity: { type: 'string', description: 'Entidade a consultar (arquivo, módulo, procedure, tabela ou termo).' }
+            },
+            required: ['entity']
+          }
+        },
+        {
+          name: 'list_http_flows',
+          description: 'Lista chamadas HTTP cross-tier detectadas (fetch/axios/HttpClient): qual componente frontend chama qual endpoint backend, com método e URL. Útil para mapear dependências entre camadas.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_portfolio',
+          description: 'Portfólio: compara TODOS os projetos analisados (saúde, riscos, drift, custo da dívida), pior saúde primeiro. Responde "qual repositório está pior?" numa visão executiva. ~300 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_roi',
+          description: 'ROI: custo da dívida técnica em tempo e dinheiro (dev-days + moeda), horas/custo economizados pelos PRs, e top módulos por custo. O argumento de tempo&custo para liderança. ~250 tokens.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_ownership',
+          description: 'Ownership e bus-factor: quem domina cada módulo, % de cobertura, arquivos de conhecimento em risco (1 só autor + alto impacto) e dificuldade de onboarding por módulo. Sem entity = visão geral; com entity = dono do arquivo/módulo. ~300 tokens.',
+          inputSchema: { type: 'object', properties: { entity: { type: 'string', description: 'Arquivo ou módulo (opcional).' } } }
+        },
+        {
+          name: 'suggest_reviewers',
+          description: 'Roteamento de revisor: dado um conjunto de arquivos mudados, sugere quem deve revisar (dono provável por autoria git). ~150 tokens.',
+          inputSchema: { type: 'object', properties: { files: { type: 'array', items: { type: 'string' }, description: 'Caminhos relativos dos arquivos mudados.' } }, required: ['files'] }
+        },
+        {
+          name: 'get_activity',
+          description: 'Linha do tempo de atividade do projeto (sistema vivo): o que mudou nas últimas análises — health subiu/caiu, riscos novos, violações de regra, predições confirmadas. Use para "o que mudou recentemente?". ~300 tokens.',
+          inputSchema: { type: 'object', properties: { limit: { type: 'number', description: 'Quantos eventos recentes (default 20).' } } }
+        },
+        {
+          name: 'get_health',
+          description: 'Health score do projeto (0-100, grade A-E) com breakdown por dimensão (dívida, riscos, violações, dead code, acoplamento) e delta vs análise anterior. ~200 tokens.',
+          inputSchema: { type: 'object', properties: {} }
         },
         {
           name: 'get_metrics',
@@ -356,6 +585,22 @@ export class TicAnalyzerMcpServer {
             },
             required: ['concept']
           }
+        },
+        {
+          name: 'explain_file',
+          description: 'Perfil estruturado de um arquivo: responsabilidade inferida, arquivos que ele chama, quem o chama, símbolos exportados e nível de risco — tudo sem IA. ~150 tokens. Use antes de ler o arquivo.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'Caminho relativo do arquivo (ex: "src/payment/PaymentService.ts")' }
+            },
+            required: ['path']
+          }
+        },
+        {
+          name: 'get_entry_points',
+          description: 'Lista todos os pontos de entrada detectados: endpoints REST, batch jobs (@Scheduled/@Async/Quartz) e componentes raiz de frontend (inDegree=0). ~300 tokens.',
+          inputSchema: { type: 'object', properties: {} }
         }
       ]
     }));
@@ -380,14 +625,14 @@ export class TicAnalyzerMcpServer {
           return respond({ content: [{ type: 'text', text: this.readFile('quick-context.md') }] });
 
         case 'get_module': {
-          const moduleName = (args as { name: string }).name;
+          const { name: moduleName, detail } = args as { name: string; detail?: 'summary' | 'full' };
           const contextPath = path.join(this.ticCodePath, 'modules', moduleName, 'context.md');
-          if (!fs.existsSync(contextPath)) {
-            const found = this.findModuleFuzzy(moduleName);
-            if (found) return respond({ content: [{ type: 'text', text: fs.readFileSync(found, 'utf8') }] });
+          const found = fs.existsSync(contextPath) ? contextPath : this.findModuleFuzzy(moduleName);
+          if (!found) {
             return respond({ content: [{ type: 'text', text: `Módulo "${moduleName}" não encontrado. Disponíveis: ${this.listModuleNames().join(', ')}` }] });
           }
-          return respond({ content: [{ type: 'text', text: fs.readFileSync(contextPath, 'utf8') }] });
+          const full = fs.readFileSync(found, 'utf8');
+          return respond(textResult(detail === 'full' ? full : summarizeDoc(full, `get_module("${moduleName}", detail="full")`)));
         }
 
         case 'search_module': {
@@ -404,10 +649,15 @@ export class TicAnalyzerMcpServer {
           return respond({ content: [{ type: 'text', text: `# Módulo: ${best.name}\n\n${content}` }] });
         }
 
-        case 'get_multigraph': return respond({ content: [{ type: 'text', text: this.readFile('multigraph.md') }] });
+        case 'get_multigraph': {
+          const detail = (args as { detail?: 'summary' | 'full' } | undefined)?.detail;
+          const full = this.readFile('multigraph.md');
+          return respond(textResult(detail === 'full' ? full : summarizeDoc(full, 'get_multigraph(detail="full")')));
+        }
         case 'get_diagram': return respond({ content: [{ type: 'text', text: this.readFile('diagram.md') }] });
         case 'get_openapi': return respond({ content: [{ type: 'text', text: this.readFile('openapi.yaml') }] });
         case 'get_gaps': return respond({ content: [{ type: 'text', text: this.readFile('gaps.md') }] });
+        case 'get_graph_report': return respond(textResult(summarizeDoc(this.readFile('graph-report.md'), 'get_graph_report')));
         case 'get_permissions': return respond({ content: [{ type: 'text', text: this.readFile('permissions.md') }] });
         case 'get_inheritance': return respond({ content: [{ type: 'text', text: this.readFile('inheritance.md') }] });
 
@@ -492,6 +742,466 @@ export class TicAnalyzerMcpServer {
           ].filter((l) => l !== undefined);
 
           return respond({ content: [{ type: 'text', text: lines.join('\n') }] });
+        }
+
+        case 'get_impact_of': {
+          const { entity, max_depth } = args as { entity: string; max_depth?: number };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const r = queryImpactOf(db, entity, { maxDepth: max_depth });
+            if (!r) return respond(textResult(`Entidade "${entity}" não encontrada no grafo de impacto. Tente o caminho do arquivo, "PKG.PROCEDURE", "TABELA" ou "TABELA.COLUNA".`));
+            return respond(textResult(formatImpactOf(r)));
+          } finally { db.close(); }
+        }
+
+        case 'get_blast_radius': {
+          const { entity } = args as { entity: string };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const r = queryBlastRadius(db, entity);
+            if (!r) return respond(textResult(`Entidade "${entity}" não encontrada no grafo de impacto.`));
+            return respond(textResult(formatBlastRadius(r)));
+          } finally { db.close(); }
+        }
+
+        case 'get_impact_path': {
+          const { from, to, max_paths, direction } = args as { from: string; to: string; max_paths?: number; direction?: 'impact' | 'depends' };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const r = queryImpactPath(db, from, to, { maxPaths: max_paths, direction });
+            if (!r) return respond(textResult(`Não foi possível resolver "${from}" e/ou "${to}" no grafo de impacto. Use o caminho do arquivo, "PKG.PROCEDURE", "TABELA" ou "TABELA.COLUNA".`));
+            return respond(textResult(formatImpactPath(r)));
+          } finally { db.close(); }
+        }
+
+        case 'get_table_impact': {
+          const { table, column } = args as { table: string; column?: string };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const id = column ? `column:${table.toUpperCase()}.${column.toUpperCase()}` : `table:${table.toUpperCase()}`;
+            const r = queryBlastRadius(db, id);
+            if (!r) {
+              // fallback: resolução por nome livre
+              const fuzzy = queryBlastRadius(db, column ? `${table}.${column}` : table);
+              if (fuzzy) return respond(textResult(formatBlastRadius(fuzzy)));
+              return respond(textResult(`Tabela/coluna "${column ? `${table}.${column}` : table}" não encontrada no grafo de impacto.`));
+            }
+            return respond(textResult(formatBlastRadius(r)));
+          } finally { db.close(); }
+        }
+
+        case 'get_graph_level': {
+          const expanded = ((args as { expanded?: string[] } | undefined)?.expanded ?? []).filter((e) => typeof e === 'string');
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const hasModules = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='modules'").get();
+            const hasLayer = hasModules && (db.prepare('PRAGMA table_info(files)').all() as any[]).some((c: any) => c.name === 'layer');
+            if (!hasLayer) return respond(textResult('index.db antigo (sem agregação por módulo/camada). Execute a análise novamente.'));
+            const level = queryGraphLevel(db, { expanded });
+            const lines = [
+              `# Grafo agregado${expanded.length ? ` (expandido: ${expanded.join(', ')})` : ' (visão por camadas)'}`,
+              '',
+              '## Nós',
+              ...level.nodes.slice(0, 80).map((n) => `- [${n.kind}] \`${n.id.slice(n.id.indexOf(':') + 1)}\`${(n as any).role ? ` [${(n as any).role}]` : ''} — ${n.childCount > 0 ? `${n.childCount} filhos, ` : ''}in ${n.inWeight} / out ${n.outWeight}`),
+              level.nodes.length > 80 ? `- ... e mais ${level.nodes.length - 80} nós` : '',
+              '',
+              '## Arestas (peso = dependências agregadas)',
+              ...level.edges
+                .sort((a, b) => b.weight - a.weight)
+                .slice(0, 60)
+                .map((e) => `- \`${e.from.slice(e.from.indexOf(':') + 1)}\` → \`${e.to.slice(e.to.indexOf(':') + 1)}\` (${e.weight}${e.resolvedWeight < e.weight ? `, ${e.resolvedWeight} resolvidas` : ''})`),
+              level.edges.length > 60 ? `- ... e mais ${level.edges.length - 60} arestas` : '',
+              '',
+              '> Para detalhar: get_graph_level(expanded=[..., "module:<nome>"]).'
+            ].filter(Boolean);
+            return respond(textResult(lines.join('\n')));
+          } finally { db.close(); }
+        }
+
+        case 'get_communities': {
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const r = queryCommunities(db);
+            if (!r) return respond(textResult('index.db antigo (sem comunidades). Execute a análise novamente para detectar clusters (Louvain).'));
+            if (r.communities.length === 0) return respond(textResult('Nenhuma comunidade detectada (grafo de impacto sem arestas).'));
+            const lines = [
+              `# Comunidades do grafo (Louvain) — ${r.communities.length} clusters`,
+              '',
+              'Clusters por topologia (nós que conversam muito), não por pasta.',
+              '',
+              '| # | Comunidade | Tamanho | Composição |',
+              '| --- | --- | --- | --- |',
+              ...r.communities.map((c) => `| ${c.id} | ${c.name} | ${c.size} | ${Object.entries(c.byKind).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k}:${v}`).join(', ')} |`)
+            ];
+            if (r.coupling.length > 0) {
+              lines.push('', '## Acoplamentos cross-cluster (pontes entre domínios)', '');
+              for (const c of r.coupling.slice(0, 12)) {
+                lines.push(`- \`${c.fromName}\` ↔ \`${c.toName}\` — ${c.weight} arestas`);
+              }
+            }
+            return respond(textResult(lines.join('\n')));
+          } finally { db.close(); }
+        }
+
+        case 'list_http_flows': {
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const rows = db.prepare(
+              `SELECT from_id, to_id, label FROM cg_edges WHERE type = 'HTTP_CALL' LIMIT 500`
+            ).all() as Array<{ from_id: string; to_id: string; label: string | null }>;
+            const flows = rows.map((r) => {
+              let url: string | undefined; let method: string | undefined;
+              try { const m = r.label ? JSON.parse(r.label) : {}; url = m.url; method = m.method; } catch {}
+              return { from: r.from_id, to: r.to_id, url, method };
+            });
+            const lines = [
+              `# HTTP Flows (${flows.length} chamadas)`,
+              '',
+              ...flows.slice(0, 50).map((f) => `- \`${f.from}\` → \`${f.to}\`${f.method ? ` [${f.method}]` : ''}${f.url ? ` ${f.url}` : ''}`),
+              flows.length > 50 ? `... e mais ${flows.length - 50} chamadas` : '',
+            ].filter(Boolean);
+            return respond(textResult(lines.join('\n')));
+          } finally { db.close(); }
+        }
+
+        case 'get_arch_rules': {
+          const data = this.readJson('arch-violations.json');
+          if (!data) return respond(textResult('arch-violations.json não encontrado. Execute a análise novamente.'));
+          const rules = (data.rules ?? []) as any[];
+          const violations = (data.violations ?? []) as any[];
+          const lines = [
+            `# Regras de Arquitetura (${rules.length} regra(s), ${violations.length} violação(ões))`,
+            '',
+            ...(rules.length === 0
+              ? ['Sem `.tic-rules.json` na raiz do projeto — exemplo disponível em `.tic-code/tic-rules.example.json`.']
+              : rules.map((r: any) => {
+                const v = violations.filter((x: any) => x.ruleId === r.id);
+                return `- ${v.length === 0 ? '✅' : '❌'} **${r.id}** (${r.severity})${r.description ? ` — ${r.description}` : ''}${v.length > 0 ? ` · ${v.length} violação(ões)` : ''}`;
+              })),
+            '',
+            ...(violations.length > 0 ? ['## Violações', ...violations.slice(0, 20).map((v: any) => `- ${v.severity === 'error' ? '🔴' : '🟡'} ${v.ruleId}: \`${v.from}\` → \`${v.to}\``)] : [])
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'get_arch_suggestions': {
+          const data = this.readJson('arch-suggestions.json');
+          if (!data || !Array.isArray(data) || data.length === 0) {
+            return respond(textResult('Nenhum candidato a melhoria arquitetural encontrado (ou análise desatualizada). 🎉'));
+          }
+          const lines = [
+            '# Oportunidades de melhoria arquitetural (deepening)',
+            '',
+            ...data.map((c: any, i: number) => [
+              `## ${i + 1}. [${c.strength}] ${c.kind} — ${c.files.map((f: string) => `\`${f}\``).join(', ')}`,
+              `- **Problema:** ${c.problem}`,
+              `- **Solução:** ${c.solution}`,
+              `- **Benefícios:** ${c.benefits}`
+            ].join('\n')),
+            '',
+            '> Relatório HTML completo: botão "Relatório de arquitetura" no app. Não proponha interfaces ainda — escolha um candidato e faça o grilling.'
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'get_risk_prediction': {
+          const limit = (args as { limit?: number } | undefined)?.limit ?? 10;
+          const data = this.readJson('risk-prediction.json');
+          if (!data || !Array.isArray(data) || data.length === 0) {
+            return respond(textResult('Sem predição de risco (projeto sem histórico git ou análise desatualizada).'));
+          }
+          const lines = [
+            '# Predição de risco — onde o próximo bug tende a nascer',
+            '',
+            '| Arquivo | Score | Motivos |',
+            '| --- | --- | --- |',
+            ...data.slice(0, limit).map((p: any) => `| \`${p.file}\` | ${p.score} | ${(p.reasons ?? []).join(', ')} |`),
+            '',
+            '> Score = churn 90d (40%) + commits de fix (20%) + complexidade (20%) + acoplamento (20%), normalizados.'
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'get_agent_brief': {
+          const { entity } = args as { entity: string };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            // Aceita id de item de triagem (resolve para a entidade dele)
+            const triage = loadTriage(this.ticCodePath).find((t) => t.id === entity);
+            const target = triage?.entity ?? triage?.title ?? entity;
+            const archData = this.readJson('arch-violations.json');
+            const brief = buildAgentBrief(db, this.ticCodePath, target, {
+              category: triage?.category,
+              summary: triage?.title,
+              detail: triage?.detail,
+              outOfScope: archData?.outOfScope ?? []
+            });
+            if (!brief) return respond(textResult(`Entidade "${entity}" não encontrada no grafo de impacto.`));
+            // Injeta memória persistente ao final do brief.
+            const memories = queryMemory(this.ticCodePath, target);
+            if (memories.length === 0) return respond(textResult(brief));
+            const memLines = [`\n## Tentativas Anteriores`, `*${memories.length} entrada(s) na memória persistente*`, ''];
+            for (const m of memories.slice(0, 5)) {
+              const tag = m.result ? ` → **${m.result}**` : '';
+              memLines.push(`- **[${m.kind}]** ${m.summary}${tag} *(${m.ts.slice(0, 10)})*`);
+              if (m.detail) memLines.push(`  > ${m.detail}`);
+            }
+            return respond(textResult(brief + memLines.join('\n')));
+          } finally { db.close(); }
+        }
+
+        case 'get_diagnosis': {
+          const { from, to } = args as { from: string; to?: string };
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const diag = buildDiagnosis(db, this.ticCodePath, from, to);
+            if (!diag) return respond(textResult(`Entidade "${from}" não encontrada no grafo.`));
+            return respond(textResult(diag));
+          } finally { db.close(); }
+        }
+
+        case 'get_zoom_out': {
+          const entity = (args as { entity?: string } | undefined)?.entity;
+          if (!entity) {
+            return respond(textResult(this.readFile('zoom-out.md')));
+          }
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(noIndexDb());
+          try {
+            const r = queryImpactOf(db, entity, { maxDepth: 3 });
+            if (!r) return respond(textResult(`Entidade "${entity}" não encontrada.`));
+            const file = r.entity.startsWith('file:') ? r.entity.slice(5) : null;
+            const home = file ? (db.prepare('SELECT module, layer FROM files WHERE rel_path = ?').get(file) as any) : null;
+            const byModule = Object.entries(r.byModule).sort((a, b) => b[1] - a[1]).slice(0, 8);
+            const lines = [
+              `# Zoom-out: \`${r.entity.slice(r.entity.indexOf(':') + 1)}\``,
+              '',
+              home ? `Pertence ao módulo **${home.module ?? '—'}** (camada ${home.layer ?? '—'}).` : `Entidade da camada de dados/banco.`,
+              '',
+              '## Quem depende desta parte (agregado por módulo)',
+              ...(byModule.length > 0 ? byModule.map(([m, c]) => `- **${m}** — ${c} ponto(s) de dependência`) : ['- Ninguém depende diretamente (folha do grafo).']),
+              '',
+              `No total, ${r.totalVisited} entidade(s) em até 3 saltos (${Object.entries(r.byKind).map(([k, v]) => `${k}: ${v}`).join(', ')}).`,
+              '',
+              '> Visão macro do sistema inteiro: get_zoom_out() sem parâmetro. Detalhe: get_blast_radius/get_impact_of.'
+            ];
+            return respond(textResult(lines.join('\n')));
+          } finally { db.close(); }
+        }
+
+        case 'get_out_of_scope': {
+          const data = this.readJson('arch-violations.json');
+          const decisions = (data?.outOfScope ?? []) as any[];
+          if (decisions.length === 0) return respond(textResult('Nenhuma decisão out-of-scope registrada. Adicione em `.tic-rules.json` → `outOfScope`.'));
+          return respond(textResult([
+            '# Decisões out-of-scope registradas (não rediscutir sem motivo novo)',
+            '',
+            ...decisions.map((d: any) => `- **${d.id}**${d.date ? ` (${d.date})` : ''}: ${d.decision}${d.reason ? ` — _${d.reason}_` : ''}`)
+          ].join('\n')));
+        }
+
+        case 'list_triage': {
+          const { state, category } = (args ?? {}) as { state?: string; category?: string };
+          let items = loadTriage(this.ticCodePath);
+          if (state) items = items.filter((i) => i.state === state);
+          if (category) items = items.filter((i) => i.category === category);
+          if (items.length === 0) return respond(textResult('Fila de triagem vazia para esse filtro.'));
+          const lines = [
+            `# Fila de triagem (${items.length} item(ns))`,
+            '',
+            '| Id | Título | Categoria | Estado | Prioridade |',
+            '| --- | --- | --- | --- | --- |',
+            ...items.slice(0, 30).map((i) => `| \`${i.id}\` | ${i.title} | ${i.category} | ${i.state} | ${i.priority} |`),
+            '',
+            '> Brief completo de um item: get_agent_brief(id). Transição: update_triage(id, state=...).'
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'update_triage': {
+          const { id, state, category, priority } = args as { id: string; state?: string; category?: string; priority?: string };
+          const r = transitionTriageItem(this.ticCodePath, id, {
+            state: state as TriageState | undefined,
+            category: category as TriageCategory | undefined,
+            priority: priority as TriagePriority | undefined
+          });
+          if (!r.ok) return respond(textResult(`❌ ${r.error}`));
+          return respond(textResult(`✅ Item \`${id}\` atualizado: estado=${r.item!.state}, categoria=${r.item!.category}, prioridade=${r.item!.priority}`));
+        }
+
+        case 'remember': {
+          const { entity, kind, summary, detail, result, refs } = args as {
+            entity: string; kind: MemoryKind; summary: string;
+            detail?: string; result?: MemoryResult; refs?: string[];
+          };
+          const entry = appendMemory(this.ticCodePath, { entity, kind, summary, detail, result, refs });
+          return respond(textResult(`Registrado (${entry.id}): [${kind}] ${summary}`));
+        }
+
+        case 'recall': {
+          const { entity } = args as { entity: string };
+          const entries = queryMemory(this.ticCodePath, entity);
+          if (entries.length === 0) return respond(textResult(`Nenhuma memória registrada para "${entity}".`));
+          const lines = [`## Memória: ${entity}`, `*${entries.length} entrada(s) — mais recentes primeiro*`, ''];
+          for (const e of entries) {
+            const resultTag = e.result ? ` → **${e.result}**` : '';
+            lines.push(`### [${e.kind}] ${e.summary}${resultTag}`);
+            lines.push(`*${e.ts.slice(0, 10)} · source: ${e.source ?? 'agent'}*`);
+            if (e.detail) lines.push(`> ${e.detail}`);
+            if (e.refs?.length) lines.push(`refs: ${e.refs.join(', ')}`);
+            lines.push('');
+          }
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'list_http_flows': {
+          const flowDb = openIndexDb(this.indexDbPath);
+          if (!flowDb) return respond(noIndexDb());
+          try {
+            const rows = flowDb.prepare(
+              "SELECT from_id, to_id, type, label FROM cg_edges WHERE type = 'HTTP_CALL' LIMIT 500"
+            ).all() as Array<{ from_id: string; to_id: string; type: string; label: string | null }>;
+            if (rows.length === 0) return respond(textResult('Nenhuma chamada HTTP cross-tier detectada. O projeto precisa ter fetch/axios/HttpClient no frontend e endpoints no backend.'));
+            const byFrom = new Map<string, typeof rows>();
+            for (const r of rows) {
+              if (!byFrom.has(r.from_id)) byFrom.set(r.from_id, []);
+              byFrom.get(r.from_id)!.push(r);
+            }
+            const lines: string[] = [`# HTTP Flows Cross-Tier (${rows.length} chamada(s))`, ''];
+            for (const [from, calls] of byFrom) {
+              lines.push(`## ${from}`);
+              for (const c of calls) {
+                const label = c.label ? ` (${c.label})` : '';
+                lines.push(`- → \`${c.to_id}\`${label}`);
+              }
+              lines.push('');
+            }
+            return respond(textResult(lines.join('\n')));
+          } finally { flowDb.close(); }
+        }
+
+        case 'get_portfolio': {
+          const projects = loadPortfolio();
+          if (projects.length === 0) return respond(textResult('Portfólio vazio. Analise um ou mais projetos para popular a visão executiva.'));
+          const lines = [
+            `# Portfólio — ${projects.length} projeto(s) (pior saúde primeiro)`,
+            '',
+            '| Projeto | Health | Arquivos | Críticos/Altos | Drift | Custo dívida |',
+            '| --- | --- | --- | --- | --- | --- |',
+            ...projects.map((p) => `| ${p.name} | ${p.healthScore ?? '—'}${p.healthGrade ? ` ${p.healthGrade}` : ''} | ${p.totalFiles.toLocaleString()} | ${p.risks.critical}/${p.risks.high} | ${p.archErrors} | ${p.debtCost !== null ? `${p.currency} ${p.debtCost.toLocaleString()}` : '—'} |`)
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'get_roi': {
+          const roi = this.readJson('roi.json');
+          if (!roi) return respond(textResult('roi.json não encontrado. Execute a análise novamente.'));
+          const m = (n: number) => `${roi.currency} ${n.toLocaleString()}`;
+          const lines = [
+            '# ROI — tempo & custo',
+            '',
+            `- **Dívida técnica:** ${roi.devDays} dev-days para sanear (${m(roi.debtCost)} · ${roi.remediationHours}h @ ${m(roi.hourlyRate)}/h)`,
+            `- **Economizado pelos PRs:** ${roi.hoursSaved}h (${m(roi.savedCost)}) em investigação de impacto evitada`,
+            `- **Saldo:** ${m(roi.net)} ${roi.net >= 0 ? '(a ferramenta já se pagou)' : ''}`,
+            '',
+            '## Custo da dívida por módulo',
+            ...(roi.byModule ?? []).slice(0, 10).map((x: any) => `- ${x.module}: ${m(x.cost)} (${x.hours}h)`),
+            '',
+            '> Estimativas ancoradas no débito técnico e na taxa-hora configurada (.tic-rules.json → roi).'
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'get_ownership': {
+          const own = this.readJson('ownership.json');
+          if (!own) return respond(textResult('ownership.json não encontrado (projeto sem git ou análise desatualizada).'));
+          const entity = (args as { entity?: string } | undefined)?.entity;
+          if (entity) {
+            const fileOwner = own.fileOwner ?? {};
+            const exact = fileOwner[entity];
+            const mod = (own.modules ?? []).find((m: any) => m.module === entity);
+            if (mod) return respond(textResult(`Módulo **${mod.module}**: dono **${mod.primaryOwner}** (${mod.ownershipPct}%), ${mod.authorCount} autor(es), bus-factor ${mod.busFactor}, onboarding ~${mod.onboardingHours}h (${mod.difficulty}).`));
+            if (exact) return respond(textResult(`\`${entity}\` — dono provável: **${exact}**.`));
+            const partial = Object.keys(fileOwner).find((f) => f.endsWith(entity));
+            return respond(textResult(partial ? `\`${partial}\` — dono provável: **${fileOwner[partial]}**.` : `Sem dados de ownership para "${entity}".`));
+          }
+          const lines = [
+            '# Ownership & bus-factor',
+            '',
+            '## Onboarding por módulo (mais difícil primeiro)',
+            ...(own.modules ?? []).slice(0, 10).map((m: any) => `- **${m.module}** — dono ${m.primaryOwner} (${m.ownershipPct}%), bus-factor ${m.busFactor}, ~${m.onboardingHours}h (${m.difficulty})`),
+            '',
+            '## 🧠 Conhecimento em risco (1 só autor + alto impacto)',
+            ...(own.knowledgeRisk ?? []).slice(0, 10).map((k: any) => `- \`${k.file}\` — só **${k.author}** (${k.reason})`),
+            ...(own.startHere?.length ? ['', `**Comece por aqui (onboarding):** ${own.startHere.join(', ')}`] : [])
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'suggest_reviewers': {
+          const files = ((args as { files?: string[] }).files ?? []).filter((f) => typeof f === 'string');
+          const own = this.readJson('ownership.json');
+          if (!own?.fileOwner) return respond(textResult('Sem dados de ownership (projeto sem git ou análise desatualizada).'));
+          const out = suggestReviewers(own.fileOwner, files);
+          if (out.length === 0) return respond(textResult('Nenhum dono identificado para os arquivos informados.'));
+          return respond(textResult([
+            '# Revisores sugeridos',
+            '',
+            ...out.map((r) => `- **${r.author}** — ${r.files.length} arquivo(s): ${r.files.slice(0, 5).map((f) => `\`${f}\``).join(', ')}`)
+          ].join('\n')));
+        }
+
+        case 'get_activity': {
+          const limit = (args as { limit?: number } | undefined)?.limit ?? 20;
+          const events = loadActivity(this.ticCodePath, limit);
+          if (events.length === 0) return respond(textResult('Nenhuma atividade registrada ainda. Rode uma análise.'));
+          const icon = (s: string) => (s === 'critical' ? '🔴' : s === 'warn' ? '🟠' : 'ℹ️');
+          const lines = [
+            `# Atividade recente (${events.length} evento(s))`,
+            '',
+            ...[...events].reverse().map((e) => `- ${icon(e.severity)} \`${new Date(e.ts).toLocaleString('pt-BR')}\` **${e.title}**${e.detail ? ` — ${e.detail}` : ''}`)
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'get_health': {
+          const snapPath = path.join(this.ticCodePath, 'snapshots.json');
+          if (!fs.existsSync(snapPath)) {
+            return respond(textResult('snapshots.json não encontrado. Execute a análise novamente (versão atual gera health score).'));
+          }
+          let snaps: any[] = [];
+          try { snaps = JSON.parse(fs.readFileSync(snapPath, 'utf8')); } catch { /* corrompido */ }
+          if (!Array.isArray(snaps) || snaps.length === 0) {
+            return respond(textResult('Nenhum snapshot de health disponível. Execute a análise.'));
+          }
+          const cur = snaps[snaps.length - 1];
+          const prev = snaps.length > 1 ? snaps[snaps.length - 2] : null;
+          const delta = prev ? Math.round((cur.score - prev.score) * 10) / 10 : null;
+          const lines = [
+            `# Health Score: ${cur.score}/100 (grade ${cur.grade})`,
+            delta !== null ? `Δ vs análise anterior: ${delta > 0 ? '+' : ''}${delta} (era ${prev.score})` : '(primeira análise — sem histórico)',
+            `Analisado em: ${cur.timestamp}${cur.gitSha ? ` · git ${String(cur.gitSha).slice(0, 8)}` : ''}`,
+            '',
+            '## Penalidades por dimensão',
+            '| Dimensão | Penalidade | Bruto |',
+            '| --- | --- | --- |',
+            ...Object.entries(cur.breakdown as Record<string, { penalty: number; raw: number; max: number }>)
+              .sort((a, b) => b[1].penalty - a[1].penalty)
+              .map(([k, v]) => `| ${k} | -${v.penalty} (máx ${v.max}) | ${v.raw} |`),
+            '',
+            `Contagens: riscos ${cur.counts.risks} · violações ${cur.counts.violations} · hotspots ${cur.counts.hotspots} · dead code ${cur.counts.deadComponents + cur.counts.deadPlsql} · arestas resolvidas ${cur.counts.resolvedEdges}/${cur.counts.totalEdges}`,
+            `Histórico: ${snaps.length} análise(s) em snapshots.json`
+          ];
+          return respond(textResult(lines.join('\n')));
         }
 
         case 'get_metrics': {
@@ -633,6 +1343,44 @@ export class TicAnalyzerMcpServer {
 
           if (changedFiles.length === 0) {
             return respond({ content: [{ type: 'text', text: '✅ Nenhuma mudança detectada no git (working tree limpa).' }] });
+          }
+
+          // Caminho preferido: grafo de impacto unificado (atravessa PL/SQL,
+          // tabelas e colunas — não só imports). Fallback: impact-index.json.
+          const diffDb = openIndexDb(this.indexDbPath);
+          if (diffDb) {
+            try {
+              const hasImpact = !!diffDb.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='impact_edges'").get();
+              if (hasImpact) {
+                const lines: string[] = [
+                  '# Impacto das Mudanças Atuais (git diff, cross-tier)',
+                  '',
+                  `${changedFiles.length} arquivo(s) modificado(s):`,
+                  ''
+                ];
+                const allAffected = new Set<string>();
+                const kindTotals: Record<string, number> = {};
+                for (const file of changedFiles.slice(0, 30)) {
+                  const r = queryBlastRadius(diffDb, file, 5);
+                  if (!r || r.totalAffected === 0) {
+                    lines.push(`**\`${file}\`** — sem dependentes mapeados`);
+                    continue;
+                  }
+                  lines.push(`**\`${file}\`** — ${r.totalAffected} afetados (${countsLine(r.byKind)})`);
+                  for (const t of r.top.slice(0, 3)) lines.push(`  • \`${shortId(t.id)}\` (${t.dependents} dependentes)`);
+                  for (const [k, v] of Object.entries(r.byKind)) kindTotals[k] = (kindTotals[k] ?? 0) + v;
+                  const full = queryImpactOf(diffDb, file);
+                  for (const n of full?.affected ?? []) allAffected.add(n.id);
+                }
+                for (const f of changedFiles) allAffected.delete(`file:${f}`);
+                if (changedFiles.length > 30) lines.push(`... e mais ${changedFiles.length - 30} arquivos modificados (analisados os 30 primeiros)`);
+                lines.push('', '---', `**Impacto consolidado (união, sem duplicatas): ${allAffected.size} entidades**`);
+                lines.push('> Detalhe por entidade: get_impact_of(entity) / get_blast_radius(entity).');
+                return respond({ content: [{ type: 'text', text: lines.join('\n') }] });
+              }
+            } finally {
+              diffDb.close();
+            }
           }
 
           const index: ImpactIndex = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
@@ -1044,13 +1792,83 @@ export class TicAnalyzerMcpServer {
 
         case 'search_code': {
           const query = ((args as { query: string }).query ?? '').trim();
-          const semantic = await this.searchSemanticTool(query);
-          return respond({ content: [{ type: 'text', text: semantic ?? this.searchCodeTool(query) }] });
+          return respond({ content: [{ type: 'text', text: await this.searchCodeFused(query) }] });
         }
 
         case 'get_concept_map': {
           const concept = ((args as { concept: string }).concept ?? '').trim();
           return respond({ content: [{ type: 'text', text: this.getConceptMapTool(concept) }] });
+        }
+
+        case 'explain_file': {
+          const filePath = ((args as { path: string }).path ?? '').trim();
+          const db = openIndexDb(this.indexDbPath);
+          if (!db) return respond(textResult('index.db não encontrado. Execute a análise primeiro.'));
+          try {
+            const summary = getFileSummary(db, filePath);
+            if (!summary) {
+              return respond(textResult(`Arquivo "${filePath}" não encontrado no índice. Verifique o caminho relativo.`));
+            }
+            return respond(textResult(JSON.stringify(summary, null, 2)));
+          } finally {
+            db.close();
+          }
+        }
+
+        case 'get_entry_points': {
+          const lines: string[] = ['# Entry Points\n'];
+
+          // REST endpoints from analysis.json
+          const analysisPath = path.join(this.ticCodePath, 'analysis.json');
+          if (fs.existsSync(analysisPath)) {
+            type Ep = { method: string; path: string; file: string; line: number; controller?: string };
+            type Bj = { file: string; line: number; className?: string; methodName?: string; type: string; cron?: string; fixedRate?: string };
+            const analysis = JSON.parse(fs.readFileSync(analysisPath, 'utf8')) as { endpoints?: Ep[]; batchJobs?: Bj[] };
+
+            const endpoints: Ep[] = analysis.endpoints ?? [];
+            if (endpoints.length > 0) {
+              lines.push(`## REST Endpoints (${endpoints.length})\n`);
+              for (const ep of endpoints.slice(0, 40)) {
+                lines.push(`- \`${ep.method} ${ep.path}\` → ${ep.file}:${ep.line}${ep.controller ? ` (${ep.controller})` : ''}`);
+              }
+              if (endpoints.length > 40) lines.push(`… e mais ${endpoints.length - 40}`);
+              lines.push('');
+            }
+
+            const jobs: Bj[] = analysis.batchJobs ?? [];
+            if (jobs.length > 0) {
+              lines.push(`## Batch Jobs (${jobs.length})\n`);
+              for (const j of jobs.slice(0, 20)) {
+                const label = j.methodName ? `${j.className ?? '?'}.${j.methodName}` : (j.className ?? path.basename(j.file));
+                const detail = j.cron ? ` cron="${j.cron}"` : j.fixedRate ? ` fixedRate=${j.fixedRate}ms` : '';
+                lines.push(`- \`${j.type}\` ${label}${detail} → ${j.file}:${j.line}`);
+              }
+              lines.push('');
+            }
+          }
+
+          // Frontend root components from SQLite (inDegree=0, frontend layer)
+          const db = openIndexDb(this.indexDbPath);
+          if (db) {
+            try {
+              const roots = db.prepare(
+                `SELECT rel_path FROM files WHERE layer = 'frontend' AND in_degree = 0 AND ext IN ('.tsx','.ts','.vue','.svelte') ORDER BY out_degree DESC LIMIT 30`
+              ).all() as Array<{ rel_path: string }>;
+              if (roots.length > 0) {
+                lines.push(`## Frontend Root Components (${roots.length})\n`);
+                for (const r of roots) lines.push(`- ${r.rel_path}`);
+                lines.push('');
+              }
+            } finally {
+              db.close();
+            }
+          }
+
+          if (lines.length === 1) {
+            lines.push('Nenhum entry point detectado. Execute a análise primeiro.');
+          }
+
+          return respond(textResult(lines.join('\n')));
         }
 
         default:
@@ -1065,6 +1883,14 @@ export class TicAnalyzerMcpServer {
       return `Arquivo não encontrado: ${fullPath}\nExecute o TIC Analyzer para gerar os artefatos.`;
     }
     return fs.readFileSync(fullPath, 'utf8');
+  }
+
+  private readJson(relativePath: string): any | null {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(this.ticCodePath, relativePath), 'utf8'));
+    } catch {
+      return null;
+    }
   }
 
   private listModuleNames(): string[] {
@@ -1374,8 +2200,54 @@ export class TicAnalyzerMcpServer {
   }
 
   /**
+   * Busca híbrida: tenta fundir FTS5 e vetorial via RRF quando há embeddings.
+   * Fallback: FTS puro quando o modelo ou os embeddings não estão disponíveis.
+   */
+  private async searchCodeFused(query: string): Promise<string> {
+    if (!query) return 'Informe um query para busca.';
+    const tokens = this.tokenizeQuery(query);
+    if (tokens.length === 0) return 'Query muito curta. Use pelo menos 3 caracteres.';
+    const db = openIndexDb(this.indexDbPath);
+    if (!db) return this.searchCodeTool(query);
+    try {
+      const ftsHits = querySearch(db, tokens, 20);
+      let hits: FusedHit[] | null = null;
+      if (embeddingsCount(db) > 0) {
+        const embedder = await getEmbedder();
+        if (embedder) {
+          const [qvec] = await embedder([query]);
+          const vecHits = queryVectorSearch(db, qvec, 20);
+          hits = fuseRRF(ftsHits, vecHits, 60, 10);
+        }
+      }
+      if (!hits) {
+        // Sem embeddings: usa FTS puro convertido para FusedHit.
+        hits = ftsHits.slice(0, 10).map((h) => ({ ...h, origin: 'fts' as const }));
+      }
+      if (hits.length === 0) return `Nenhum arquivo encontrado para "${query}". Tente termos mais gerais.`;
+      const hasVec = hits.some((h) => h.origin !== 'fts');
+      const mode = hasVec ? 'FTS5 + vetorial (RRF)' : 'FTS5/BM25';
+      const lines: string[] = [
+        `## Resultados para: "${query}"`,
+        `*${hits.length} arquivos relevantes (${mode})*`,
+        ''
+      ];
+      for (const hit of hits) {
+        const originTag = hasVec ? ` [${hit.origin}]` : '';
+        lines.push(`### \`${hit.file}\`${originTag} (score: ${hit.score})`);
+        if (hit.snippet) lines.push(`> ${hit.snippet}`);
+        lines.push('');
+      }
+      return lines.join('\n');
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
    * Busca semântica via embeddings locais (Fase 4). Retorna null quando não há
    * embeddings no índice ou o modelo não está disponível — aí o caller usa FTS.
+   * @deprecated Use searchCodeFused() que agrega RRF.
    */
   private async searchSemanticTool(query: string): Promise<string | null> {
     if (!query) return null;
@@ -1609,19 +2481,71 @@ export class TicAnalyzerMcpServer {
     return lines.join('\n');
   }
 
-  async startHttp(port = 7432): Promise<void> {
+  /**
+   * @param host '127.0.0.1' (padrão, app local) ou '0.0.0.0' (modo servidor —
+   *             máquina dedicada servindo o time). Em rede, exija `authToken`.
+   * @param authToken se definido, toda chamada precisa de
+   *                  `Authorization: Bearer <token>` (exceto /health).
+   */
+  async startHttp(port = 7432, host = '127.0.0.1', authToken?: string): Promise<void> {
     const app = http.createServer(async (req, res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, Authorization');
       if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+      if (authToken && req.url !== '/health') {
+        // EventSource não envia headers → /events aceita ?token= na query
+        const url = new URL(req.url ?? '/', 'http://localhost');
+        const queryToken = url.searchParams.get('token');
+        const auth = req.headers.authorization ?? '';
+        if (auth !== `Bearer ${authToken}` && queryToken !== authToken) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'unauthorized: use Authorization: Bearer <token> (ou ?token= para /events)' }));
+          return;
+        }
+      }
       if (req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok', projectPath: this.projectPath, version: '2.0.0' }));
         return;
       }
+      // ── SSE: push ao vivo (analysis-complete + eventos de atividade) ──────────
+      if (req.url === '/events' || req.url?.startsWith('/events')) {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive'
+        });
+        res.write('retry: 5000\n\n');
+        this.sseClients.add(res);
+        const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* fechado */ } }, 25_000);
+        req.on('close', () => { clearInterval(ping); this.sseClients.delete(res); });
+        return;
+      }
       if (req.url === '/mcp' || req.url?.startsWith('/mcp')) {
         try {
+          const url = new URL(req.url ?? '/', 'http://localhost');
+          const sessionId = url.searchParams.get('sessionId');
+
+          // Old SSE protocol: GET opens the SSE stream
+          if (req.method === 'GET') {
+            const transport = new SSEServerTransport('/mcp', res);
+            const serverInstance = this.createServerInstance();
+            await serverInstance.connect(transport);
+            this.sseSessions.set(transport.sessionId, { transport, server: serverInstance });
+            req.on('close', () => { this.sseSessions.delete(transport.sessionId); });
+            await transport.start();
+            return;
+          }
+
+          // Old SSE protocol: POST with sessionId routes to existing session
+          if (sessionId && this.sseSessions.has(sessionId)) {
+            const session = this.sseSessions.get(sessionId)!;
+            await session.transport.handlePostMessage(req, res);
+            return;
+          }
+
+          // New Streamable HTTP protocol: stateless POST
           const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
           const serverInstance = this.createServerInstance();
           await serverInstance.connect(transport);
@@ -1645,8 +2569,9 @@ export class TicAnalyzerMcpServer {
     });
     this.httpServer = app;
     return new Promise((resolve, reject) => {
-      app.listen(port, '127.0.0.1', () => {
-        console.log(`TIC Analyzer MCP Server v2.0.0 em http://localhost:${port}/mcp`);
+      app.listen(port, host, () => {
+        const where = host === '127.0.0.1' ? 'localhost' : host;
+        console.log(`TIC Analyzer MCP Server v2.0.0 em http://${where}:${port}/mcp${authToken ? ' (auth: Bearer token)' : ''}`);
         resolve();
       });
       app.on('error', reject);
@@ -1663,6 +2588,129 @@ export class TicAnalyzerMcpServer {
   isRunning(): boolean {
     return this.httpServer?.listening ?? false;
   }
+
+  /** Push de um evento para todos os clientes SSE conectados em /events. */
+  emit(event: unknown): void {
+    const payload = `data: ${JSON.stringify(event)}\n\n`;
+    for (const res of this.sseClients) {
+      try { res.write(payload); } catch { this.sseClients.delete(res); }
+    }
+  }
+
+  sseClientCount(): number {
+    return this.sseClients.size;
+  }
+}
+
+// ── Helpers das tools de impacto cross-tier ──────────────────────────────────
+
+function textResult(text: string): { content: Array<{ type: string; text: string }> } {
+  return { content: [{ type: 'text', text }] };
+}
+
+function noIndexDb(): { content: Array<{ type: string; text: string }> } {
+  return textResult('index.db não encontrado. Execute a análise novamente (a versão atual gera o grafo de impacto unificado).');
+}
+
+const KIND_LABEL: Record<string, string> = {
+  file: 'Arquivos', method: 'Métodos', plsql: 'PL/SQL', table: 'Tabelas', column: 'Colunas'
+};
+
+function shortId(id: string): string {
+  if (id.startsWith('file:')) return id.slice(5);
+  if (id.startsWith('method:')) return id.slice(7);
+  return id.slice(id.indexOf(':') + 1);
+}
+
+function countsLine(byKind: Record<string, number>): string {
+  return Object.entries(byKind)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${KIND_LABEL[k] ?? k}: ${v}`)
+    .join(' | ');
+}
+
+function formatImpactOf(r: ImpactOfResult): string {
+  const lines = [
+    `# Impacto de \`${r.entity}\``,
+    '',
+    `**${r.totalVisited} entidades afetadas** — ${countsLine(r.byKind)}`,
+    r.truncated ? '⚠️ Resultado truncado (>2000 nós). Use get_blast_radius para o resumo ou max_depth para limitar.' : ''
+  ];
+  if (Object.keys(r.byModule).length > 0) {
+    lines.push('', '## Por módulo', ...Object.entries(r.byModule).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([m, c]) => `- ${m}: ${c}`));
+  }
+  const byDepth = new Map<number, ImpactOfResult['affected']>();
+  for (const n of r.affected) {
+    const arr = byDepth.get(n.depth) ?? [];
+    arr.push(n);
+    byDepth.set(n.depth, arr);
+  }
+  for (const [depth, nodes] of [...byDepth.entries()].sort((a, b) => a[0] - b[0]).slice(0, 6)) {
+    lines.push('', `## ${depth} salto(s)`);
+    for (const n of nodes.slice(0, 25)) {
+      lines.push(`- ${n.confidence === 'inferred' ? '🟡' : '🟢'} \`${shortId(n.id)}\`${n.module ? ` (${n.module})` : ''}`);
+    }
+    if (nodes.length > 25) lines.push(`- ... e mais ${nodes.length - 25} nesta profundidade`);
+  }
+  if (r.candidates?.length) {
+    lines.push('', `> Outras entidades com esse nome: ${r.candidates.map(shortId).join(', ')}`);
+  }
+  return lines.filter((l) => l !== '').join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+function formatImpactPath(r: ImpactPathResult): string {
+  const lines = [`# Caminho de impacto: \`${shortId(r.from)}\` → \`${shortId(r.to)}\``, ''];
+  if (r.paths.length === 0) {
+    lines.push('Nenhum caminho encontrado no grafo de impacto entre as duas entidades.');
+    if (r.truncated) lines.push('⚠️ Busca truncada (>5000 nós) — pode haver caminho além do teto.');
+  } else {
+    lines.push(`**${r.hops} salto(s)** no caminho mais curto${r.paths.length > 1 ? ` — ${r.paths.length} rotas mostradas` : ''}.`);
+    r.paths.forEach((path, i) => {
+      lines.push('', r.paths.length > 1 ? `## Rota ${i + 1} (${path.length} saltos)` : '## Caminho');
+      lines.push(`\`${shortId(r.from)}\``);
+      for (const h of path) {
+        lines.push(`  ${h.confidence === 'inferred' ? '🟡' : '🟢'} --${h.via}--> \`${shortId(h.to)}\``);
+      }
+    });
+    if (r.truncated) lines.push('', '⚠️ Busca truncada (>5000 nós) — rotas adicionais podem existir.');
+  }
+  if (r.fromCandidates?.length) lines.push('', `> Origem ambígua, outras opções: ${r.fromCandidates.map(shortId).join(', ')}`);
+  if (r.toCandidates?.length) lines.push(`> Destino ambíguo, outras opções: ${r.toCandidates.map(shortId).join(', ')}`);
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+/**
+ * Resumo de documento markdown grande: corta em ~4000 chars num limite de
+ * seção e informa explicitamente como pedir o restante (a IA não fica cega).
+ */
+function summarizeDoc(content: string, fullHint: string): string {
+  const LIMIT = 4000;
+  if (content.length <= LIMIT) return content;
+  let cut = content.lastIndexOf('\n#', LIMIT);
+  if (cut < LIMIT / 2) cut = content.lastIndexOf('\n\n', LIMIT);
+  if (cut < LIMIT / 2) cut = LIMIT;
+  const omitted = content.length - cut;
+  return `${content.slice(0, cut)}\n\n---\n> ⚠️ Resumo truncado (~${Math.ceil(omitted / 4).toLocaleString()} tokens omitidos). Conteúdo completo: \`${fullHint}\`.`;
+}
+
+function formatBlastRadius(r: BlastRadiusResult): string {
+  const lines = [
+    `# Blast radius de \`${r.entity}\``,
+    '',
+    `**${r.totalAffected} entidades afetadas**${r.truncated ? ' (truncado em 2000 — há mais)' : ''} — ${countsLine(r.byKind)}`
+  ];
+  if (Object.keys(r.byModule).length > 0) {
+    lines.push(`Módulos: ${Object.entries(r.byModule).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([m, c]) => `${m} (${c})`).join(', ')}`);
+  }
+  if (r.top.length > 0) {
+    lines.push('', '## Mais críticos (por nº de dependentes)', '| Entidade | Tipo | Saltos | Dependentes |', '| --- | --- | --- | --- |');
+    for (const t of r.top) {
+      lines.push(`| \`${shortId(t.id)}\` | ${t.kind} | ${t.depth} | ${t.dependents} |`);
+    }
+  }
+  lines.push('', '> Detalhe completo: get_impact_of(entity). Lineage de colunas: get_table_columns(tabela).');
+  if (r.candidates?.length) lines.push(`> Outras entidades com esse nome: ${r.candidates.map(shortId).join(', ')}`);
+  return lines.join('\n');
 }
 
 function scoreMatch(moduleName: string, query: string): number {

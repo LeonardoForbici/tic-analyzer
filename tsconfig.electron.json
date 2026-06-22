@@ -17,6 +17,6 @@
       "@modelcontextprotocol/sdk/types.js": ["node_modules/@modelcontextprotocol/sdk/dist/esm/types"]
     }
   },
-  "include": ["electron/**/*", "src/analyzer/**/*", "src/mcp/**/*"],
+  "include": ["electron/**/*", "src/analyzer/**/*", "src/mcp/**/*", "src/cli/**/*"],
   "exclude": ["node_modules", "dist", "src/ui"]
 }

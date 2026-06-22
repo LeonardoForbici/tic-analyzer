@@ -34,6 +34,72 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
   getGitDiff: (projectPath: string): Promise<{ files: string[]; error?: string }> =>
     ipcRenderer.invoke('get-git-diff', projectPath),
 
+  getImpactOf: (projectPath: string, entity: string): Promise<unknown> =>
+    ipcRenderer.invoke('get-impact-of', projectPath, entity),
+
+  getGraphLevel: (projectPath: string, expanded: string[]): Promise<unknown> =>
+    ipcRenderer.invoke('get-graph-level', projectPath, expanded),
+
+  getUnifiedGraph: (projectPath: string, expanded: string[]): Promise<unknown> =>
+    ipcRenderer.invoke('get-unified-graph', projectPath, expanded),
+
+  exportGraph: (projectPath: string, format: 'html' | 'mermaid' | 'svg' | 'png', expanded: string[]): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('export-graph', projectPath, format, expanded),
+
+  searchCode: (projectPath: string, query: string): Promise<unknown> =>
+    ipcRenderer.invoke('search-code', projectPath, query),
+
+  updateTriage: (projectPath: string, id: string, changes: unknown): Promise<unknown> =>
+    ipcRenderer.invoke('update-triage', projectPath, id, changes),
+
+  createTriage: (projectPath: string, input: unknown): Promise<unknown> =>
+    ipcRenderer.invoke('create-triage', projectPath, input),
+
+  openArchReport: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('open-arch-report', projectPath),
+
+  setLiveMode: (projectPath: string, on: boolean): Promise<unknown> =>
+    ipcRenderer.invoke('set-live-mode', projectPath, on),
+
+  getActivity: (projectPath: string, limit?: number): Promise<unknown> =>
+    ipcRenderer.invoke('get-activity', projectPath, limit),
+
+  exportExecutiveReport: (projectPath: string, format: 'pdf' | 'html'): Promise<{ ok: boolean; path?: string; error?: string }> =>
+    ipcRenderer.invoke('export-executive-report', projectPath, format),
+
+  getPortfolio: (): Promise<unknown> =>
+    ipcRenderer.invoke('get-portfolio'),
+
+  removePortfolioProject: (id: string): Promise<unknown> =>
+    ipcRenderer.invoke('remove-portfolio-project', id),
+
+  analyzePortfolioProject: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('analyze-portfolio-project', projectPath),
+
+  setRoiConfig: (projectPath: string, cfg: { hourlyRate: number; currency: string }): Promise<unknown> =>
+    ipcRenderer.invoke('set-roi-config', projectPath, cfg),
+
+  getGithubStatus: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('get-github-status', projectPath),
+
+  installGithubWorkflow: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('install-github-workflow', projectPath),
+
+  createTicRules: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('create-tic-rules', projectPath),
+
+  onLiveStatus: (callback: (s: unknown) => void) => {
+    const handler = (_event: unknown, s: unknown) => callback(s);
+    ipcRenderer.on('live-status', handler);
+    return () => ipcRenderer.removeListener('live-status', handler);
+  },
+
+  onActivity: (callback: (event: unknown) => void) => {
+    const handler = (_event: unknown, e: unknown) => callback(e);
+    ipcRenderer.on('activity-event', handler);
+    return () => ipcRenderer.removeListener('activity-event', handler);
+  },
+
   getTokenStats: (): Promise<unknown> =>
     ipcRenderer.invoke('get-token-stats'),
 
@@ -44,5 +110,20 @@ contextBridge.exposeInMainWorld('ticAnalyzer', {
     const handler = (_event: unknown, entry: unknown) => callback(entry);
     ipcRenderer.on('mcp-token-update', handler);
     return () => ipcRenderer.removeListener('mcp-token-update', handler);
-  }
+  },
+
+  listHttpFlows: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('list-http-flows', projectPath),
+
+  getAgentBrief: (projectPath: string, entity: string): Promise<{ markdown?: string; entity?: string; error?: string }> =>
+    ipcRenderer.invoke('get-agent-brief', projectPath, entity),
+
+  getDiagnosis: (projectPath: string, from: string, to?: string): Promise<{ markdown?: string; error?: string }> =>
+    ipcRenderer.invoke('get-diagnosis', projectPath, from, to),
+
+  getZoomOut: (projectPath: string, entity?: string): Promise<{ markdown?: string; error?: string }> =>
+    ipcRenderer.invoke('get-zoom-out', projectPath, entity),
+
+  getSkillsOverview: (projectPath: string): Promise<unknown> =>
+    ipcRenderer.invoke('get-skills-overview', projectPath),
 });

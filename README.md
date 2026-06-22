@@ -1,300 +1,341 @@
 # TIC Analyzer
 
-Motor local de análise estática para projetos grandes — zero tokens de IA na fase de análise.
+**Analisador semântico de código e plataforma de governança de engenharia** — 100% local, zero tokens de IA na análise.
 
 ```
-código (74k+ arquivos) → engine local → resumo compacto → IA (mínimo de tokens)
+código (74k+ arquivos) → engine local → índice SQLite + resumos compactos → IA consulta o mínimo
 ```
+
+A ideia central: o trabalho pesado (AST, grafos, impacto, métricas, regras) é feito por um engine determinístico na sua máquina. A IA (Claude Code, Copilot) **pergunta primeiro ao MCP** e só lê arquivos quando realmente precisa — gastando uma fração dos tokens.
+
+---
+
+## O que ele responde
+
+- **"Se eu mexer aqui, o que quebra?"** — impacto de *qualquer* entidade: arquivo, método, procedure/function PL/SQL, tabela ou coluna, atravessando todas as camadas (coluna → trigger → procedure → DAO → endpoint → tela)
+- **"Por que X afeta Y?"** — caminho explicado salto a salto entre quaisquer duas entidades do grafo (arquivo, tabela, procedure, tela), com o tipo de cada ligação (`import`, `db-call`, `writes`...)
+- **"Quais são os nós mais críticos?"** — relatório de god nodes (hubs por grau), conexões surpreendentes entre camadas e chamadas MCP prontas para explorar
+- **"Que grupos naturais existem no código?"** — clusters detectados pela topologia real do grafo (Louvain), não pela estrutura de pastas; acoplamento entre clusters destacado
+- **"Como esse fluxo funciona?"** — trace ponta-a-ponta tela → endpoint → service → procedure → tabela
+- **"Esse PR é seguro?"** — review automático no GitHub com impacto, riscos novos, violações de regras de arquitetura e quality gates
+- **"A arquitetura está derivando?"** — regras escritas pelo arquiteto validadas a cada análise e a cada PR (architecture drift)
+- **"Onde nasce o próximo bug?"** — predição por churn do git × complexidade × acoplamento
+- **"O projeto está saudável?"** — health score 0–100 (A–E) com tendência histórica
+- **"O que precisa ser feito?"** — fila de triagem com máquina de estados e briefs prontos para agentes de IA
+
+---
 
 ## Stack
 
 | Camada | Tecnologia |
 |--------|-----------|
-| Desktop | Electron |
-| UI | React + Vite |
-| Linguagem | TypeScript |
-| Protocolo IA | MCP SDK (Model Context Protocol) |
+| Desktop | Electron (.exe / .dmg / .AppImage) |
+| UI | React + Vite (canvas próprio, sem libs de grafo) |
+| Engine | Node.js puro + tree-sitter (WASM, offline) |
+| Índice | SQLite (better-sqlite3) + FTS5 |
+| Protocolo IA | MCP (Model Context Protocol) HTTP/SSE |
+| CI | GitHub Action composite + CLI headless |
 
 ---
 
-## Como usar
+## Os 3 modos de uso
 
-1. Abrir o TIC Analyzer
-2. Selecionar a pasta raiz do projeto
-3. Clicar em **Analisar**
-4. (Opcional) Clicar em **Iniciar MCP** para expor as ferramentas ao Claude Code
-5. Configurar `.claude/settings.json` no projeto analisado:
+### 1. App desktop (dev individual)
+
+1. Abrir o TIC Analyzer → selecionar a pasta raiz do projeto → **Analisar**
+2. Explorar as abas: **Visão Geral · Saúde · Valor · Governança · Atividade · Explorador · Impacto · Métricas · Arquivos · Portfólio**
+3. (Opcional) **Iniciar MCP** e configurar no `.claude/settings.json` do projeto analisado:
+
+```json
+{ "mcpServers": { "tic-analyzer": { "url": "http://localhost:7432/mcp" } } }
+```
+
+A análise também gera `CLAUDE.md` e `.github/copilot-instructions.md` no projeto analisado, ensinando a IA a usar o MCP antes de ler arquivos.
+
+### 2. Modo servidor (enterprise — máquina dedicada para o time)
+
+```bash
+tic-analyzer serve /caminho/do/projeto --host 0.0.0.0 --token segredo-do-time --watch 30
+```
+
+- Analisa o projeto e sobe o MCP headless (sem janela)
+- **File-watch reativo**: reage a *saves* (debounced, `--debounce 15`) e re-analisa sozinho — `--watch N` vira só rede de segurança periódica
+- **Push ao vivo** em `GET /events` (SSE): dashboards e assistentes de IA recebem `analysis-complete` + eventos de atividade sem polling
+- **Alertas outbound**: configure `alerts` no `.tic-rules.json` (Slack/webhook) — health caiu, risco crítico ou violação de regra disparam um POST na hora
+- Em rede, `--token` (ou env `TIC_TOKEN`) é **obrigatório**: `Authorization: Bearer <token>` (ou `?token=` no `/events`); `/health` fica aberto para monitoramento
+- Cada dev aponta o assistente de IA para a máquina dedicada — **todo o time consulta o MESMO índice**:
+
+```json
+{ "mcpServers": { "tic-analyzer": { "url": "http://maquina-dedicada:7432/mcp", "headers": { "Authorization": "Bearer segredo-do-time" } } } }
+```
+
+### 3. GitHub Action (PR review automático)
+
+No repositório do **seu projeto**, crie `.github/workflows/tic-review.yml`:
+
+```yaml
+name: TIC PR Review
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write          # apenas se usar create-issues
+jobs:
+  tic:
+    runs-on: ubuntu-latest   # ou self-hosted (recomendado p/ repos grandes)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: <org>/tic-coder-lite@main
+        with:
+          gate: new-high-risks,new-rule-violations,health-drop:5
+          create-issues: 'true'   # gate falhou → issue bug/needs-triage com AGENT-BRIEF
+```
+
+A cada PR, a Action:
+1. Analisa o **merge-base** e o **head** — a análise da base é **cacheada** (chaveada pelo SHA do merge-base; em self-hosted persiste em disco) e o engine é incremental
+2. Posta **um comentário fixo** (atualizado a cada push) com: impacto cross-tier por arquivo mudado, riscos novos, violações de regras de arquitetura, risco preditivo dos arquivos tocados, delta do health e **perguntas de grilling**
+3. **Reprova o check** se um gate falhar: `new-high-risks` · `new-violations` · `new-rule-violations` · `health-drop:N`
+4. Com `create-issues`, gate reprovado vira **issue automática** com labels `bug`/`needs-triage` e corpo = AGENT-BRIEF completo
+
+---
+
+## Módulo de Governança de Engenharia
+
+### Regras de arquitetura (`.tic-rules.json`)
+
+O arquiteto declara o que não pode acontecer; a pipeline valida; o PR bloqueia o drift:
 
 ```json
 {
-  "mcpServers": {
-    "tic-analyzer": {
-      "url": "http://localhost:7432/mcp"
-    }
+  "rules": [
+    { "id": "no-frontend-db", "severity": "error",
+      "description": "Frontend nunca acessa o banco diretamente",
+      "forbid": { "fromLayer": "frontend", "toLayer": "database" } },
+    { "id": "sem-legado", "severity": "warn",
+      "forbid": { "fromModule": "backend/novo", "toModule": "backend/legado" } },
+    { "id": "camadas-por-path", "severity": "error",
+      "forbid": { "fromPath": "app-frontend/**", "toPath": "**/repository/**" } }
+  ],
+  "outOfScope": [
+    { "id": "multi-tenant", "decision": "Multi-tenancy fora do escopo atual",
+      "reason": "Custo de migração não justifica", "date": "2026-01-15" }
+  ],
+  "alerts": {
+    "slackWebhook": "https://hooks.slack.com/services/...",
+    "webhook": "https://meu-endpoint/tic",
+    "on": { "healthDrop": 5, "newCriticalRisk": true, "newRuleViolation": true }
   }
 }
 ```
 
----
+Regras por **camada** (frontend/backend/database), **módulo** ou **glob de path**. Violações `error` derrubam o health score e o gate `new-rule-violations`. O catálogo `outOfScope` registra decisões para o time não rediscutir. A seção `alerts` (opcional) dispara notificações outbound — ver "Sistema vivo".
 
-## Análise semântica (AST + resolução de símbolos)
+**Como criar.** Na aba **Governança**, quando não há `.tic-rules.json` na raiz, clique em **"Criar .tic-rules.json"** — o TIC grava um template comentado na raiz do projeto (sem sobrescrever um arquivo já existente). Edite as regras e **reanalise** para validar. Alternativamente, copie `.tic-code/tic-rules.example.json` (gerado a cada análise) para a raiz como `.tic-rules.json`.
 
-A partir da Fase 1 da evolução rumo a uma análise estática profunda de
-engenharia reversa, o grafo de dependências deixou de ser regex e passa a usar
-**parsing AST real**
-(`tree-sitter`, 100% local/offline) com **resolução de símbolos** para
-TypeScript/JS/TSX e Java:
+**Campos do schema:**
 
-- Imports TS resolvidos com **aliases de tsconfig** (`@/...`) e **barris**
-  (`export ... from`) seguidos até a origem.
-- Java: `extends`/`implements` resolvidos e **chamadas via interface→implementador**
-  (padrão DI) — sabe que `userService.findAll()` chama `UserServiceImpl`.
-- Cada aresta carrega `confidence`: **`resolved`** (alvo único confirmado) ou
-  **`inferred`** (ambíguo — ex.: interface com vários implementadores). Em
-  engenharia reversa, isso diz no que confiar.
-- Linguagens sem grammar (Python/Go/C#/Rust/PHP/Kotlin) continuam via regex como
-  fallback.
+| Campo | O que faz |
+|---|---|
+| `rules[].id` | Identificador único da regra (aparece no relatório/gate). |
+| `rules[].severity` | `error` (derruba health + gate) ou `warn` (apenas alerta). |
+| `rules[].description` | Texto livre exibido na UI. |
+| `rules[].forbid` | O que é proibido: `fromLayer`/`toLayer` (camada), `fromModule`/`toModule` (módulo) ou `fromPath`/`toPath` (glob). |
+| `outOfScope[]` | Decisões de escopo registradas (`decision`, `reason`, `date`) — o time não rediscute. |
+| `alerts` | Opcional: `slackWebhook`, `webhook` e limiares em `on` (`healthDrop`, `newCriticalRisk`, `newRuleViolation`). |
+| `roi` | Opcional: `hourlyRate`, `currency`, `hoursPerDebtPoint` — converte débito em tempo/dinheiro na aba Valor. |
 
-Verificação: `npm run verify` roda o resolvedor sobre `test/fixtures/semantic`.
+### Manutenção preditiva
 
----
+Cruza o churn do git (90 dias) com as métricas estáticas: **score 0–100 por arquivo** = churn (40%) + commits de fix (20%) + complexidade (20%) + acoplamento (20%), com motivos legíveis ("mudou 14× em 90 dias, 8 fixes, complexidade 32"). Arquivos de alto risco tocados num PR ganham flag no comentário.
 
-## Trace cross-tier — impacto end-to-end (React → Java → PL/SQL)
+### Valor & Custo (ROI) — o argumento que reduz tempo e dinheiro
 
-A tool MCP `trace_flow` reconstrói a **cadeia de impacto ininterrupta** entre as
-camadas, unificando dois grafos que vivem no `index.db`: o **intra-código
-resolvido** (Fase 1) e o **cross-tier** (HTTP/DB/PL-SQL), usando os arquivos como
-ponte. Pergunta típica — *"o que quebra se eu mudar `PKG_CLIENTE.SALVAR`?"* —
-devolve:
+Traduz a análise técnica em **tempo e dinheiro** para a liderança (aba **Valor**):
+- **Custo da dívida**: débito técnico → horas → dev-days → moeda (`debtScore × hoursPerDebtPoint × hourlyRate`). A aba **Valor** explica de onde vem cada ponto de dívida (complexidade, tamanho, acoplamento) e mostra **drill-down por arquivo** ("comece por estes N que concentram X% da dívida"). A **taxa-hora e moeda** (default **R$ 90/h**) podem ser ajustadas **direto no app** — os números recalculam na hora.
+- **Horas economizadas**: cada entidade cross-tier que um PR impactou e que não precisou ser rastreada à mão (estimativa conservadora) → horas/custo poupados.
+- **Ownership & bus-factor** (autoria git): quem domina cada módulo, **conhecimento em risco** (arquivo crítico com 1 só autor — se a pessoa sair, dói), dificuldade de **onboarding** por módulo e **roteamento de revisor** de PR.
+- **Relatório Executivo**: um clique gera um **PDF** (ou HTML) para a diretoria — saúde, tendência, custo da dívida, riscos e risco de conhecimento, em vocabulário de negócio.
 
-```
-🖥️ TelaCliente
-  ↓ ☕ ClienteController.salvar
-  ↓ 📄 ClienteServiceImpl.salvar
-  ↓ 📄 ClienteRepository
-  ↓ 🗄️ PKG_CLIENTE
+```json
+"roi": { "hourlyRate": 90, "currency": "R$", "hoursPerDebtPoint": 0.5 }
 ```
 
-As chamadas Java são **resolvidas no nível de método** (`Classe.metodo`), via
-arestas método→método persistidas em `method_edges` (ex. real do Spring
-PetClinic: `OwnerController.findPaginated… → OwnerRepository#findByLastName…`).
+> Valores de tempo/custo são **estimativas transparentes** ancoradas no débito e na taxa-hora — não promessa contábil.
 
-O miolo `Service → Repository`, que o multigrafo antigo pulava, agora aparece —
-porque a query atravessa as arestas `call` resolvidas (Fase 1) e os saltos
-HTTP/DB cross-tier num único espaço de nós. Verificação:
-`test/fixtures/crosstier`.
+### Portfólio multi-projeto
 
-A cadeia também alcança **tabelas e colunas** (não só procedures): a camada ORM
-(`detectOrmMappings`) liga `@Entity`/`@Table`, repositórios Spring Data
-(`JpaRepository<Entity, Id>`) e SQL de `@Query`/`createNativeQuery` às tabelas.
-O SQL é parseado por um **AST real multi-dialeto** (`node-sql-parser`:
-Postgres/SQL Server/MySQL/Oracle-DML; fallback regex para JPQL/PL-SQL), o que dá
-**lineage coluna-a-coluna**: `get_table_columns("PEDIDO")` lista quais colunas
-são lidas/escritas e por quais arquivos. Assim `trace_flow("PEDIDO")` sobe da
-tabela até a tela. Validado em código real (Spring PetClinic) e em
-`test/fixtures/orm`.
+Visão executiva **cross-repositório** (aba **Portfólio**): um registro global (`~/.tic-analyzer/portfolio.json`, ou `TIC_PORTFOLIO_DIR`) que cada análise — pelo app, CLI ou Action em CI — alimenta com um resumo compacto. O painel compara **saúde, riscos, drift e custo da dívida de todos os repositórios**, pior saúde no topo, com custo por projeto e ações de re-analisar/remover. Em CI, analisar N repositórios popula o mesmo painel; a tool MCP `get_portfolio` responde "qual repositório está pior?". `tic-analyzer portfolio [--json]` lista pela CLI.
 
----
+### Skills de engenharia (fiéis a [mattpocock/skills](https://github.com/mattpocock/skills))
 
-## Busca semântica local (opt-in)
+| Skill | Implementação no TIC |
+|-------|---------------------|
+| **triage** | Fila com máquina de estados (`needs-triage` → `needs-info`/`ready-for-agent`/`ready-for-human`/`wontfix`), 1 categoria + 1 estado por item, riscos e violações viram itens automaticamente (preservando triagem humana), **AGENT-BRIEF** no template exato da skill (Category · Summary · Current/Desired behavior · Key interfaces · Acceptance criteria · Out of scope) preenchido pelo grafo, e issue automática no PR |
+| **diagnose** | `get_diagnosis(from, to)` devolve as 6 fases: feedback loop primeiro, reprodução pelo caminho do grafo, 3–5 hipóteses falsificáveis ("Se X é a causa, então mudar Y elimina o bug") ranqueadas por risco preditivo, instrumentação 1-a-1 com prefixo de log, fix+regressão e post-mortem |
+| **improve-codebase-architecture** | Deletion test (módulos pass-through), interfaces rasas, god modules e circulares viram candidatos a *deepening* — com **relatório HTML** (cards Problem/Solution/Benefits + Top recommendation) gerado pelo app |
+| **grill-with-docs** | Perguntas de grilling no PR nascidas de contradições do grafo, confrontadas com as docs geradas (regras de negócio por módulo, ADRs em `docs/adr/`, decisões out-of-scope) + sugestão quando a mudança atinge o limiar de ADR |
+| **zoom-out** | `get_zoom_out()` = visão macro por fronteiras de domínio (Mermaid); `get_zoom_out(entity)` = onde aquela parte se encaixa: módulo dono, quem a chama, em vocabulário de domínio |
 
-`search_code` tem dois modos: **FTS5** (léxico, padrão) e **vetorial**
-(embeddings locais, ONNX via `@xenova/transformers`, sem chamada de API). O modo
-vetorial é **opt-in** porque baixa um modelo (~25MB) na 1ª execução — ative com
-`TIC_EMBEDDINGS=1` ao rodar a análise. Os vetores ficam no `index.db`; em runtime
-o MCP embeda a query e ranqueia por cosseno. Onde o host do modelo é bloqueado
-(ex.: sandboxes), a busca cai automaticamente para FTS5. A infraestrutura
-(armazenamento + ranking por cosseno) é verificada em `verify-embeddings`.
+*Toda saída de triagem segue a regra da skill: começa com "This was generated by AI during triage."*
 
----
+### Sistema vivo (event-driven, contínuo)
 
-## Complexidade por função
+Em vez de só responder quando perguntado, o TIC observa, lembra e avisa:
 
-As métricas de qualidade são medidas **por função** sobre a AST real (não por
-regex), para as linguagens com gramática (**Java, TypeScript, JavaScript, TSX/JSX**):
+- **Olhos** — file-watch reativo no modo `serve` e no app (toggle **🔴 Ao Vivo**): re-analisa sozinho quando você salva, debounced
+- **Batimento** — `activity.json`: linha do tempo do que mudou a cada análise (health subiu/caiu, riscos novos, regras violadas, módulos add/removidos)
+- **Aprendizado** — quando um arquivo marcado de alto risco depois recebe um commit de fix, registra `prediction-confirmed` e calcula a **taxa de acerto** do preditor (`prediction-accuracy.json`)
+- **Voz interna** — push **SSE em `GET /events`**: a aba Atividade e os dashboards atualizam ao vivo; a IA assina via `get_activity` ("o que mudou recentemente?")
+- **Voz externa** — alertas outbound (Slack + webhook JSON genérico + notificação desktop nativa) quando um limiar de `alerts` é cruzado
 
-- **Ciclomática (McCabe)** — `1 + nº de pontos de decisão` (if, for, while, case,
-  catch, `&&`, `||`, ternário).
-- **Cognitiva** — penaliza o **aninhamento**: cada estrutura de controle soma o
-  nível de profundidade corrente, capturando o custo de leitura que a ciclomática
-  pura ignora.
-- **Profundidade de aninhamento** — quão fundo o código encadeia decisões.
-- **Funções ofensoras** — sinalizadas quando excedem os limites
-  (`CC > 10`, cognitiva `> 15` ou aninhamento `> 4`), para priorizar refatoração.
-
-Linguagens sem gramática (Python/Go/C#/Rust/PHP/Kotlin) caem no **fallback regex**
-por arquivo. Os resultados aparecem em `metrics-summary.md`, em
-`complex-functions.json`, na aba **Métricas › Funções** do app e na ferramenta MCP
-`list_complex_functions` (com filtros `module` e `offendersOnly`).
+> A re-análise é **incremental**: arquivos não alterados reusam os símbolos AST cacheados (`symbol-cache.json`), pulando o tree-sitter — a fase mais cara. A resolução de referências roda sempre (é barata e cruza arquivos), então o grafo incremental é **idêntico** ao completo. No `serve`/Ao Vivo isso reduz a re-análise de minutos para segundos em repositórios grandes.
 
 ---
 
-## O que é analisado — 30 fases
+## Dashboard
 
-| # | Fase | O que produz |
-|---|------|-------------|
-| 1 | Scan de arquivos | Índice de todos os arquivos com linhas e extensões |
-| 2 | Detecção de stack | Linguagens, frameworks, gerenciadores de pacotes |
-| 3 | Grafo de dependências (AST) | `dep-graph.json` — arestas `import`/`call`/`extends`/`implements` com `confidence` (`resolved`/`inferred`) |
-| 4 | Detecção de riscos (OWASP) | A02 Crypto, A03 Injection, A05 Misconfig, A09 Logging |
-| 5 | Endpoints REST | Rotas detectadas em Express, Spring, NestJS, etc. |
-| 6 | Chamadas HTTP frontend | fetch/axios/HttpClient com método e URL |
-| 7 | Objetos PL/SQL | Procedures, functions, packages, triggers, views, sequences, indexes, synonyms + tabelas lidas/escritas |
-| 8 | Chamadas backend→banco | JDBC, oracledb, Spring StoredProcedure, JdbcTemplate |
-| 9 | Módulos | Agrupamento por estrutura de diretório |
-| 10 | Quick-context.md | Resumo ~12k tokens para IA |
-| 11 | Contexto por módulo | `modules/{nome}/context.md` (~75k tokens total) |
-| 12 | Regras de negócio | Validações, enums, guards por módulo |
-| 13 | Permissões e roles | Matriz de acesso com guards e decorators |
-| 14 | index.md | Mapa de navegação do projeto |
-| 15 | Diagrama Mermaid | Dependências entre módulos |
-| 16 | OpenAPI YAML | Especificação dos endpoints detectados |
-| 17 | Relatório de gaps | Módulos sem contexto, endpoints sem docs |
-| 18 | Multi-grafo | Frontend → Endpoint → Backend → PL/SQL (`call-graph.json`) |
-| 19 | Índice de impacto | `impact-index.json` — quem depende de quem |
-| 20 | Métricas de qualidade | Complexidade **por função** (ciclomática McCabe + cognitiva + aninhamento) via AST, funções ofensoras, dívida técnica e hotspots; fallback regex p/ linguagens sem AST |
-| 21 | Hierarquia de classes | `inheritance.md` — extends, implements, abstract, interface |
-| 22 | Padrões arquiteturais | Repository, Service, Factory, Observer, etc. |
-| 23 | Schema de banco | Tabelas de migrations, ORM models, DDL |
-| 24 | @Transactional | Boundaries Spring: propagation, readOnly, rollbackFor |
-| 25 | Batch jobs | @Scheduled, @Async, Quartz Job, Spring Batch |
-| 26 | Módulos Angular/NgRx | @NgModule, lazy routes, actions, reducers, effects, selectors |
-| 27 | Dead components | React/Angular components com inDegree=0 no grafo |
-| 28 | Índice consultável (SQLite) | `index.db` — grafo/símbolos/busca FTS5 **sem teto de nós**, consultado pelo MCP |
-| 29 | Export JSON | `analysis.json` estruturado com todos os dados |
-| 30 | Arquivos para IA | `CLAUDE.md` e `.github/copilot-instructions.md` |
+- **Visão Geral** — números da análise + health score + status do MCP + tokens por tool
+- **Saúde** — gauge do score (6 dimensões), KPIs com delta, tendência histórica
+- **Governança** — 🎯 KPIs (Impact Score, Risk Level, Modules Analyzed, Architecture Drift) · 📊 tendência de impacto dos PRs + distribuição de dívida · 🔍 fila de triagem com transições de estado · 🏗️ compliance por regra de arquitetura · 📈 PRs recentes com blast radius e status de gate · botão de **relatório de arquitetura (HTML)**
+- **Explorador** — drill-down hierárquico estilo CAST Imaging: aplicação → camadas → módulos → arquivos → símbolos; renderiza só o nível visível (74k arquivos ok) e o layout chega já assentado
+- **Impacto** — cross-tier (qualquer entidade), por arquivo e por git diff
+- **Métricas** — complexidade, dívida, hotspots, violações
 
 ---
 
-## Ferramentas MCP (35)
+## CLI
 
-| Tool | ~Tokens | Descrição |
-|------|---------|-----------|
-| `get_quick_context` | ~12k | Resumo completo do projeto |
-| `list_modules` | ~200 | Lista módulos com contagem de arquivos |
-| `get_module` | ~3k | Contexto detalhado de um módulo |
-| `search_module` | ~1k | Busca módulo por nome parcial |
-| `get_impact` | ~200 | Quem depende de um arquivo |
-| `get_diff_impact` | ~500 | Impacto de arquivos modificados no git |
-| `get_metrics` | ~500 | Complexidade e dívida técnica |
-| `get_hotspots` | ~300 | Top arquivos com maior dívida técnica |
-| `get_patterns` | ~400 | Padrões arquiteturais detectados |
-| `get_violations` | ~300 | Violações de camadas arquiteturais |
-| `get_inheritance` | ~400 | Hierarquia de classes |
-| `get_db_schema` | ~500 | Tabelas, colunas, PKs, FKs |
-| `get_analysis_json` | ~2k | Export completo analysis.json |
-| `get_multigraph` | ~1k | Grafo Frontend→Endpoint→Backend→PL/SQL |
-| `get_diagram` | ~500 | Diagrama Mermaid de módulos |
-| `get_openapi` | ~1k | Especificação OpenAPI dos endpoints |
-| `get_gaps` | ~300 | Gaps e lacunas do projeto |
-| `get_permissions` | ~400 | Matriz de permissões e roles |
-| `get_business_rules` | ~500 | Regras de negócio por módulo |
-| `get_plsql_object` | ~300 | Detalhes de uma procedure/function PL/SQL |
-| `get_table_access` | ~200 | Quais procedures leem/escrevem uma tabela |
-| `get_dead_plsql` | ~300 | Procedures/functions sem referenciadores |
-| `get_transactions` | ~400 | Boundaries @Transactional do Spring |
-| `get_batch_jobs` | ~300 | Jobs @Scheduled, @Async, Quartz, Spring Batch |
-| `get_angular_modules` | ~400 | Módulos Angular, lazy routes e NgRx store |
-| `get_dead_components` | ~200 | Componentes React/Angular sem uso |
-| `find_path` | ~200 | Menor caminho entre dois arquivos no grafo |
-| `get_table_columns` | ~200 | Lineage coluna-a-coluna: colunas lidas/escritas de uma tabela e onde |
-| `list_complex_functions` | ~400 | Funções mais complexas por função (ciclomática + cognitiva + aninhamento); filtros `module`/`offendersOnly` |
-| `get_behavioral_hotspots` | ~400 | Hotspots comportamentais: complexidade × frequência de mudança no histórico do git |
-| `get_change_coupling` | ~400 | Acoplamento temporal: arquivos que mudam juntos nos mesmos commits |
-| `get_knowledge_map` | ~400 | Knowledge map / bus factor por módulo (concentração de autoria) |
-| `trace_flow` | ~1.5k | Fluxo vertical completo a partir de um ponto de entrada (upstream + downstream) |
-| `search_code` | ~400 | Busca semântica no código-fonte (FTS5 ou vetorial local) |
-| `get_concept_map` | ~800 | Mapa cruzado de um conceito de negócio em todos os artefatos |
+```bash
+tic-analyzer analyze <path> [--json] [--no-ai-files]
+tic-analyzer health <path>
+tic-analyzer pr-review --base <dir> --head <dir> [--out report.md]
+           [--gate new-high-risks,new-rule-violations,health-drop:5] [--brief-out brief.md]
+tic-analyzer serve <path> [--port 7432] [--host 0.0.0.0] [--token <segredo>] [--watch <min>] [--debounce <seg>]
+tic-analyzer export <path> [--format html|mermaid|svg] [--expanded id1,id2] [--out arquivo]  # grafo standalone
+tic-analyzer report <path> [--out report.html]                                          # relatório executivo (HTML)
+tic-analyzer portfolio [--json]                                                          # portfólio (todos os projetos analisados)
+```
+
+Exit codes do `pr-review`: `0` ok · `1` gate falhou · `2` erro. Cada execução registra em `.tic-code/pr-history.json` (alimenta o dashboard).
 
 ---
 
-## Arquivos gerados em `.tic-code/`
+## O que o engine analisa (pipeline de 45 fases)
+
+| Área | Detalhe |
+|------|---------|
+| **Grafo de dependências** | AST real via tree-sitter (TS/TSX/JS/Java) com resolução de símbolos: aliases de tsconfig (`@/...`), barris (`export ... from`) seguidos até a origem, DI (interface → implementador), `extends`/`implements`, method edges. Fallback regex p/ Python/Go/C#/Rust/PHP/Kotlin. Cada aresta tem `confidence: resolved \| inferred` — em engenharia reversa, isso diz no que confiar |
+| **Grafo de impacto unificado** | Consolida imports, chamadas de método, HTTP (frontend→controller), backend→PL/SQL (`@Procedure`, `{call}`, `SimpleJdbcCall`...), PL/SQL→PL/SQL, triggers (`ON <tabela>`), sinônimos e acesso a tabela/coluna (ORM + SQL parseado) num único grafo endereçável: `file:` `method:` `plsql:` `table:` `column:`. Path finding explica o caminho entre quaisquer duas entidades. Detecção de comunidades (Louvain) agrupa nós por topologia real |
+| **PL/SQL** | Procedures, functions, packages, triggers, views, sequences, sinônimos; tabelas lidas/escritas por objeto; chamadas inter-procedure; dead PL/SQL; lineage coluna-a-coluna |
+| **Monorepo** | Pastas `<projeto>-backend` / `<projeto>-frontend` lado a lado viram subprojetos automaticamente (nomes curtos: `backend`, `frontend`), com camada frontend/backend/database **por arquivo** |
+| **Governança** | Regras `.tic-rules.json` (drift), predição de risco, triagem (máquina de estados), candidatos a deepening, zoom-out executivo |
+| **Health score** | 0–100, grade A–E, 6 dimensões: dívida/KLOC, riscos ponderados (OWASP), violações + drift, dead code, acoplamento, % de arestas heurísticas. Snapshots históricos |
+| **Qualidade** | Complexidade **por função** (McCabe, cognitiva e aninhamento) via AST para Java/TS/JS, hotspots comportamentais (complexidade × churn git), dívida técnica, dependências circulares, padrões arquiteturais e hierarquia de herança |
+| **Spring/Angular** | `@Transactional`, `@Scheduled`/batch jobs, `@NgModule`/NgRx, permissões (roles × rotas), endpoints → OpenAPI 3.0 |
+| **Busca** | FTS5 sempre ativa; embeddings locais opcionais (`TIC_EMBEDDINGS=1`, modelo ONNX ~25MB, 100% offline) |
+| **Incremental** | file-cache por hash: re-análises só tocam o que mudou |
+
+Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `complex-functions.json`, `behavioral-hotspots.md`, `change-coupling.md`, `knowledge-map.md`, `snapshots.json`, `triage.json`, `pr-history.json`, `arch-violations.json`, `risk-prediction.json`, `zoom-out.md`, contextos por módulo e relatórios.
+
+---
+
+## As 62 ferramentas MCP
+
+**Impacto (use primeiro):** `get_blast_radius` (resumo ~200 tokens — **comece por ele**) · `get_impact_of` · `get_impact_path` (caminho explicado entre duas entidades — "por que X afeta Y") · `get_table_impact` · `get_diff_impact` · `get_impact`
+
+**Grafo e comunidades:** `get_graph_level` (drill-down hierárquico) · `get_graph_report` (god nodes + conexões surpreendentes) · `get_communities` (clusters por topologia Louvain)
+
+**Governança e skills:** `get_arch_rules` · `get_arch_suggestions` · `get_risk_prediction` · `get_agent_brief` · `get_diagnosis` · `get_zoom_out` · `get_out_of_scope` · `list_triage` · `update_triage`
+
+**Memória persistente:** `remember` (registra decisão/tentativa/outcome por entidade) · `recall` (histórico de tentativas, injetado no `get_agent_brief`)
+
+**Navegação e fluxo:** `trace_flow` · `find_path` · `search_code` (FTS5 + vetorial fundidos via RRF) · `get_concept_map`
+
+**Contexto:** `get_quick_context` · `list_modules` · `get_module(detail)` · `search_module` · `get_multigraph(detail)` · `get_diagram`
+
+**Valor & custo:** `get_roi` · `get_ownership` · `suggest_reviewers` · `get_portfolio` · `get_knowledge_map`
+
+**Qualidade e saúde:** `get_health` · `get_activity` (timeline do sistema vivo) · `get_metrics` · `get_hotspots` · `list_complex_functions` · `get_behavioral_hotspots` · `get_change_coupling` · `get_violations` · `get_patterns` · `get_inheritance` · `get_dead_components`
+
+**Banco:** `get_db_schema` · `get_table_columns` · `get_table_access` · `get_plsql_object` · `get_dead_plsql`
+
+**Specs e regras:** `get_openapi` · `get_permissions` · `get_business_rules` · `get_transactions` · `get_batch_jobs` · `get_angular_modules` · `get_gaps` · `get_analysis_json`
+
+Todas leem o `index.db` e respondem compacto, com truncamento explícito — a IA nunca fica cega.
+
+---
+
+## Fluxo "da detecção à tarefa pronta"
 
 ```
-.tic-code/
-├── quick-context.md          # resumo ~12k tokens
-├── index.md                  # mapa de navegação
-├── index.db                  # índice consultável (SQLite) — fonte do MCP, sem teto de nós
-├── dep-graph.json            # grafo de dependências (subconjunto p/ o visualizador da UI)
-├── call-graph.json           # grafo multi-camada
-├── impact-index.json         # índice de impacto de mudanças
-├── analysis.json             # export estruturado completo
-├── metrics-summary.md        # complexidade (por função) + hotspots + violações
-├── complex-functions.json    # funções mais complexas (CC + cognitiva + aninhamento + ofensoras)
-├── patterns.md               # padrões arquiteturais
-├── inheritance.md            # hierarquia de classes
-├── openapi.yaml              # endpoints em OpenAPI 3.0
-├── diagram.md + multigraph.md # diagramas Mermaid
-├── gaps.md                   # lacunas detectadas
-├── permissions.md            # matriz de permissões
-├── db-schema.md              # schema de banco de dados
-├── transactions.md           # @Transactional boundaries (Spring)
-├── batch-jobs.md             # @Scheduled, @Async, Quartz, Spring Batch
-├── angular-modules.md        # NgModule + lazy routes + NgRx
-├── plsql-objects.json        # procedures/functions com tabelas lidas/escritas
-├── dead-plsql.json           # PL/SQL sem referenciadores
-├── dead-components.json      # React/Angular components com inDegree=0
-├── file-cache.json           # cache incremental
-└── modules/
-    └── {nome}/
-        ├── context.md
-        ├── business-rules.md
-        ├── metrics.md
-        └── patterns.md
+análise ──► risco/violação detectada ──► item bug · needs-triage na fila
+PR ──► gate falhou ──► issue automática com AGENT-BRIEF completo
+humano (ou IA) ──► triagem: ready-for-agent
+agente ──► get_agent_brief(id) ──► implementa com acceptance criteria verificáveis
+```
+
+E o ciclo macro:
+
+```
+dev commita ──► Action (cache incremental) ──► comentário + grilling + gates no PR
+máquina dedicada ──► serve --watch ──► MCP único para todo o time
+dashboard ──► saúde, drift, triagem e PRs ao longo do tempo
 ```
 
 ---
 
-## Suporte a linguagens
-
-| Linguagem / Ecossistema | Detecção |
-|-------------------------|---------|
-| **PL/SQL Oracle** | PROCEDURE, FUNCTION, PACKAGE, TRIGGER, VIEW, SEQUENCE, INDEX, SYNONYM + tabelas lidas/escritas por procedure |
-| **Java / Spring** | Endpoints (@GetMapping etc.), @Transactional (propagation, readOnly, rollbackFor), @Scheduled (cron/fixedRate), @Async, Quartz Job, Spring Batch Tasklet/ItemProcessor |
-| **TypeScript / JavaScript** | React (components, hooks), Angular (@NgModule, lazy routes, NgRx), Express/NestJS endpoints, fetch/axios/HttpClient |
-| **HTML** | Chamadas HTTP inline |
-| **Python** | Endpoints Flask/FastAPI, imports, métricas |
-| **Go** | Imports, grafo, métricas |
-| **C# / .NET** | Endpoints, imports, métricas |
-| **Kotlin** | Endpoints Spring, @Transactional |
-| **Ruby / PHP / Rust** | Imports, grafo, métricas |
-
----
-
-## Build
+## Desenvolvimento
 
 ```bash
 npm install
-npm run dev          # desenvolvimento (Electron + Vite hot-reload)
+npm run dev          # Vite (5173) + Electron
 
+npm run verify       # build + 18 suítes: semantic, store, crosstier, orm,
+                     # impacto, graph-insights, export, communities,
+                     # health, pr-review, serve, governança, vivo, valor,
+                     # portfólio, incremental, ux, embeddings, git-history,
+                     # ast-metrics
+```
+
+> ⚠️ **Nunca rode `rebuild:electron` em CI** — recompila o better-sqlite3 para a ABI do Electron e quebra a execução em Node puro.
+
+## Build de distribuição
+
+```bash
 npm run dist:win     # → release/TIC Analyzer Setup.exe
 npm run dist:mac     # → release/TIC Analyzer.dmg
 npm run dist:linux   # → release/TIC Analyzer.AppImage
 ```
 
-> **Módulo nativo (`better-sqlite3`):** o `index.db` usa um módulo nativo. O
-> empacotamento (`dist:*`) recompila-o para o runtime do Electron
-> automaticamente (electron-builder). Para `npm run dev`, rode
-> `npm run rebuild:electron` uma vez. Os scripts de verificação (`npm run
-> verify`) rodam sob Node e usam o binário Node-ABI.
-
 ---
 
-## Capacidades
+## Arquitetura
 
-| Recurso | Status |
-|---------|--------|
-| Grafo por AST + símbolos resolvidos (TS/Java) | ✅ Fase 1 |
-| Confiança por aresta (`resolved`/`inferred`) | ✅ |
-| Índice consultável em escala (70k+ arquivos) | ✅ SQLite (Fase 2) |
-| Trace de impacto cross-tier (React→Java→PL/SQL) | ✅ Fase 3 |
-| Complexidade por função (ciclomática + cognitiva + aninhamento) | ✅ AST (Java/TS/JS) |
-| PL/SQL data flow (tabelas por procedure) | ✅ |
-| Dead PL/SQL detection | ✅ |
-| Spring @Transactional mapping | ✅ |
-| Batch jobs (@Scheduled, @Async, Quartz, Spring Batch) | ✅ |
-| Angular NgRx store analysis | ✅ |
-| Dead components (React/Angular) | ✅ |
-| Integração MCP (Claude Code) | ✅ |
-| Funciona 100% offline / sem cloud | ✅ |
-| Orçamento de tokens para IA | ~12k tokens (quick-context) |
+```
+electron/            processo principal (janela, IPC, lifecycle do MCP)
+src/
+  analyzer/          engine puro Node (zero IA): pipeline de 45 fases
+    buildDependencyGraph   AST tree-sitter + resolução de símbolos
+    buildImpactGraph       grafo de impacto unificado cross-tier
+    computeHealthScore     health 0-100 em 6 dimensões
+    checkArchRules         regras .tic-rules.json + deepening candidates + HTML
+    computeRiskPrediction  churn git × complexidade × acoplamento
+    generateZoomOut        visão executiva por fronteiras de domínio
+    generateGraphReport    god nodes + conexões surpreendentes (graph-report.md)
+    detectCommunities      clusters por topologia (Louvain, graphology)
+    exportGraph            export standalone do grafo (HTML interativo / Mermaid / SVG)
+    store/
+      indexDb              index.db SQLite (files/edges/symbols/impact_edges/modules/communities/FTS5)
+      impactQueries        BFS reverso cross-tier + queryImpactPath (caminho entre entidades)
+      graphQueries         agregação hierárquica (layer → module → file → symbol) + queryCommunities
+      snapshots            histórico de health
+      triageStore          fila de triagem (máquina de estados da skill)
+  cli/               headless: analyze / health / pr-review / serve / export
+  mcp/               MCP Server HTTP/SSE (57 tools, auth Bearer, push SSE /events, agent briefs)
+  ui/                React: Health, Governança, Explorador, Impacto
+action.yml           GitHub Action (PR review, cache incremental, issues de triagem)
+```
+
+Créditos: as skills de engenharia implementam os processos de [mattpocock/skills](https://github.com/mattpocock/skills).

@@ -1,8 +1,14 @@
-import { useState, useEffect, useCallback, useRef, useMemo, MouseEvent as RMouseEvent } from 'react';
-import mermaid from 'mermaid';
-import { GraphViewer } from './GraphViewer';
-
-mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { HierGraphViewer } from './HierGraphViewer';
+import { HealthDashboard } from './HealthDashboard';
+import { ActivityFeed, type ActivityEvent } from './ActivityFeed';
+import { ValueDashboard } from './ValueDashboard';
+import { PortfolioDashboard } from './PortfolioDashboard';
+import { GovernanceDashboard } from './GovernanceDashboard';
+import { SkillsConsole } from './SkillsConsole';
+import { MemoryViewer } from './MemoryViewer';
+import { SearchCodeViewer } from './SearchCodeViewer';
+import { HttpFlowsViewer } from './HttpFlowsViewer';
 
 declare global {
   interface Window {
@@ -15,13 +21,46 @@ declare global {
       openFolder: (path: string) => Promise<void>;
       readFile: (path: string) => Promise<string | null>;
       getGitDiff: (projectPath: string) => Promise<{ files: string[]; error?: string }>;
+      getImpactOf: (projectPath: string, entity: string) => Promise<ImpactOfResponse>;
+      getGraphLevel: (projectPath: string, expanded: string[]) => Promise<unknown>;
+      getUnifiedGraph: (projectPath: string, expanded: string[]) => Promise<unknown>;
+      exportGraph: (projectPath: string, format: 'html' | 'mermaid' | 'svg' | 'png', expanded: string[]) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      searchCode: (projectPath: string, query: string) => Promise<SearchCodeResponse>;
+      updateTriage: (projectPath: string, id: string, changes: unknown) => Promise<unknown>;
+      createTriage: (projectPath: string, input: unknown) => Promise<unknown>;
+      openArchReport: (projectPath: string) => Promise<unknown>;
+      setLiveMode: (projectPath: string, on: boolean) => Promise<{ ok: boolean; live: boolean; error?: string }>;
+      getActivity: (projectPath: string, limit?: number) => Promise<ActivityEvent[]>;
+      onActivity: (cb: (e: ActivityEvent) => void) => () => void;
+      exportExecutiveReport: (projectPath: string, format: 'pdf' | 'html') => Promise<{ ok: boolean; path?: string; error?: string }>;
+      getPortfolio: () => Promise<unknown>;
+      removePortfolioProject: (id: string) => Promise<unknown>;
+      analyzePortfolioProject: (projectPath: string) => Promise<unknown>;
+      setRoiConfig: (projectPath: string, cfg: { hourlyRate: number; currency: string }) => Promise<unknown>;
+      getGithubStatus: (projectPath: string) => Promise<unknown>;
+      installGithubWorkflow: (projectPath: string) => Promise<unknown>;
+      createTicRules: (projectPath: string) => Promise<unknown>;
+      onLiveStatus: (cb: (s: { watching?: boolean; analyzing?: boolean; lastRun?: string }) => void) => () => void;
       getTokenStats: () => Promise<TokenStats | null>;
       clearTokenStats: () => Promise<void>;
       onTokenUpdate: (cb: (entry: TokenEntry) => void) => () => void;
       onProgress: (cb: (p: Progress) => void) => () => void;
       onAnalysisDone: (cb: (r: AnalysisResult) => void) => void;
+      listHttpFlows: (projectPath: string) => Promise<unknown>;
+      getAgentBrief: (projectPath: string, entity: string) => Promise<{ markdown?: string; entity?: string; error?: string }>;
+      getDiagnosis: (projectPath: string, from: string, to?: string) => Promise<{ markdown?: string; error?: string }>;
+      getZoomOut: (projectPath: string, entity?: string) => Promise<{ markdown?: string; error?: string }>;
+      getSkillsOverview: (projectPath: string) => Promise<SkillsOverview>;
     };
   }
+}
+
+export interface SkillsOverview {
+  archSuggestions: Array<{ strength?: string; kind?: string; files?: string[]; problem?: string; solution?: string; benefits?: string }>;
+  riskPrediction: Array<{ file: string; score: number; reasons?: string[] }>;
+  outOfScope: Array<{ id: string; decision: string; reason?: string; date?: string }>;
+  triageCounts: { total: number; readyForAgent: number; needsTriage: number };
+  hasZoomOut: boolean;
 }
 
 interface TokenEntry { timestamp: number; tool: string; inputTokens: number; outputTokens: number; totalTokens: number; }
@@ -41,81 +80,56 @@ interface AnalysisResult {
   impactedFiles: number; inheritanceClasses: number;
   dbTables: number; cacheHits: number;
   transactions: number; batchJobs: number; angularModules: number; deadComponents: number;
-  functionsAnalyzed: number; offenderFunctions: number;
+  impactEdges?: number; healthScore?: number; healthGrade?: string;
   error?: string;
 }
+interface ImpactedNode { id: string; kind: string; depth: number; confidence: string; module?: string; }
+interface ImpactOfResponse {
+  error?: string;
+  impact?: { entity: string; affected: ImpactedNode[]; byKind: Record<string, number>; byModule: Record<string, number>; totalVisited: number; truncated: boolean; candidates?: string[] };
+  blast?: { entity: string; totalAffected: number; truncated: boolean; byKind: Record<string, number>; byModule: Record<string, number>; top: Array<{ id: string; kind: string; depth: number; dependents: number; confidence: string }> };
+}
+export interface SearchHitUI { file: string; snippet: string; score: number; origin: 'fts' | 'vec' | 'both' }
+export interface SearchCodeResponse { hits?: SearchHitUI[]; mode?: string; error?: string }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
-type Tab = 'overview' | 'multigraph' | 'modules' | 'impact' | 'metrics' | 'files' | 'docs';
+type Tab = 'overview' | 'health' | 'value' | 'governance' | 'skills' | 'activity' | 'explorer' | 'search' | 'memory' | 'impact' | 'metrics' | 'files' | 'portfolio' | 'docs' | 'http';
 
-const C = { bg: '#0f0f1a', card: '#16213e', border: '#2a2a4e', accent: '#7c83fd', green: '#56cfad', red: '#ff6b6b', orange: '#f0a500', text: '#e0e0e0', muted: '#888' };
-
-const S = {
-  app: { minHeight: '100vh', display: 'flex', flexDirection: 'column' as const, fontFamily: "'Segoe UI', system-ui, sans-serif", background: C.bg, color: C.text },
-  header: { padding: '16px 24px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: '12px', background: '#0d1117' },
-  body: { flex: 1, padding: '20px', maxWidth: '1100px', width: '100%', margin: '0 auto', boxSizing: 'border-box' as const },
-  card: { background: C.card, borderRadius: '12px', padding: '20px', marginBottom: '16px', border: `1px solid ${C.border}` },
-  folderRow: { display: 'flex', gap: '10px', alignItems: 'center' },
-  folderInput: { flex: 1, background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '10px 14px', color: C.text, fontSize: '13px', fontFamily: 'monospace' },
-  btn: (color = C.accent) => ({ padding: '9px 18px', background: color, border: 'none', borderRadius: '8px', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '13px', whiteSpace: 'nowrap' as const }),
-  btnDisabled: { padding: '9px 18px', background: '#222', border: 'none', borderRadius: '8px', color: '#555', cursor: 'not-allowed', fontWeight: 600, fontSize: '13px' },
-  tab: (active: boolean) => ({ padding: '7px 14px', background: active ? C.accent : 'transparent', border: `1px solid ${active ? C.accent : C.border}`, borderRadius: '8px', color: active ? '#fff' : C.muted, cursor: 'pointer', fontWeight: active ? 600 : 400, fontSize: '12px' }),
-  stat: (color = C.accent) => ({ textAlign: 'center' as const, flex: 1, minWidth: '100px' }),
-  statNum: (color = C.accent) => ({ fontSize: '22px', fontWeight: 700, color }),
-  statLabel: { fontSize: '11px', color: C.muted, marginTop: '2px' },
-  progressBar: { height: '6px', borderRadius: '3px', background: C.border, overflow: 'hidden' as const, margin: '10px 0' },
-  progressFill: (pct: number) => ({ height: '100%', width: `${pct}%`, background: `linear-gradient(90deg, ${C.accent}, ${C.green})`, borderRadius: '3px', transition: 'width 0.3s ease' }),
-  phaseRow: (status: string) => ({ display: 'flex', alignItems: 'center', gap: '10px', padding: '5px 0', opacity: status === 'pending' ? 0.4 : 1, fontSize: '13px' }),
-  badge: (s: string) => ({ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, background: s === 'done' ? '#1a4a1a' : s === 'running' ? '#1a1a4a' : s === 'error' ? '#4a1a1a' : '#222', color: s === 'done' ? C.green : s === 'running' ? C.accent : s === 'error' ? C.red : '#555' }),
-  dot: (on: boolean) => ({ width: '8px', height: '8px', borderRadius: '50%', background: on ? C.green : '#555', flexShrink: 0 }),
+// ── Design System ─────────────────────────────────────────────────────────────
+const C = {
+  bg: '#0b1326',
+  surface: '#0b1326',
+  surfaceContainer: '#171f33',
+  surfaceContainerLow: '#131b2e',
+  surfaceContainerHigh: '#222a3d',
+  surfaceContainerHighest: '#2d3449',
+  surfaceVariant: '#2d3449',
+  surfaceBright: '#31394d',
+  surfaceDim: '#0b1326',
+  surfaceContainerLowest: '#060e20',
+  primary: '#dbfcff',
+  primaryFixedDim: '#00dbe9',
+  primaryFixed: '#7df4ff',
+  secondary: '#4edea3',
+  secondaryFixedDim: '#4edea3',
+  error: '#ffb4ab',
+  errorContainer: '#93000a',
+  tertiary: '#fff3ea',
+  tertiaryFixedDim: '#ffb95f',
+  tertiaryFixed: '#ffddb8',
+  onSurface: '#dae2fd',
+  onSurfaceVariant: '#b9cacb',
+  outline: '#849495',
+  outlineVariant: '#3b494b',
+  onPrimary: '#00363a',
+  onSecondary: '#003824',
+  onError: '#690005',
 };
 
-// ── MermaidDiagram ────────────────────────────────────────────────────────────
-let mermaidCounter = 0;
-function MermaidDiagram({ code, id }: { code: string; id: string }) {
-  const [svg, setSvg] = useState('');
-  const [scale, setScale] = useState(1);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
-  const drag = useRef({ active: false, startX: 0, startY: 0, originX: 0, originY: 0 });
-  const renderKey = useRef(0);
-  const uniqueId = useMemo(() => `mg-${id}-${++mermaidCounter}`, [id]);
-
-  useEffect(() => {
-    if (!code.trim()) { setSvg(''); return; }
-    const key = ++renderKey.current;
-    mermaid.render(uniqueId, code)
-      .then(({ svg: rendered }) => { if (key === renderKey.current) setSvg(rendered); })
-      .catch(() => { if (key === renderKey.current) setSvg(`<pre style="color:#888;font-size:11px;overflow:auto;white-space:pre-wrap">${code}</pre>`); });
-  }, [code, uniqueId]);
-
-  useEffect(() => { setScale(1); setPos({ x: 0, y: 0 }); }, [svg]);
-
-  const onWheel = useCallback((e: React.WheelEvent) => { e.preventDefault(); setScale((s) => Math.min(4, Math.max(0.3, s - e.deltaY * 0.001))); }, []);
-  const onMouseDown = useCallback((e: RMouseEvent) => { drag.current = { active: true, startX: e.clientX, startY: e.clientY, originX: pos.x, originY: pos.y }; }, [pos]);
-  const onMouseMove = useCallback((e: RMouseEvent) => { if (!drag.current.active) return; setPos({ x: drag.current.originX + e.clientX - drag.current.startX, y: drag.current.originY + e.clientY - drag.current.startY }); }, []);
-  const stopDrag = useCallback(() => { drag.current.active = false; }, []);
-  const reset = useCallback(() => { setScale(1); setPos({ x: 0, y: 0 }); }, []);
-
-  return (
-    <div>
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', alignItems: 'center' }}>
-        <button style={{ padding: '4px 10px', background: '#1a1a3a', border: '1px solid #2a2a4e', borderRadius: '6px', color: '#aaa', cursor: 'pointer', fontSize: '16px' }} onClick={() => setScale((s) => Math.min(4, s + 0.2))}>+</button>
-        <button style={{ padding: '4px 10px', background: '#1a1a3a', border: '1px solid #2a2a4e', borderRadius: '6px', color: '#aaa', cursor: 'pointer', fontSize: '16px' }} onClick={() => setScale((s) => Math.max(0.3, s - 0.2))}>−</button>
-        <button style={{ padding: '4px 10px', background: '#1a1a3a', border: '1px solid #2a2a4e', borderRadius: '6px', color: '#aaa', cursor: 'pointer', fontSize: '12px' }} onClick={reset}>⟳ Reset</button>
-        <span style={{ fontSize: '11px', color: '#666' }}>{Math.round(scale * 100)}% | scroll=zoom | drag=mover</span>
-      </div>
-      <div style={{ overflow: 'hidden', background: '#0d1117', borderRadius: '8px', height: '440px', cursor: drag.current.active ? 'grabbing' : 'grab', userSelect: 'none' }}
-        onWheel={onWheel} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={stopDrag} onMouseLeave={stopDrag}>
-        <div dangerouslySetInnerHTML={{ __html: svg }}
-          style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`, transformOrigin: '0 0', padding: '16px', display: 'inline-block', minWidth: '100%' }} />
-      </div>
-    </div>
-  );
-}
-
-function extractMermaid(md: string): string {
-  const match = md.match(/```mermaid\n([\s\S]*?)```/);
-  return match ? match[1].trim() : '';
-}
+const F = {
+  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  body: "'Inter', system-ui, sans-serif",
+  code: "'JetBrains Mono', monospace",
+};
 
 type ImpactEntry = { directCount: number; transitiveCount: number; direct: string[]; transitive: string[] };
 
@@ -129,14 +143,33 @@ function buildImpactText(file: string, entry: ImpactEntry | undefined): string {
   ].filter(Boolean).join('\n') + '\n';
 }
 
+// ── Icon helper ───────────────────────────────────────────────────────────────
+function Icon({ name, size = 20, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
+  return (
+    <span
+      className="material-symbols-outlined"
+      style={{
+        fontSize: `${size}px`,
+        color: color,
+        fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
+        lineHeight: 1,
+        display: 'inline-flex',
+        alignItems: 'center',
+      }}
+    >
+      {name}
+    </span>
+  );
+}
+
 // ── TokenMonitor ─────────────────────────────────────────────────────────────
 function TokenMonitor({ stats, onClear }: { stats: TokenStats | null; onClear: () => void }) {
   const [expanded, setExpanded] = useState(false);
 
   if (!stats || stats.totalCalls === 0) {
     return (
-      <div style={{ padding: '10px 0', fontSize: '12px', color: C.muted, display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#555', display: 'inline-block' }} />
+      <div style={{ padding: '10px 0', fontSize: '12px', color: C.outline, display: 'flex', alignItems: 'center', gap: '8px', fontFamily: F.code }}>
+        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: C.outlineVariant, display: 'inline-block' }} />
         Aguardando chamadas do Claude Code...
       </div>
     );
@@ -148,69 +181,57 @@ function TokenMonitor({ stats, onClear }: { stats: TokenStats | null; onClear: (
 
   return (
     <div>
-      {/* Summary row */}
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' as const }}>
-        <div style={{ display: 'flex', gap: '20px', flex: 1 }}>
-          <div style={{ textAlign: 'center' as const }}>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: C.accent, lineHeight: 1 }}>{stats.totalTokens.toLocaleString()}</div>
-            <div style={{ fontSize: '10px', color: C.muted, marginTop: '2px' }}>tokens totais</div>
-          </div>
-          <div style={{ textAlign: 'center' as const }}>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: C.green, lineHeight: 1 }}>{stats.totalCalls}</div>
-            <div style={{ fontSize: '10px', color: C.muted, marginTop: '2px' }}>chamadas MCP</div>
-          </div>
-          <div style={{ textAlign: 'center' as const }}>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: C.orange, lineHeight: 1 }}>{stats.totalCalls > 0 ? Math.round(stats.totalTokens / stats.totalCalls).toLocaleString() : 0}</div>
-            <div style={{ fontSize: '10px', color: C.muted, marginTop: '2px' }}>média/chamada</div>
-          </div>
-          <div style={{ textAlign: 'center' as const }}>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: '#a0a0ff', lineHeight: 1 }}>{sessionMinutes}m</div>
-            <div style={{ fontSize: '10px', color: C.muted, marginTop: '2px' }}>sessão ativa</div>
-          </div>
+        <div style={{ display: 'flex', gap: '24px', flex: 1 }}>
+          {[
+            { val: stats.totalTokens.toLocaleString(), label: 'tokens totais', color: C.primaryFixedDim },
+            { val: stats.totalCalls, label: 'chamadas MCP', color: C.secondary },
+            { val: stats.totalCalls > 0 ? Math.round(stats.totalTokens / stats.totalCalls).toLocaleString() : 0, label: 'média/chamada', color: C.tertiaryFixedDim },
+            { val: `${sessionMinutes}m`, label: 'sessão ativa', color: C.onSurfaceVariant },
+          ].map((s) => (
+            <div key={s.label} style={{ textAlign: 'center' as const }}>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: s.color, fontFamily: F.headline, lineHeight: 1 }}>{s.val}</div>
+              <div style={{ fontSize: '10px', color: C.outline, marginTop: '3px', fontFamily: F.code, letterSpacing: '0.06em', textTransform: 'uppercase' as const }}>{s.label}</div>
+            </div>
+          ))}
         </div>
         <div style={{ display: 'flex', gap: '6px' }}>
-          <button style={S.tab(expanded)} onClick={() => setExpanded((e) => !e)}>{expanded ? 'Fechar' : 'Detalhes'}</button>
-          <button style={{ ...S.btn('#333'), fontSize: '11px', padding: '5px 10px' }} onClick={onClear}>Resetar</button>
+          <button style={{ padding: '6px 12px', background: 'transparent', border: `1px solid ${C.outlineVariant}`, borderRadius: '4px', color: C.onSurface, cursor: 'pointer', fontFamily: F.code, fontSize: '12px' }} onClick={() => setExpanded((e) => !e)}>{expanded ? 'Fechar' : 'Detalhes'}</button>
+          <button style={{ padding: '6px 12px', background: 'transparent', border: `1px solid ${C.outlineVariant}`, borderRadius: '4px', color: C.onSurfaceVariant, cursor: 'pointer', fontFamily: F.code, fontSize: '12px' }} onClick={onClear}>Resetar</button>
         </div>
       </div>
 
       {expanded && (
         <div style={{ marginTop: '14px' }}>
-          {/* Per-tool breakdown */}
           <div style={{ marginBottom: '14px' }}>
-            <div style={{ fontSize: '11px', color: C.muted, marginBottom: '8px', fontWeight: 600 }}>GASTO POR FERRAMENTA</div>
+            <div style={{ fontSize: '10px', color: C.outline, marginBottom: '8px', fontWeight: 600, fontFamily: F.code, letterSpacing: '0.08em', textTransform: 'uppercase' as const }}>GASTO POR FERRAMENTA</div>
             {sortedTools.map(([tool, data]) => (
               <div key={tool} style={{ marginBottom: '6px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                  <span style={{ fontFamily: 'monospace', fontSize: '11px', color: C.accent }}>{tool}</span>
-                  <span style={{ fontSize: '11px', color: C.muted }}>
-                    <strong style={{ color: C.text }}>{data.tokens.toLocaleString()}</strong>t · {data.calls}x
-                    <span style={{ color: '#666', marginLeft: '6px' }}>({Math.round((data.tokens / stats.totalTokens) * 100)}%)</span>
+                  <span style={{ fontFamily: F.code, fontSize: '12px', color: C.primaryFixedDim }}>{tool}</span>
+                  <span style={{ fontSize: '12px', color: C.outline, fontFamily: F.code }}>
+                    <strong style={{ color: C.onSurface }}>{data.tokens.toLocaleString()}</strong>t · {data.calls}x
+                    <span style={{ color: C.outlineVariant, marginLeft: '6px' }}>({Math.round((data.tokens / stats.totalTokens) * 100)}%)</span>
                   </span>
                 </div>
-                <div style={{ height: '5px', background: C.border, borderRadius: '3px', overflow: 'hidden' as const }}>
-                  <div style={{ width: `${(data.tokens / maxTokens) * 100}%`, height: '100%', background: C.accent, borderRadius: '3px', transition: 'width 0.3s' }} />
+                <div style={{ height: '4px', background: C.outlineVariant, borderRadius: '2px', overflow: 'hidden' as const }}>
+                  <div style={{ width: `${(data.tokens / maxTokens) * 100}%`, height: '100%', background: C.primaryFixedDim, borderRadius: '2px', transition: 'width 0.3s' }} />
                 </div>
               </div>
             ))}
           </div>
-
-          {/* Input vs output breakdown */}
-          <div style={{ display: 'flex', gap: '16px', marginBottom: '14px', padding: '10px', background: '#0d1117', borderRadius: '8px', fontSize: '12px' }}>
-            <div><span style={{ color: C.muted }}>Entrada (args): </span><strong style={{ color: C.green }}>{stats.totalInputTokens.toLocaleString()}</strong></div>
-            <div><span style={{ color: C.muted }}>Saída (respostas): </span><strong style={{ color: C.orange }}>{stats.totalOutputTokens.toLocaleString()}</strong></div>
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '14px', padding: '10px', background: C.surfaceContainerLowest, borderRadius: '6px', fontSize: '12px', fontFamily: F.code }}>
+            <div><span style={{ color: C.outline }}>Entrada: </span><strong style={{ color: C.secondary }}>{stats.totalInputTokens.toLocaleString()}</strong></div>
+            <div><span style={{ color: C.outline }}>Saída: </span><strong style={{ color: C.tertiaryFixedDim }}>{stats.totalOutputTokens.toLocaleString()}</strong></div>
           </div>
-
-          {/* Recent calls log */}
           {stats.log.length > 0 && (
             <div>
-              <div style={{ fontSize: '11px', color: C.muted, marginBottom: '6px', fontWeight: 600 }}>ÚLTIMAS CHAMADAS</div>
+              <div style={{ fontSize: '10px', color: C.outline, marginBottom: '6px', fontWeight: 600, fontFamily: F.code, letterSpacing: '0.08em', textTransform: 'uppercase' as const }}>ÚLTIMAS CHAMADAS</div>
               {[...stats.log].reverse().slice(0, 8).map((entry, i) => (
-                <div key={i} style={{ display: 'flex', gap: '8px', padding: '4px 0', borderBottom: `1px solid ${C.border}`, fontSize: '11px' }}>
-                  <span style={{ color: '#555', width: '56px', flexShrink: 0 }}>{new Date(entry.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-                  <span style={{ color: C.accent, fontFamily: 'monospace', flex: 1 }}>{entry.tool}</span>
-                  <span style={{ color: C.text, width: '80px', textAlign: 'right' as const }}>{entry.totalTokens.toLocaleString()}t</span>
-                  <span style={{ color: '#666', width: '90px', textAlign: 'right' as const }}>{entry.inputTokens}↑ · {entry.outputTokens}↓</span>
+                <div key={i} style={{ display: 'flex', gap: '8px', padding: '4px 0', borderBottom: `1px solid ${C.outlineVariant}`, fontSize: '11px', fontFamily: F.code }}>
+                  <span style={{ color: C.outline, width: '56px', flexShrink: 0 }}>{new Date(entry.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                  <span style={{ color: C.primaryFixedDim, flex: 1 }}>{entry.tool}</span>
+                  <span style={{ color: C.onSurface, width: '80px', textAlign: 'right' as const }}>{entry.totalTokens.toLocaleString()}t</span>
                 </div>
               ))}
             </div>
@@ -228,7 +249,8 @@ function ImpactTab({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPat
   const [loading, setLoading] = useState(false);
   const [diffLoading, setDiffLoading] = useState(false);
   const [index, setIndex] = useState<Record<string, ImpactEntry> | null>(null);
-  const [activeMode, setActiveMode] = useState<'manual' | 'git'>('manual');
+  const [activeMode, setActiveMode] = useState<'crosstier' | 'manual' | 'git'>('crosstier');
+  const [crossResult, setCrossResult] = useState<ImpactOfResponse | null>(null);
 
   useEffect(() => {
     window.ticAnalyzer.readFile(`${ticCodeDir}/impact-index.json`).then((content) => {
@@ -245,6 +267,15 @@ function ImpactTab({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPat
     }
     return entry;
   }, [index]);
+
+  const searchCrossTier = useCallback(async () => {
+    if (!query.trim()) { setCrossResult(null); return; }
+    setLoading(true);
+    setCrossResult(null);
+    const r = await window.ticAnalyzer.getImpactOf(projectPath, query.trim());
+    setCrossResult(r);
+    setLoading(false);
+  }, [projectPath, query]);
 
   const search = useCallback(() => {
     if (!index || !query.trim()) { setResult(''); return; }
@@ -271,46 +302,32 @@ function ImpactTab({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPat
     if (!index) return;
     setDiffLoading(true);
     setResult('');
-
     const { files, error } = await window.ticAnalyzer.getGitDiff(projectPath);
-
     if (error || files.length === 0) {
       setResult(error ? `Erro ao ler git diff: ${error}` : 'Nenhuma mudanca detectada no git (working tree limpa).');
       setDiffLoading(false);
       return;
     }
-
     const directImpact = new Set<string>();
     const transitiveImpact = new Set<string>();
-
-    const lines: string[] = [
-      `Git Diff — ${files.length} arquivo(s) modificado(s)`,
-      '═'.repeat(50),
-      ''
-    ];
-
+    const lines: string[] = [`Git Diff — ${files.length} arquivo(s) modificado(s)`, '═'.repeat(50), ''];
     for (const file of files) {
       const entry = lookupEntry(file);
       lines.push(buildImpactText(file, entry));
       entry?.direct.forEach((f) => directImpact.add(f));
       entry?.transitive.forEach((f) => transitiveImpact.add(f));
     }
-
-    // Remove os próprios arquivos modificados do conjunto de afetados
     files.forEach((f) => { directImpact.delete(f); transitiveImpact.delete(f); });
-
     lines.push('═'.repeat(50));
     lines.push(`Impacto consolidado desta mudanca:`);
     lines.push(`  Arquivos diretamente afetados: ${directImpact.size}`);
     lines.push(`  Arquivos transitivamente afetados: ${transitiveImpact.size}`);
-
     if (transitiveImpact.size > 0) {
       lines.push('');
       lines.push('Top afetados transitivos:');
       [...transitiveImpact].slice(0, 10).forEach((f) => lines.push(`  ○ ${f}`));
       if (transitiveImpact.size > 10) lines.push(`  ... e mais ${transitiveImpact.size - 10}`);
     }
-
     setResult(lines.join('\n'));
     setDiffLoading(false);
   }, [index, projectPath, lookupEntry]);
@@ -320,58 +337,92 @@ function ImpactTab({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPat
     ? Object.entries(index).sort((a, b) => b[1].transitiveCount - a[1].transitiveCount).slice(0, 5)
     : [];
 
+  const modeBtn = (id: 'crosstier' | 'manual' | 'git', label: string) => (
+    <button
+      onClick={() => setActiveMode(id)}
+      style={{
+        padding: '6px 14px',
+        background: activeMode === id ? `${C.primaryFixedDim}18` : 'transparent',
+        border: `1px solid ${activeMode === id ? C.primaryFixedDim : C.outlineVariant}`,
+        borderRadius: '4px',
+        color: activeMode === id ? C.primaryFixedDim : C.onSurfaceVariant,
+        cursor: 'pointer',
+        fontFamily: F.code,
+        fontSize: '12px',
+        fontWeight: activeMode === id ? 600 : 400,
+      }}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <div>
-      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' as const, gap: '12px' }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>Analise de Impacto de Mudanca</div>
-          <div style={{ fontSize: '12px', color: C.muted }}>Descubra quais arquivos sao afetados antes de fazer uma mudanca</div>
+          <div style={{ fontWeight: 600, fontSize: '20px', marginBottom: '4px', fontFamily: F.headline, color: C.onSurface }}>Análise de Impacto</div>
+          <div style={{ fontSize: '13px', color: C.onSurfaceVariant }}>Descubra quais arquivos são afetados antes de fazer uma mudança</div>
         </div>
         <div style={{ display: 'flex', gap: '6px' }}>
-          <button style={S.tab(activeMode === 'manual')} onClick={() => setActiveMode('manual')}>Manual</button>
-          <button style={S.tab(activeMode === 'git')} onClick={() => setActiveMode('git')}>Git Diff</button>
+          {modeBtn('crosstier', 'Cross-tier')}
+          {modeBtn('manual', 'Arquivo')}
+          {modeBtn('git', 'Git Diff')}
         </div>
       </div>
+
+      {activeMode === 'crosstier' && (
+        <div>
+          <div style={{ fontSize: '12px', color: C.onSurfaceVariant, marginBottom: '12px', padding: '12px', background: C.surfaceContainerLowest, borderRadius: '6px', border: `1px solid ${C.outlineVariant}`, fontFamily: F.code, lineHeight: 1.6 }}>
+            Impacto de QUALQUER entidade — arquivo, procedure PL/SQL (<code style={{ color: C.primaryFixedDim }}>PKG.PROC</code>), tabela (<code style={{ color: C.primaryFixedDim }}>CLIENTES</code>) ou coluna (<code style={{ color: C.primaryFixedDim }}>CLIENTES.CPF</code>) — atravessando React → Java → PL/SQL → banco.
+          </div>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+            <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && searchCrossTier()}
+              placeholder="PKG_CLIENTE.SALVAR · CLIENTES · CLIENTES.CPF · UserService.java"
+              style={{ flex: 1, background: C.surfaceContainerLowest, border: `1px solid ${C.outlineVariant}`, borderRadius: '6px', padding: '10px 14px', color: C.onSurface, fontSize: '13px', fontFamily: F.code, outline: 'none' }} />
+            <button style={{ padding: '10px 20px', background: C.primaryFixedDim, border: 'none', borderRadius: '6px', color: C.onPrimary, cursor: 'pointer', fontWeight: 600, fontSize: '13px', fontFamily: F.code }} onClick={searchCrossTier} disabled={loading}>{loading ? '...' : 'Analisar'}</button>
+          </div>
+          {crossResult?.error && <div style={{ color: C.error, fontSize: '13px', padding: '12px', background: `${C.errorContainer}44`, borderRadius: '6px', fontFamily: F.code }}>{crossResult.error}</div>}
+          {crossResult?.impact && <CrossTierImpactView impact={crossResult.impact} blast={crossResult.blast} onSelect={(e) => { setQuery(e); }} />}
+        </div>
+      )}
 
       {activeMode === 'manual' && (
         <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
           <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search()}
             placeholder="src/api/user.ts ou user.service"
-            style={{ flex: 1, background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '10px 14px', color: C.text, fontSize: '13px', fontFamily: 'monospace' }} />
-          <button style={S.btn(C.accent)} onClick={search} disabled={loading}>
-            {loading ? '...' : 'Analisar'}
-          </button>
+            style={{ flex: 1, background: C.surfaceContainerLowest, border: `1px solid ${C.outlineVariant}`, borderRadius: '6px', padding: '10px 14px', color: C.onSurface, fontSize: '13px', fontFamily: F.code, outline: 'none' }} />
+          <button style={{ padding: '10px 20px', background: C.primaryFixedDim, border: 'none', borderRadius: '6px', color: C.onPrimary, cursor: 'pointer', fontWeight: 600, fontSize: '13px', fontFamily: F.code }} onClick={search} disabled={loading}>{loading ? '...' : 'Analisar'}</button>
         </div>
       )}
 
       {activeMode === 'git' && (
         <div style={{ marginBottom: '16px' }}>
-          <div style={{ fontSize: '12px', color: C.muted, marginBottom: '10px', padding: '10px', background: '#0d1b2a', borderRadius: '8px', border: `1px solid ${C.border}` }}>
-            Le <code style={{ color: C.accent }}>git diff HEAD</code> + <code style={{ color: C.accent }}>git diff --cached</code> no projeto analisado e calcula o impacto de todos os arquivos modificados de uma vez.
+          <div style={{ fontSize: '12px', color: C.onSurfaceVariant, marginBottom: '12px', padding: '12px', background: C.surfaceContainerLowest, borderRadius: '6px', border: `1px solid ${C.outlineVariant}`, fontFamily: F.code, lineHeight: 1.6 }}>
+            Lê <code style={{ color: C.primaryFixedDim }}>git diff HEAD</code> + <code style={{ color: C.primaryFixedDim }}>git diff --cached</code> no projeto analisado e calcula o impacto de todos os arquivos modificados de uma vez.
           </div>
-          <button style={S.btn(C.green)} onClick={analyzeGitDiff} disabled={diffLoading}>
-            {diffLoading ? 'Lendo git diff...' : 'Analisar Mudancas Atuais (git diff)'}
+          <button style={{ padding: '10px 20px', background: C.secondary, border: 'none', borderRadius: '6px', color: C.onSecondary, cursor: 'pointer', fontWeight: 600, fontSize: '13px', fontFamily: F.code }} onClick={analyzeGitDiff} disabled={diffLoading}>
+            {diffLoading ? 'Lendo git diff...' : 'Analisar Mudanças Atuais (git diff)'}
           </button>
         </div>
       )}
 
       {result && (
-        <div style={{ background: '#0d1117', borderRadius: '8px', padding: '16px', marginBottom: '16px', fontFamily: 'monospace', fontSize: '12px', color: '#ccc', whiteSpace: 'pre-wrap', maxHeight: '380px', overflowY: 'auto', lineHeight: 1.7 }}>
+        <div style={{ background: C.surfaceContainerLowest, borderRadius: '8px', padding: '16px', marginBottom: '16px', fontFamily: F.code, fontSize: '12px', color: C.onSurfaceVariant, whiteSpace: 'pre-wrap', maxHeight: '380px', overflowY: 'auto', lineHeight: 1.7, border: `1px solid ${C.outlineVariant}` }}>
           {result}
         </div>
       )}
 
       {activeMode === 'manual' && total > 0 && (
         <div>
-          <div style={{ fontSize: '12px', color: C.muted, marginBottom: '10px' }}>{total} arquivos com dependentes mapeados</div>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: C.muted, marginBottom: '8px' }}>Maior Impacto Transitivo</div>
+          <div style={{ fontSize: '10px', color: C.outline, marginBottom: '12px', fontFamily: F.code, letterSpacing: '0.06em', textTransform: 'uppercase' as const }}>{total} arquivos com dependentes mapeados</div>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: C.onSurfaceVariant, marginBottom: '8px', fontFamily: F.code }}>MAIOR IMPACTO TRANSITIVO</div>
           {topImpact.map(([file, entry]) => (
             <div key={file} onClick={() => { setQuery(file); setActiveMode('manual'); }}
-              style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: `1px solid ${C.border}`, cursor: 'pointer' }}>
-              <div style={{ flex: 1, fontFamily: 'monospace', fontSize: '12px', color: C.accent }}>{file}</div>
-              <div style={{ fontSize: '12px', color: C.muted }}>
-                direto: <strong style={{ color: C.green }}>{entry.directCount}</strong> &nbsp;|&nbsp;
-                transitivo: <strong style={{ color: C.orange }}>{entry.transitiveCount}</strong>
+              style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 0', borderBottom: `1px solid ${C.outlineVariant}`, cursor: 'pointer' }}>
+              <div style={{ flex: 1, fontFamily: F.code, fontSize: '12px', color: C.primaryFixedDim }}>{file}</div>
+              <div style={{ fontSize: '12px', color: C.outline, fontFamily: F.code }}>
+                direto: <strong style={{ color: C.secondary }}>{entry.directCount}</strong> &nbsp;|&nbsp;
+                transitivo: <strong style={{ color: C.tertiaryFixedDim }}>{entry.transitiveCount}</strong>
               </div>
             </div>
           ))}
@@ -381,9 +432,101 @@ function ImpactTab({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPat
   );
 }
 
-// ── ComplexFunctionsView ───────────────────────────────────────────────────────
-interface FnEntry { file: string; module: string; name: string; line: number; cyclomatic: number; cognitive: number; maxNesting: number; offender: boolean; }
-interface FnPayload { thresholds: { cyclomatic: number; cognitive: number; maxNesting: number }; totalFunctions: number; offenderCount: number; functions: FnEntry[]; }
+// ── CrossTierImpactView ────────────────────────────────────────────────────────
+const KIND_COLORS: Record<string, string> = { file: C.primaryFixedDim, method: '#9d8cff', plsql: C.tertiaryFixedDim, table: C.secondary, column: '#4ecdc4' };
+const KIND_LABELS: Record<string, string> = { file: 'arquivo', method: 'método', plsql: 'PL/SQL', table: 'tabela', column: 'coluna' };
+
+function shortImpactId(id: string): string {
+  const i = id.indexOf(':');
+  return i >= 0 ? id.slice(i + 1) : id;
+}
+
+function CrossTierImpactView({ impact, blast, onSelect }: {
+  impact: NonNullable<ImpactOfResponse['impact']>;
+  blast?: ImpactOfResponse['blast'];
+  onSelect: (entity: string) => void;
+}) {
+  const maxDepthShown = 6;
+  const byDepth = useMemo(() => {
+    const m = new Map<number, ImpactedNode[]>();
+    for (const n of impact.affected) {
+      const arr = m.get(n.depth) ?? [];
+      arr.push(n);
+      m.set(n.depth, arr);
+    }
+    return [...m.entries()].sort((a, b) => a[0] - b[0]);
+  }, [impact]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '14px', alignItems: 'baseline', flexWrap: 'wrap' as const, marginBottom: '12px', padding: '12px', background: C.surfaceContainerLow, borderRadius: '8px', border: `1px solid ${C.outlineVariant}` }}>
+        <span style={{ fontFamily: F.code, fontSize: '13px', color: C.primaryFixedDim }}>{impact.entity}</span>
+        <strong style={{ color: C.onSurface, fontFamily: F.code, fontSize: '13px' }}>{impact.totalVisited} entidades afetadas{impact.truncated ? ' (truncado em 2000)' : ''}</strong>
+        {Object.entries(impact.byKind).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+          <span key={k} style={{ fontSize: '11px', color: KIND_COLORS[k] ?? C.outline, fontFamily: F.code }}>● {KIND_LABELS[k] ?? k}: {v}</span>
+        ))}
+      </div>
+      {Object.keys(impact.byModule).length > 0 && (
+        <div style={{ fontSize: '12px', color: C.outline, marginBottom: '12px', fontFamily: F.code }}>
+          Módulos: {Object.entries(impact.byModule).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([m, c]) => `${m} (${c})`).join(' · ')}
+        </div>
+      )}
+      {blast && blast.top.length > 0 && (
+        <div style={{ marginBottom: '16px', background: C.surfaceContainerLow, borderRadius: '8px', border: `1px solid ${C.outlineVariant}`, overflow: 'hidden' }}>
+          <div style={{ padding: '10px 14px', borderBottom: `1px solid ${C.outlineVariant}`, fontSize: '10px', color: C.outline, fontFamily: F.code, letterSpacing: '0.06em', textTransform: 'uppercase' as const }}>MAIS CRÍTICOS (por nº de dependentes)</div>
+          {blast.top.slice(0, 8).map((t) => (
+            <div key={t.id} onClick={() => onSelect(t.id)} style={{ display: 'flex', gap: '10px', padding: '8px 14px', borderBottom: `1px solid ${C.outlineVariant}`, fontSize: '12px', cursor: 'pointer' }}>
+              <span style={{ color: KIND_COLORS[t.kind] ?? C.outline, width: '58px', flexShrink: 0, fontFamily: F.code }}>{KIND_LABELS[t.kind] ?? t.kind}</span>
+              <span style={{ fontFamily: F.code, color: C.onSurface, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{shortImpactId(t.id)}</span>
+              <span style={{ color: C.tertiaryFixedDim, width: '110px', textAlign: 'right' as const, fontFamily: F.code }}>{t.dependents} dep.</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ maxHeight: '320px', overflowY: 'auto' as const }}>
+        {byDepth.slice(0, maxDepthShown).map(([depth, nodes]) => (
+          <div key={depth} style={{ marginBottom: '12px' }}>
+            <div style={{ fontSize: '10px', fontWeight: 600, color: C.outline, marginBottom: '6px', fontFamily: F.code, letterSpacing: '0.06em', textTransform: 'uppercase' as const }}>{depth} SALTO(S)</div>
+            {nodes.slice(0, 25).map((n) => (
+              <div key={n.id} onClick={() => onSelect(n.id)} style={{ display: 'flex', gap: '8px', padding: '4px 0', fontSize: '12px', cursor: 'pointer' }}>
+                <span title={n.confidence === 'inferred' ? 'heurístico' : 'resolvido por AST/SQL'}>{n.confidence === 'inferred' ? '🟡' : '🟢'}</span>
+                <span style={{ color: KIND_COLORS[n.kind] ?? C.outline, width: '58px', flexShrink: 0, fontFamily: F.code }}>{KIND_LABELS[n.kind] ?? n.kind}</span>
+                <span style={{ fontFamily: F.code, color: C.onSurface, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{shortImpactId(n.id)}</span>
+                {n.module && <span style={{ color: C.outline, fontFamily: F.code }}>{n.module}</span>}
+              </div>
+            ))}
+            {nodes.length > 25 && <div style={{ fontSize: '11px', color: C.outline, fontFamily: F.code }}>... e mais {nodes.length - 25} nesta profundidade</div>}
+          </div>
+        ))}
+      </div>
+      {impact.candidates && impact.candidates.length > 0 && (
+        <div style={{ fontSize: '11px', color: C.outline, marginTop: '8px', fontFamily: F.code }}>
+          Outras entidades com esse nome: {impact.candidates.map((c) => (
+            <span key={c} onClick={() => onSelect(c)} style={{ color: C.primaryFixedDim, cursor: 'pointer', marginRight: '8px' }}>{shortImpactId(c)}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface FnEntry {
+  file: string;
+  module: string;
+  name: string;
+  line: number;
+  cyclomatic: number;
+  cognitive: number;
+  maxNesting: number;
+  offender: boolean;
+}
+
+interface FnPayload {
+  thresholds: { cyclomatic: number; cognitive: number; maxNesting: number };
+  totalFunctions: number;
+  offenderCount: number;
+  functions: FnEntry[];
+}
 
 function ComplexFunctionsView({ ticCodeDir }: { ticCodeDir: string }) {
   const [data, setData] = useState<FnPayload | null>(null);
@@ -392,64 +535,102 @@ function ComplexFunctionsView({ ticCodeDir }: { ticCodeDir: string }) {
 
   useEffect(() => {
     window.ticAnalyzer.readFile(`${ticCodeDir}/complex-functions.json`).then((c) => {
-      if (c) { try { setData(JSON.parse(c)); } catch { setData(null); } }
+      if (c) {
+        try {
+          setData(JSON.parse(c));
+        } catch {
+          setData(null);
+        }
+      }
       setLoaded(true);
     });
   }, [ticCodeDir]);
 
-  if (!loaded) return <div style={{ color: C.muted, fontSize: '13px', padding: '20px' }}>Carregando funções...</div>;
-  if (!data || data.functions.length === 0) {
-    return <div style={{ color: C.muted, fontSize: '13px', padding: '40px', textAlign: 'center' as const }}>Nenhuma função complexa detectada (requer linguagens com AST: Java, TypeScript ou JavaScript).</div>;
+  if (!loaded) {
+    return <div style={{ color: C.onSurfaceVariant, fontSize: '13px', padding: '20px' }}>Carregando funções...</div>;
   }
 
-  const t = data.thresholds;
+  if (!data || data.functions.length === 0) {
+    return (
+      <div style={{ color: C.onSurfaceVariant, fontSize: '13px', padding: '40px', textAlign: 'center' as const }}>
+        Nenhuma função complexa detectada (requer linguagens com AST: Java, TypeScript ou JavaScript).
+      </div>
+    );
+  }
+
+  const thresholds = data.thresholds;
   const rows = onlyOffenders ? data.functions.filter((f) => f.offender) : data.functions;
-  const ccColor = (cc: number) => (cc > 30 ? C.red : cc > t.cyclomatic ? C.orange : cc > 7 ? '#d9c200' : C.green);
-  const th = { textAlign: 'left' as const, padding: '8px 10px', color: C.muted, fontWeight: 600, fontSize: '11px', textTransform: 'uppercase' as const, letterSpacing: '0.04em', position: 'sticky' as const, top: 0, background: '#0d1117' };
-  const td = { padding: '7px 10px', fontSize: '12px', borderBottom: `1px solid ${C.border}` };
+  const toggleStyle = (active: boolean) => ({
+    padding: '8px 12px',
+    borderRadius: '6px',
+    border: `1px solid ${active ? C.primaryFixedDim : C.outlineVariant}`,
+    background: active ? `${C.primaryFixedDim}18` : 'transparent',
+    color: active ? C.primaryFixedDim : C.onSurfaceVariant,
+    cursor: 'pointer',
+    fontFamily: F.code,
+    fontSize: '12px',
+    fontWeight: active ? 600 : 400
+  });
+  const metricColor = (value: number, warn: number, severe: number) =>
+    value > severe ? C.error : value > warn ? C.tertiaryFixedDim : C.onSurface;
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' as const }}>
-        <div style={{ display: 'flex', gap: '14px', flex: 1, flexWrap: 'wrap' as const }}>
-          <span style={{ fontSize: '12px', color: C.muted }}>Funções analisadas <strong style={{ color: C.text }}>{data.totalFunctions.toLocaleString()}</strong></span>
-          <span style={{ fontSize: '12px', color: C.muted }}>Acima do limite <strong style={{ color: data.offenderCount > 0 ? C.red : C.green }}>{data.offenderCount}</strong></span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' as const, marginBottom: '12px' }}>
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' as const, fontFamily: F.code, fontSize: '12px' }}>
+          <span style={{ color: C.onSurfaceVariant }}>Funções analisadas <strong style={{ color: C.onSurface }}>{data.totalFunctions.toLocaleString()}</strong></span>
+          <span style={{ color: C.onSurfaceVariant }}>Ofensoras <strong style={{ color: data.offenderCount > 0 ? C.error : C.secondary }}>{data.offenderCount}</strong></span>
         </div>
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button style={S.tab(!onlyOffenders)} onClick={() => setOnlyOffenders(false)}>Todas</button>
-          <button style={S.tab(onlyOffenders)} onClick={() => setOnlyOffenders(true)}>Só ofensoras</button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button style={toggleStyle(!onlyOffenders)} onClick={() => setOnlyOffenders(false)}>Todas</button>
+          <button style={toggleStyle(onlyOffenders)} onClick={() => setOnlyOffenders(true)}>Só ofensoras</button>
         </div>
       </div>
 
-      <div style={{ fontSize: '11px', color: C.muted, marginBottom: '10px', padding: '8px 10px', background: '#0d1b2a', borderRadius: '6px', border: `1px solid ${C.border}` }}>
-        🔴 ofensora = ultrapassa um limite: complexidade ciclomática &gt; {t.cyclomatic}, cognitiva &gt; {t.cognitive} ou aninhamento &gt; {t.maxNesting}.
+      <div style={{ marginBottom: '12px', padding: '10px 12px', background: C.surfaceContainerLowest, borderRadius: '8px', border: `1px solid ${C.outlineVariant}`, fontFamily: F.code, fontSize: '11px', color: C.onSurfaceVariant }}>
+        Limites: ciclomática &gt; {thresholds.cyclomatic}, cognitiva &gt; {thresholds.cognitive}, aninhamento &gt; {thresholds.maxNesting}.
       </div>
 
-      <div style={{ background: '#0d1117', borderRadius: '8px', maxHeight: '460px', overflowY: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' as const }}>
-          <thead>
-            <tr>
-              <th style={th}>Função</th>
-              <th style={th}>Arquivo</th>
-              <th style={{ ...th, textAlign: 'right' as const }}>CC</th>
-              <th style={{ ...th, textAlign: 'right' as const }}>Cognitiva</th>
-              <th style={{ ...th, textAlign: 'right' as const }}>Aninham.</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((f, i) => (
-              <tr key={`${f.file}:${f.name}:${f.line}:${i}`} style={{ background: f.offender ? '#2a141422' : 'transparent' }}>
-                <td style={{ ...td, fontFamily: 'monospace', color: f.offender ? C.red : C.text, whiteSpace: 'nowrap' as const }}>
-                  {f.offender ? '🔴 ' : ''}{f.name}<span style={{ color: '#666' }}>:{f.line}</span>
-                </td>
-                <td style={{ ...td, fontFamily: 'monospace', color: C.muted, maxWidth: '320px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }} title={f.file}>{f.file}</td>
-                <td style={{ ...td, textAlign: 'right' as const, fontWeight: 700, color: ccColor(f.cyclomatic) }}>{f.cyclomatic}</td>
-                <td style={{ ...td, textAlign: 'right' as const, color: f.cognitive > t.cognitive ? C.orange : C.text }}>{f.cognitive}</td>
-                <td style={{ ...td, textAlign: 'right' as const, color: f.maxNesting > t.maxNesting ? C.orange : C.text }}>{f.maxNesting}</td>
+      <div style={{ background: C.surfaceContainerLowest, borderRadius: '8px', border: `1px solid ${C.outlineVariant}`, overflow: 'hidden' }}>
+        <div style={{ maxHeight: '520px', overflowY: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' as const }}>
+            <thead>
+              <tr style={{ background: C.surfaceContainerLow }}>
+                {['Função', 'Módulo', 'Arquivo', 'CC', 'Cognitiva', 'Aninhamento'].map((label) => (
+                  <th
+                    key={label}
+                    style={{
+                      textAlign: label === 'CC' || label === 'Cognitiva' || label === 'Aninhamento' ? 'right' : 'left',
+                      padding: '10px 12px',
+                      fontFamily: F.code,
+                      fontSize: '10px',
+                      color: C.outline,
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase'
+                    }}
+                  >
+                    {label}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((fn, index) => (
+                <tr key={`${fn.file}:${fn.name}:${fn.line}:${index}`} style={{ borderTop: `1px solid ${C.outlineVariant}`, background: fn.offender ? `${C.error}0f` : 'transparent' }}>
+                  <td style={{ padding: '10px 12px', fontFamily: F.code, fontSize: '12px', color: fn.offender ? C.error : C.onSurface }}>
+                    {fn.name}
+                    <span style={{ color: C.outline, marginLeft: '6px' }}>:{fn.line}</span>
+                  </td>
+                  <td style={{ padding: '10px 12px', fontFamily: F.code, fontSize: '12px', color: C.secondaryFixedDim }}>{fn.module}</td>
+                  <td style={{ padding: '10px 12px', fontFamily: F.code, fontSize: '12px', color: C.onSurfaceVariant, maxWidth: '320px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }} title={fn.file}>{fn.file}</td>
+                  <td style={{ padding: '10px 12px', fontFamily: F.code, fontSize: '12px', textAlign: 'right' as const, color: metricColor(fn.cyclomatic, thresholds.cyclomatic, thresholds.cyclomatic + 10), fontWeight: 700 }}>{fn.cyclomatic}</td>
+                  <td style={{ padding: '10px 12px', fontFamily: F.code, fontSize: '12px', textAlign: 'right' as const, color: metricColor(fn.cognitive, thresholds.cognitive, thresholds.cognitive + 10) }}>{fn.cognitive}</td>
+                  <td style={{ padding: '10px 12px', fontFamily: F.code, fontSize: '12px', textAlign: 'right' as const, color: metricColor(fn.maxNesting, thresholds.maxNesting, thresholds.maxNesting + 2) }}>{fn.maxNesting}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -458,7 +639,7 @@ function ComplexFunctionsView({ ticCodeDir }: { ticCodeDir: string }) {
 // ── MetricsTab ─────────────────────────────────────────────────────────────────
 function MetricsTab({ ticCodeDir }: { ticCodeDir: string }) {
   const [content, setContent] = useState('');
-  const [activeSubTab, setActiveSubTab] = useState<'summary' | 'functions' | 'graph'>('summary');
+  const [activeSubTab, setActiveSubTab] = useState<'summary' | 'functions'>('summary');
 
   useEffect(() => {
     window.ticAnalyzer.readFile(`${ticCodeDir}/metrics-summary.md`).then((c) => {
@@ -466,558 +647,807 @@ function MetricsTab({ ticCodeDir }: { ticCodeDir: string }) {
     });
   }, [ticCodeDir]);
 
+  const tabStyle = (active: boolean) => ({
+    padding: '8px 12px',
+    borderRadius: '6px',
+    border: `1px solid ${active ? C.primaryFixedDim : C.outlineVariant}`,
+    background: active ? `${C.primaryFixedDim}18` : 'transparent',
+    color: active ? C.primaryFixedDim : C.onSurfaceVariant,
+    cursor: 'pointer',
+    fontFamily: F.code,
+    fontSize: '12px',
+    fontWeight: active ? 600 : 400
+  });
+
   return (
     <div>
-      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' as const, gap: '8px' }}>
+      <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' as const }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>Métricas de Qualidade</div>
-          <div style={{ fontSize: '12px', color: C.muted }}>Complexidade por função · Dívida Técnica · Hotspots · Violações</div>
+          <div style={{ fontWeight: 600, fontSize: '20px', marginBottom: '4px', fontFamily: F.headline, color: C.onSurface }}>Métricas de Qualidade</div>
+          <div style={{ fontSize: '13px', color: C.onSurfaceVariant }}>Complexidade por função · Dívida Técnica · Hotspots · Violações</div>
         </div>
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button style={S.tab(activeSubTab === 'summary')} onClick={() => setActiveSubTab('summary')}>Relatório</button>
-          <button style={S.tab(activeSubTab === 'functions')} onClick={() => setActiveSubTab('functions')}>Funções</button>
-          <button style={S.tab(activeSubTab === 'graph')} onClick={() => setActiveSubTab('graph')}>Grafo de Deps</button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button style={tabStyle(activeSubTab === 'summary')} onClick={() => setActiveSubTab('summary')}>Relatório</button>
+          <button style={tabStyle(activeSubTab === 'functions')} onClick={() => setActiveSubTab('functions')}>Funções</button>
         </div>
       </div>
-
-      {activeSubTab === 'summary' && (
-        <div style={{ background: '#0d1117', borderRadius: '8px', padding: '16px', maxHeight: '500px', overflowY: 'auto', fontFamily: 'monospace', fontSize: '12px', color: '#ccc', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+      {activeSubTab === 'summary' ? (
+        <div style={{ background: C.surfaceContainerLowest, borderRadius: '8px', padding: '16px', maxHeight: '600px', overflowY: 'auto', fontFamily: F.code, fontSize: '12px', color: C.onSurfaceVariant, whiteSpace: 'pre-wrap', lineHeight: 1.7, border: `1px solid ${C.outlineVariant}` }}>
           {content}
         </div>
-      )}
-
-      {activeSubTab === 'functions' && <ComplexFunctionsView ticCodeDir={ticCodeDir} />}
-
-      {activeSubTab === 'graph' && (
-        <GraphViewer ticCodeDir={ticCodeDir} mode="deps" />
+      ) : (
+        <ComplexFunctionsView ticCodeDir={ticCodeDir} />
       )}
     </div>
   );
 }
 
 // ── DocsTab ───────────────────────────────────────────────────────────────────
-function Code({ children }: { children: string }) {
+function CodeBlock({ children }: { children: string }) {
   return (
-    <pre style={{ background: '#0d1117', border: `1px solid ${C.border}`, borderRadius: '8px', padding: '12px 16px', fontSize: '12px', color: '#e0e0e0', overflowX: 'auto', margin: '8px 0', fontFamily: 'monospace', lineHeight: 1.6 }}>
+    <pre style={{ background: C.surfaceContainerLowest, border: `1px solid ${C.outlineVariant}`, borderRadius: '6px', padding: '12px 16px', fontSize: '12px', color: C.onSurface, overflowX: 'auto', margin: '8px 0', fontFamily: F.code, lineHeight: 1.6 }}>
       {children}
     </pre>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function DocSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: '28px' }}>
-      <div style={{ fontSize: '15px', fontWeight: 700, color: C.accent, borderBottom: `1px solid ${C.border}`, paddingBottom: '8px', marginBottom: '14px' }}>{title}</div>
+      <div style={{ fontSize: '16px', fontWeight: 600, color: C.primaryFixedDim, borderBottom: `1px solid ${C.outlineVariant}`, paddingBottom: '8px', marginBottom: '14px', fontFamily: F.headline }}>{title}</div>
       {children}
     </div>
   );
 }
 
-function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+function DocStep({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', gap: '14px', marginBottom: '14px' }}>
-      <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: C.accent, color: '#fff', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '1px' }}>{n}</div>
+      <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: C.primaryFixedDim, color: C.onPrimary, fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '1px', fontFamily: F.headline }}>{n}</div>
       <div>
-        <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>{title}</div>
-        <div style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.7 }}>{children}</div>
+        <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px', fontFamily: F.headline, color: C.onSurface }}>{title}</div>
+        <div style={{ fontSize: '13px', color: C.onSurfaceVariant, lineHeight: 1.7 }}>{children}</div>
       </div>
     </div>
   );
 }
 
-function Tag({ color = C.accent, children }: { color?: string; children: string }) {
-  return <span style={{ display: 'inline-block', padding: '2px 8px', background: color + '22', border: `1px solid ${color}55`, borderRadius: '4px', fontSize: '11px', color, fontFamily: 'monospace', marginRight: '4px' }}>{children}</span>;
+function DocTag({ color = C.primaryFixedDim, children }: { color?: string; children: string }) {
+  return <span style={{ display: 'inline-block', padding: '2px 8px', background: color + '22', border: `1px solid ${color}55`, borderRadius: '4px', fontSize: '11px', color, fontFamily: F.code, marginRight: '4px' }}>{children}</span>;
 }
 
 function DocsTab() {
   const [section, setSection] = useState<'inicio' | 'claude' | 'copilot' | 'abas' | 'ferramentas' | 'arquivos' | 'cli'>('inicio');
 
   const NAV = [
-    { id: 'inicio',      label: 'Primeiros Passos' },
-    { id: 'claude',      label: 'Claude Code' },
-    { id: 'copilot',     label: 'VS Code / Copilot' },
-    { id: 'abas',        label: 'Abas do App' },
-    { id: 'ferramentas', label: 'Ferramentas MCP' },
-    { id: 'arquivos',    label: 'Arquivos Gerados' },
-    { id: 'cli',         label: 'CLI / CI-CD' },
+    { id: 'inicio', label: 'Primeiros Passos', icon: 'rocket_launch' },
+    { id: 'claude', label: 'Claude Code', icon: 'smart_toy' },
+    { id: 'copilot', label: 'VS Code / Copilot', icon: 'code' },
+    { id: 'abas', label: 'Abas do App', icon: 'dashboard' },
+    { id: 'ferramentas', label: 'Ferramentas MCP', icon: 'build' },
+    { id: 'arquivos', label: 'Arquivos Gerados', icon: 'folder' },
+    { id: 'cli', label: 'CLI / CI-CD', icon: 'terminal' },
   ] as const;
 
   return (
     <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
-      {/* Sidebar nav */}
-      <div style={{ width: '160px', flexShrink: 0, position: 'sticky', top: '0' }}>
+      <div style={{ width: '180px', flexShrink: 0, position: 'sticky', top: '0' }}>
         {NAV.map((n) => (
           <button key={n.id} onClick={() => setSection(n.id)}
-            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', marginBottom: '4px', background: section === n.id ? C.accent + '22' : 'transparent', border: `1px solid ${section === n.id ? C.accent : C.border}`, borderRadius: '8px', color: section === n.id ? C.accent : C.muted, cursor: 'pointer', fontSize: '12px', fontWeight: section === n.id ? 600 : 400 }}>
+            style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', textAlign: 'left', padding: '10px 12px', marginBottom: '2px', background: section === n.id ? `${C.primaryFixedDim}18` : 'transparent', border: `1px solid ${section === n.id ? C.primaryFixedDim : C.outlineVariant}`, borderRadius: '6px', color: section === n.id ? C.primaryFixedDim : C.onSurfaceVariant, cursor: 'pointer', fontSize: '13px', fontWeight: section === n.id ? 600 : 400, fontFamily: F.body, transition: 'all 0.15s' }}>
+            <Icon name={n.icon} size={16} color={section === n.id ? C.primaryFixedDim : C.outline} />
             {n.label}
           </button>
         ))}
       </div>
 
-      {/* Content */}
       <div style={{ flex: 1, minWidth: 0 }}>
-
-        {/* ── Primeiros Passos ── */}
         {section === 'inicio' && (
           <div>
-            <Section title="O que é o TIC Analyzer?">
-              <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: '0 0 12px 0' }}>
-                O TIC Analyzer é um motor de engenharia reversa local para projetos grandes. Ele escaneia seu código,
-                mapeia dependências, endpoints, chamadas de banco, regras de negócio, métricas de qualidade e muito mais —
-                tudo <strong style={{ color: C.green }}>sem enviar nenhuma linha de código para a internet</strong> e
-                sem gastar nenhum token de IA na análise.
+            <DocSection title="O que é o TIC Analyzer?">
+              <p style={{ fontSize: '14px', color: C.onSurfaceVariant, lineHeight: 1.8, margin: '0 0 12px 0' }}>
+                Motor de engenharia reversa local para projetos grandes. Escaneia código, mapeia dependências, endpoints, chamadas de banco, métricas de qualidade e muito mais — tudo <strong style={{ color: C.secondary }}>sem enviar nenhuma linha de código para a internet</strong> e sem gastar nenhum token de IA.
               </p>
-              <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: '0 0 12px 0' }}>
-                O resultado é uma pasta <Tag>.tic-code/</Tag> dentro do seu projeto, com arquivos Markdown compactos
-                que o Claude Code (ou qualquer IA) pode ler de forma cirúrgica — sem precisar carregar o projeto inteiro no contexto.
-              </p>
-            </Section>
-
-            <Section title="Como analisar um projeto">
-              <Step n={1} title="Selecione a pasta raiz do projeto">
-                Clique em <strong>Selecionar</strong> e escolha a pasta raiz do projeto — a mesma onde ficam <Tag>package.json</Tag>, <Tag>pom.xml</Tag> ou <Tag>build.gradle</Tag>.
-                <br /><br />
-                <span style={{ color: C.red }}>Não selecione a pasta <Tag>.tic-code</Tag> — sempre a pasta pai.</span>
-              </Step>
-              <Step n={2} title="Clique em Analisar">
-                O progresso aparece em tempo real, fase a fase. Para projetos grandes (10k–200k arquivos) o processo leva de 30 segundos a alguns minutos. A partir da segunda análise, o cache incremental acelera significativamente os módulos não alterados.
-              </Step>
-              <Step n={3} title="Explore os resultados">
-                Após a análise, as abas <Tag>Impacto</Tag>, <Tag>Métricas</Tag>, <Tag>Multi-Grafo</Tag> e <Tag>Módulos</Tag> ficam disponíveis.
-                Uma pasta <Tag>.tic-code/</Tag> é criada dentro do projeto com todos os artefatos.
-              </Step>
-              <Step n={4} title="(Opcional) Configure a IA de sua escolha">
-                Para o <strong>Claude Code</strong>: ative o MCP Server e configure <Tag>.claude/settings.json</Tag> — veja a aba <em>Claude Code</em>.<br />
-                Para o <strong>GitHub Copilot</strong>: o <Tag>copilot-instructions.md</Tag> já foi gerado. Para as 35 ferramentas, veja a aba <em>VS Code / Copilot</em>.
-              </Step>
-            </Section>
-
-            <Section title="Linguagens suportadas">
+            </DocSection>
+            <DocSection title="Como analisar um projeto">
+              <DocStep n={1} title="Selecione a pasta raiz do projeto">Clique em <strong>Selecionar</strong> e escolha a pasta raiz. <span style={{ color: C.error }}>Não selecione a pasta <DocTag color={C.error}>.tic-code</DocTag> — sempre a pasta pai.</span></DocStep>
+              <DocStep n={2} title="Clique em Analisar">O progresso aparece em tempo real com 25 fases. A partir da segunda análise, o cache incremental acelera os módulos não alterados.</DocStep>
+              <DocStep n={3} title="Explore os resultados">Após a análise, todas as abas ficam disponíveis. Uma pasta <DocTag>.tic-code/</DocTag> é criada com todos os artefatos.</DocStep>
+              <DocStep n={4} title="(Opcional) Configure a IA">Para Claude Code: ative o MCP Server e configure <DocTag>.claude/settings.json</DocTag>. Para GitHub Copilot: o <DocTag>copilot-instructions.md</DocTag> já foi gerado.</DocStep>
+            </DocSection>
+            <DocSection title="Linguagens suportadas">
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                 {['TypeScript','JavaScript','Java','Kotlin','Python','Go','Rust','C#','PHP','Ruby','PL/SQL','SQL','HTML','CSS','SCSS'].map((l) => (
-                  <Tag key={l} color={C.green}>{l}</Tag>
+                  <DocTag key={l} color={C.secondary}>{l}</DocTag>
                 ))}
               </div>
-              <p style={{ fontSize: '12px', color: C.muted, marginTop: '10px' }}>Frameworks detectados automaticamente: React, Vue, Angular, Next.js, Express, NestJS, Spring, Django, FastAPI, Flask e outros.</p>
-            </Section>
+            </DocSection>
           </div>
         )}
 
-        {/* ── Claude Code ── */}
         {section === 'claude' && (
           <div>
-            <Section title="Como funciona com o Claude Code">
-              <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: '0 0 8px 0' }}>
-                O Claude Code usa MCP (Model Context Protocol) para chamar as ferramentas do TIC Analyzer sob demanda —
-                sem você precisar pedir. Ele lê o <Tag>CLAUDE.md</Tag> gerado pela análise, entende que há um servidor MCP
-                disponível, e já consulta <Tag>get_quick_context()</Tag> sozinho antes de responder qualquer pergunta sobre o projeto.
+            <DocSection title="Como funciona com o Claude Code">
+              <p style={{ fontSize: '14px', color: C.onSurfaceVariant, lineHeight: 1.8, margin: '0 0 8px 0' }}>
+                O Claude Code usa MCP para chamar as ferramentas do TIC Analyzer sob demanda. Ele lê o <DocTag>CLAUDE.md</DocTag> gerado e já consulta <DocTag>get_quick_context()</DocTag> sozinho antes de responder qualquer pergunta sobre o projeto.
               </p>
-              <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: 0 }}>
-                Cada ferramenta retorna apenas o necessário: <Tag>get_impact()</Tag> custa ~200 tokens, <Tag>get_metrics()</Tag> ~500 tokens.
-                O Claude nunca carrega o projeto inteiro — apenas o que precisa, quando precisa.
-              </p>
-            </Section>
-
-            <Section title="Configuração passo a passo">
-              <Step n={1} title="Rode a análise">
-                Clique em <strong>Analisar</strong>. Quando terminar, o arquivo <Tag>CLAUDE.md</Tag> é gerado automaticamente na raiz do projeto com as instruções de navegação para o Claude.
-              </Step>
-              <Step n={2} title="Inicie o MCP Server">
-                Na aba <Tag>Visão Geral</Tag>, clique em <strong>Iniciar MCP</strong>. O servidor sobe em <Tag>localhost:7432</Tag> e fica ativo enquanto o app estiver aberto.
-              </Step>
-              <Step n={3} title="Crie .claude/settings.json no projeto analisado">
-                Dentro da pasta raiz do projeto (a mesma que você analisou), crie:
-                <Code>{`# Linux / macOS
-mkdir -p /seu/projeto/.claude
-
-# Windows PowerShell
-New-Item -ItemType Directory -Force -Path C:\seu\projeto\.claude`}</Code>
-                Conteúdo do arquivo <Tag>.claude/settings.json</Tag>:
-                <Code>{`{
-  "mcpServers": {
-    "tic-analyzer": {
-      "url": "http://localhost:7432/mcp"
-    }
-  }
-}`}</Code>
-              </Step>
-              <Step n={4} title="Abra o projeto no Claude Code e teste">
-                No terminal, dentro do projeto:
-                <Code>{`claude
-
-# Verifique se o MCP está conectado:
-/mcp
-# → Deve mostrar: tic-analyzer  connected  35 tools`}</Code>
-              </Step>
-              <Step n={5} title="Use normalmente — o Claude sabe o que fazer">
-                Basta conversar. O Claude vai consultar as ferramentas automaticamente:
-                <Code>{`"Quero refatorar o módulo de pagamentos. Por onde começo?"
-→ Claude chama: get_quick_context() + get_module("pagamentos")
-   + get_metrics("pagamentos") + get_hotspots()
-
-"Quais arquivos vou afetar se renomear UserService?"
-→ Claude chama: get_impact("src/services/user.service.ts")
-
-"Como está a dívida técnica do projeto?"
-→ Claude chama: get_hotspots() + get_violations()`}</Code>
-              </Step>
-            </Section>
-
-            <Section title="Dicas de uso">
-              {[
-                { tip: 'Não peça para carregar tudo', desc: 'Nunca diga "leia todos os arquivos do projeto". O Claude vai consultar o MCP de forma cirúrgica — deixe ele decidir o que buscar.' },
-                { tip: 'Antes de commitar, use get_diff_impact', desc: 'Diga: "antes de fazer o commit, analise o impacto das mudanças atuais". O Claude chama get_diff_impact() automaticamente.' },
-                { tip: 'Re-analise quando o projeto mudar', desc: 'O .tic-code/ é um snapshot. Após adicionar muitos arquivos ou fazer uma refatoração grande, rode a análise novamente. O cache incremental faz isso em segundos para módulos não alterados.' },
-                { tip: 'O MCP Server precisa estar aberto', desc: 'O servidor só funciona enquanto o TIC Analyzer estiver rodando. Se fechar o app, reinicie o MCP Server antes de abrir o Claude Code.' },
-              ].map((item) => (
-                <div key={item.tip} style={{ display: 'flex', gap: '12px', padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
-                  <div style={{ color: C.accent, fontSize: '14px', flexShrink: 0, marginTop: '1px' }}>→</div>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '3px' }}>{item.tip}</div>
-                    <div style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.6 }}>{item.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </Section>
+            </DocSection>
+            <DocSection title="Configuração">
+              <DocStep n={1} title="Rode a análise">Clique em <strong>Analisar</strong>. O arquivo <DocTag>CLAUDE.md</DocTag> é gerado automaticamente.</DocStep>
+              <DocStep n={2} title="Inicie o MCP Server">Na aba <DocTag>Visão Geral</DocTag>, clique em <strong>Iniciar MCP</strong>. Sobe em <DocTag>localhost:7432</DocTag>.</DocStep>
+              <DocStep n={3} title="Crie .claude/settings.json">
+                <CodeBlock>{`{\n  "mcpServers": {\n    "tic-analyzer": {\n      "url": "http://localhost:7432/mcp"\n    }\n  }\n}`}</CodeBlock>
+              </DocStep>
+              <DocStep n={4} title="Teste no Claude Code">
+                <CodeBlock>{`claude\n/mcp\n# → tic-analyzer  connected  62 tools`}</CodeBlock>
+              </DocStep>
+            </DocSection>
           </div>
         )}
 
-        {/* ── VS Code / Copilot ── */}
         {section === 'copilot' && (
           <div>
-            <Section title="Dois modos de integração com o Copilot">
+            <DocSection title="Dois modos">
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '8px' }}>
-                <div style={{ padding: '14px', background: '#0d1b2a', borderRadius: '10px', border: `1px solid ${C.green}44` }}>
-                  <div style={{ fontWeight: 700, color: C.green, marginBottom: '6px', fontSize: '13px' }}>Modo Básico</div>
-                  <div style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.8 }}>
-                    Qualquer versão do VS Code.<br />
-                    Funciona imediatamente após a análise.<br />
-                    O Copilot lê <Tag color={C.green}>copilot-instructions.md</Tag> automaticamente.<br />
-                    Você referencia arquivos com <Tag color={C.green}>#file:</Tag>
-                  </div>
+                <div style={{ padding: '14px', background: C.surfaceContainerLow, borderRadius: '8px', border: `1px solid ${C.secondary}44` }}>
+                  <div style={{ fontWeight: 700, color: C.secondary, marginBottom: '6px', fontSize: '14px', fontFamily: F.headline }}>Modo Básico</div>
+                  <div style={{ fontSize: '13px', color: C.onSurfaceVariant, lineHeight: 1.8 }}>Qualquer versão do VS Code.<br />Copilot lê <DocTag color={C.secondary}>copilot-instructions.md</DocTag> automaticamente.</div>
                 </div>
-                <div style={{ padding: '14px', background: '#0d1b2a', borderRadius: '10px', border: `1px solid ${C.accent}44` }}>
-                  <div style={{ fontWeight: 700, color: C.accent, marginBottom: '6px', fontSize: '13px' }}>Modo MCP (VS Code 1.99+)</div>
-                  <div style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.8 }}>
-                    Acesso às 35 ferramentas do TIC Analyzer.<br />
-                    Requer configurar <Tag>.vscode/mcp.json</Tag>.<br />
-                    Ferramentas ativadas manualmente no Copilot Chat.<br />
-                    Monitor de tokens em tempo real.
-                  </div>
+                <div style={{ padding: '14px', background: C.surfaceContainerLow, borderRadius: '8px', border: `1px solid ${C.primaryFixedDim}44` }}>
+                  <div style={{ fontWeight: 700, color: C.primaryFixedDim, marginBottom: '6px', fontSize: '14px', fontFamily: F.headline }}>Modo MCP (VS Code 1.99+)</div>
+                  <div style={{ fontSize: '13px', color: C.onSurfaceVariant, lineHeight: 1.8 }}>Acesso às 62 ferramentas.<br />Requer configurar <DocTag>.vscode/mcp.json</DocTag>.</div>
                 </div>
               </div>
-            </Section>
-
-            <Section title="Modo Básico — zero configuração">
-              <Step n={1} title="Rode a análise">
-                Clique em <strong>Analisar</strong>. O arquivo <Tag>.github/copilot-instructions.md</Tag> é gerado automaticamente com o mapa do projeto: stack, módulos, onde estão os contextos, como navegar o <Tag>.tic-code/</Tag>.
-              </Step>
-              <Step n={2} title="Abra o projeto no VS Code — pronto">
-                O Copilot lê o <Tag>copilot-instructions.md</Tag> automaticamente em toda conversa no Copilot Chat. Sem nenhuma configuração extra, ele já sabe a estrutura do projeto.
-              </Step>
-              <Step n={3} title="Referencie arquivos específicos quando precisar de profundidade">
-                No Copilot Chat, use <Tag>#file:</Tag> para carregar contextos específicos:
-                <Code>{`# Contexto geral do projeto (recomendado para começar)
-#file:.tic-code/quick-context.md me ajude a implementar X
-
-# Contexto completo de um módulo específico
-#file:.tic-code/modules/pagamentos/context.md
-refatore o service de pagamentos
-
-# Ver métricas antes de refatorar
-#file:.tic-code/metrics-summary.md
-quais arquivos têm maior dívida técnica?
-
-# Schema do banco para queries/migrations
-#file:.tic-code/db-schema-summary.md
-crie uma migration para adicionar coluna X
-
-# Impacto de uma mudança (leitura manual)
-#file:.tic-code/impact-index.json
-qual é o impacto de mudar UserRepository?`}</Code>
-              </Step>
-            </Section>
-
-            <Section title="Modo MCP — VS Code 1.99+">
-              <Step n={1} title="Verifique a versão do VS Code">
-                Menu <strong>Help → About</strong>. Precisa ser <strong>1.99.0 ou superior</strong>.
-                <Code>{`# Ou verifique pelo terminal:
-code --version
-# → 1.99.x ou maior`}</Code>
-              </Step>
-              <Step n={2} title="Inicie o MCP Server no TIC Analyzer">
-                Na aba <Tag>Visão Geral</Tag>, após a análise, clique em <strong>Iniciar MCP</strong>. Mantenha o TIC Analyzer aberto.
-              </Step>
-              <Step n={3} title="Crie .vscode/mcp.json no projeto analisado">
-                Dentro da pasta raiz do projeto:
-                <Code>{`# Linux / macOS
-mkdir -p /seu/projeto/.vscode
-
-# Windows PowerShell
-New-Item -ItemType Directory -Force -Path C:\seu\projeto\.vscode`}</Code>
-                Conteúdo do arquivo <Tag>.vscode/mcp.json</Tag>:
-                <Code>{`{
-  "servers": {
-    "tic-analyzer": {
-      "type": "sse",
-      "url": "http://localhost:7432/mcp"
-    }
-  }
-}`}</Code>
-              </Step>
-              <Step n={4} title="Ative MCP nas configurações do VS Code">
-                Abra as configurações (<Tag>Ctrl+,</Tag> / <Tag>Cmd+,</Tag>), busque por <strong>copilot mcp</strong> e ative a opção <em>Github Copilot Chat: Mcp Enabled</em>. Ou adicione ao seu <Tag>settings.json</Tag>:
-                <Code>{`{
-  "github.copilot.chat.mcp.enabled": true
-}`}</Code>
-              </Step>
-              <Step n={5} title="Use o modo Agent no Copilot Chat">
-                Abra o Copilot Chat (<Tag>Ctrl+Shift+I</Tag>), mude para o modo <strong>Agent</strong> (ícone de ferramenta). Depois peça as ferramentas explicitamente:
-                <Code>{`Use tic-analyzer to get the quick context of this project
-
-Use tic-analyzer get_impact to check src/services/user.service.ts
-
-Use tic-analyzer get_metrics for the payments module
-
-Use tic-analyzer get_diff_impact to review my current changes`}</Code>
-                <div style={{ marginTop: '8px', padding: '10px', background: '#1a1500', borderRadius: '8px', border: '1px solid #7a600044' }}>
-                  <span style={{ fontSize: '11px', color: '#f0c000' }}>Diferença do Claude Code: o Copilot não chama ferramentas automaticamente. Você precisa pedir explicitamente usando "Use tic-analyzer" no início da mensagem.</span>
-                </div>
-              </Step>
-            </Section>
-
-            <Section title="Comparação rápida">
-              <div style={{ overflowX: 'auto' as const }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' as const, fontSize: '12px' }}>
-                  <thead>
-                    <tr style={{ borderBottom: `2px solid ${C.border}` }}>
-                      <th style={{ textAlign: 'left' as const, padding: '8px 10px', color: C.muted, fontWeight: 600 }}>Capacidade</th>
-                      <th style={{ textAlign: 'center' as const, padding: '8px 10px', color: C.green, fontWeight: 600 }}>Copilot<br/>Básico</th>
-                      <th style={{ textAlign: 'center' as const, padding: '8px 10px', color: C.accent, fontWeight: 600 }}>Copilot<br/>+ MCP</th>
-                      <th style={{ textAlign: 'center' as const, padding: '8px 10px', color: '#a0a0ff', fontWeight: 600 }}>Claude<br/>Code</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      ['copilot-instructions.md automático', '✓', '✓', '—'],
-                      ['CLAUDE.md automático', '—', '—', '✓'],
-                      ['Contexto via #file: (manual)', '✓', '✓', '✓'],
-                      ['35 ferramentas MCP disponíveis', '—', '✓', '✓'],
-                      ['Ferramentas ativadas automaticamente', '—', '—', '✓'],
-                      ['get_impact() ~200 tokens', '—', '✓ (manual)', '✓ (auto)'],
-                      ['get_diff_impact() antes do commit', '—', '✓ (manual)', '✓ (auto)'],
-                      ['Monitor de tokens em tempo real', '—', '✓', '✓'],
-                      ['Funciona sem instalar nada extra', '✓', '—', '—'],
-                    ].map(([cap, basic, mcp, claude]) => (
-                      <tr key={cap} style={{ borderBottom: `1px solid ${C.border}` }}>
-                        <td style={{ padding: '7px 10px', color: '#b0b0c0' }}>{cap}</td>
-                        <td style={{ textAlign: 'center' as const, padding: '7px 10px', color: basic === '✓' ? C.green : basic === '—' ? '#444' : C.muted }}>{basic}</td>
-                        <td style={{ textAlign: 'center' as const, padding: '7px 10px', color: mcp === '✓' || mcp.includes('manual') ? C.accent : '#444' }}>{mcp}</td>
-                        <td style={{ textAlign: 'center' as const, padding: '7px 10px', color: claude === '✓' || claude.includes('auto') ? '#a0a0ff' : '#444' }}>{claude}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Section>
+            </DocSection>
+            <DocSection title="Configuração MCP">
+              <CodeBlock>{`// .vscode/mcp.json\n{\n  "servers": {\n    "tic-analyzer": {\n      "type": "sse",\n      "url": "http://localhost:7432/mcp"\n    }\n  }\n}`}</CodeBlock>
+            </DocSection>
           </div>
         )}
 
-        {/* ── Abas do App ── */}
         {section === 'abas' && (
           <div>
             {[
-              {
-                name: 'Visão Geral',
-                desc: 'Resumo dos resultados: total de arquivos, linhas, módulos, hotspots, violações arquiteturais e padrões detectados. Também é onde você inicia e para o MCP Server.',
-                dica: 'O contador de Hotspots e Violações em vermelho indica onde focar a atenção antes de mexer no código.'
-              },
-              {
-                name: 'Impacto',
-                desc: 'Análise de impacto de mudança. Tem dois modos: Manual (busca um arquivo específico) e Git Diff (lê automaticamente git diff HEAD + staged + untracked e mostra o impacto consolidado de todas as mudanças pendentes).',
-                dica: 'Use o modo Git Diff antes de fazer commit para saber quantos arquivos sua mudança vai afetar.'
-              },
-              {
-                name: 'Métricas',
-                desc: 'Três visões: Relatório (debt score, hotspots e violações arquiteturais), Funções (complexidade por função — ciclomática, cognitiva e aninhamento — com as ofensoras destacadas) e Grafo de Deps. A complexidade é medida por AST real em Java/TS/JS.',
-                dica: 'Use a aba Funções e filtre por "Só ofensoras" para a lista acionável do que refatorar primeiro.'
-              },
-              {
-                name: 'Multi-Grafo',
-                desc: 'Grafo interativo que mostra o fluxo completo: Frontend → Endpoint REST → Backend → PL/SQL. Clique em um nó para ver o arquivo de origem. Use filtro por camada e busca por nome.',
-                dica: '🟢 = conexão detectada diretamente no código. 🟡 = inferida por heurística de nomes.'
-              },
-              {
-                name: 'Módulos',
-                desc: 'Diagrama Mermaid com as dependências entre módulos do projeto, gerado por análise de imports.',
-                dica: 'Módulos com muitas setas entrando são os mais críticos — mudanças neles têm alto impacto.'
-              },
-              {
-                name: 'Arquivos',
-                desc: 'Lista de todos os artefatos gerados na pasta .tic-code/ com uma descrição do que cada um contém.',
-                dica: 'Você pode abrir a pasta diretamente pelo botão "Abrir .tic-code" para ver os Markdown no editor.'
-              },
+              { name: 'Visão Geral', desc: 'Resumo dos resultados: total de arquivos, linhas, módulos, hotspots, violações arquiteturais. Também é onde você inicia e para o MCP Server.', dica: 'O contador de Hotspots e Violações em vermelho indica onde focar a atenção.' },
+              { name: 'Saúde', desc: 'Health score 0–100 (grade A–E) com gauge, penalidades por dimensão e gráfico de tendência entre análises.', dica: 'Rode análises periódicas — a linha de tendência mostra se o projeto está melhorando ou piorando.' },
+              { name: 'Governança', desc: 'KPIs de engenharia, fila de triagem com máquina de estados, compliance das regras .tic-rules.json e histórico de PRs.', dica: 'Riscos critical/high viram itens de triagem automaticamente — use get_agent_brief(id) via MCP.' },
+              { name: 'Engenharia', desc: 'Console das skills (mattpocock/skills): Zoom-out, Agent Brief, Diagnóstico em 6 fases, oportunidades de arquitetura, risco preditivo e decisões fora de escopo — geradas pelo engine local, sem IA.', dica: 'Gere o AGENT-BRIEF de qualquer entidade e copie o markdown direto para uma issue ou para um agente.' },
+              { name: 'Valor', desc: 'Custo da dívida técnica em dinheiro, dev-days, ownership/bus-factor e risco de conhecimento.', dica: 'Bus-factor 1 ⚠️ = se a pessoa sair, o conhecimento vai junto.' },
+              { name: 'Atividade', desc: 'Linha do tempo do que mudou a cada análise: health, riscos, regras, módulos, predições. Atualiza ao vivo.', dica: 'Ligue "Ao Vivo" no topo: o app re-analisa sozinho ao salvar um arquivo.' },
+              { name: 'Explorador', desc: 'Drill-down hierárquico: aplicação → camadas → módulos → arquivos → símbolos. Duplo-clique expande.', dica: 'Verde = dependência resolvida por AST; âmbar = heurística.' },
+              { name: 'Impacto', desc: 'Cross-tier (qualquer entidade), Arquivo (dependentes por imports) e Git Diff (impacto de tudo que mudou).', dica: 'Use Git Diff antes de commitar.' },
+              { name: 'Métricas', desc: 'Relatório geral + visão por função: ciclomática, cognitiva, aninhamento, hotspots e violações arquiteturais.', dica: 'Use a subaba Funções para filtrar só as ofensoras e ir direto aos métodos mais caros de manter.' },
             ].map((tab) => (
-              <div key={tab.name} style={{ marginBottom: '16px', padding: '14px', background: '#0d1b2a', borderRadius: '10px', border: `1px solid ${C.border}` }}>
-                <div style={{ fontWeight: 700, fontSize: '14px', color: C.accent, marginBottom: '6px' }}>{tab.name}</div>
-                <div style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.7, marginBottom: '8px' }}>{tab.desc}</div>
-                <div style={{ fontSize: '11px', color: C.green }}>Dica: {tab.dica}</div>
+              <div key={tab.name} style={{ marginBottom: '12px', padding: '16px', background: C.surfaceContainerLow, borderRadius: '8px', border: `1px solid ${C.outlineVariant}` }}>
+                <div style={{ fontWeight: 700, fontSize: '14px', color: C.primaryFixedDim, marginBottom: '6px', fontFamily: F.headline }}>{tab.name}</div>
+                <div style={{ fontSize: '13px', color: C.onSurfaceVariant, lineHeight: 1.7, marginBottom: '8px' }}>{tab.desc}</div>
+                <div style={{ fontSize: '12px', color: C.secondary, fontFamily: F.code }}>Dica: {tab.dica}</div>
               </div>
             ))}
           </div>
         )}
 
-        {/* ── Ferramentas MCP ── */}
         {section === 'ferramentas' && (
           <div>
-            <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: '0 0 16px 0' }}>
-              Com o MCP Server ativo, o Claude Code (e o Copilot em modo Agent) pode chamar 35 ferramentas. Estas são as principais — cada uma retorna apenas o necessário, de ~200 a ~75k tokens dependendo do escopo.
+            <p style={{ fontSize: '14px', color: C.onSurfaceVariant, lineHeight: 1.8, margin: '0 0 16px 0' }}>
+              Com o MCP Server ativo, o Claude Code pode chamar estas ferramentas. Cada uma retorna apenas o necessário — de ~200 a ~75k tokens dependendo do escopo.
             </p>
             {[
-              { tool: 'get_quick_context()', tokens: '~12k', desc: 'Visão geral compacta do projeto: stack, módulos, riscos, top endpoints. Use como ponto de partida em qualquer conversa.' },
-              { tool: 'list_modules()', tokens: '~2k', desc: 'Lista todos os módulos detectados com contagem de arquivos e linguagens. Use para escolher qual módulo explorar.' },
-              { tool: 'get_module("nome")', tokens: '~75k', desc: 'Contexto completo de um módulo específico: arquivos, código dos principais, dependências, riscos e endpoints do módulo.' },
-              { tool: 'search_module("query")', tokens: '~75k', desc: 'Busca o módulo mais relevante para um termo. Use quando não sabe o nome exato do módulo.' },
-              { tool: 'get_impact("arquivo.ts")', tokens: '~200', desc: 'Retorna quantos arquivos dependem do arquivo informado (direto + transitivo). Use antes de alterar um arquivo.' },
-              { tool: 'get_diff_impact()', tokens: '~300', desc: 'Lê git diff + staged + untracked e retorna o impacto consolidado de TODAS as mudanças pendentes. Use antes de commitar.' },
-              { tool: 'get_metrics("módulo")', tokens: '~500', desc: 'Complexidade ciclomática, debt score e hotspots de um módulo. Sem parâmetro, retorna o resumo do projeto inteiro.' },
-              { tool: 'get_hotspots()', tokens: '~1k', desc: 'Top arquivos com maior dívida técnica do projeto (alta complexidade + alto acoplamento).' },
-              { tool: 'list_complex_functions()', tokens: '~400', desc: 'Funções mais complexas POR FUNÇÃO (ciclomática McCabe + cognitiva + aninhamento). Filtros: module e offendersOnly (só as que excedem os limites). Aponta o método a refatorar, não só o arquivo.' },
-              { tool: 'get_violations()', tokens: '~1k', desc: 'Lista violações arquiteturais: dependências circulares, frontend importando backend, controller acessando BD direto.' },
-              { tool: 'get_patterns("módulo")', tokens: '~500', desc: 'Padrões arquiteturais detectados: Repository, Service, Controller, Factory, DTO, Entity, Mapper, UseCase, etc.' },
-              { tool: 'get_inheritance()', tokens: '~2k', desc: 'Hierarquia de herança de classes (extends/implements) para Java, TypeScript e Python.' },
-              { tool: 'get_multigraph()', tokens: '~3k', desc: 'Multi-grafo Frontend→Endpoint→Backend→PL/SQL em Mermaid. Mostra o fluxo de chamadas entre camadas.' },
-              { tool: 'get_diagram()', tokens: '~1k', desc: 'Diagrama Mermaid com dependências entre módulos do projeto.' },
-              { tool: 'get_openapi()', tokens: '~2k', desc: 'Especificação OpenAPI 3.0 com todos os endpoints detectados (Spring, NestJS, Express, FastAPI).' },
-              { tool: 'get_business_rules("módulo")', tokens: '~500', desc: 'Validações, enums, guards e constantes de negócio de um módulo (@NotNull, .required(), enum Status, etc).' },
-              { tool: 'get_permissions()', tokens: '~1k', desc: 'Matriz de permissões: rota × método × roles (@PreAuthorize, @Roles, @Secured, requireRole, etc).' },
-              { tool: 'get_db_schema("tabela")', tokens: '~200–500', desc: 'Schema de banco detectado: tabelas de SQL migrations, Prisma, TypeORM, JPA/Hibernate, Django, Sequelize. Sem parâmetro retorna resumo; com nome de tabela retorna colunas detalhadas.' },
-              { tool: 'get_analysis_json()', tokens: '~500', desc: 'Metadados estruturados da análise em JSON compacto. Útil para scripts, CI/CD e ferramentas externas que não usam MCP.' },
-              { tool: 'get_gaps()', tokens: '~1k', desc: 'Relatório de lacunas: módulos sem endpoints, arquivos isolados, dependências não analisadas.' },
+              { tool: 'get_quick_context()', tokens: '~12k', desc: 'Visão geral compacta: stack, módulos, riscos, top endpoints. Use como ponto de partida.' },
+              { tool: 'get_blast_radius("entidade")', tokens: '~200', desc: 'Resumo ULTRA-COMPACTO do impacto de qualquer entidade. Use PRIMEIRO, antes de tudo.' },
+              { tool: 'get_impact_of("entidade")', tokens: '~600', desc: 'Impacto cross-tier detalhado, agrupado por profundidade e módulo.' },
+              { tool: 'get_table_impact("TABELA")', tokens: '~300', desc: 'Quem é afetado por mudar uma tabela ou coluna do banco.' },
+              { tool: 'get_diff_impact()', tokens: '~300', desc: 'Lê git diff e retorna o impacto consolidado de todas as mudanças. Use antes de commitar.' },
+              { tool: 'get_health()', tokens: '~200', desc: 'Health score atual com breakdown por dimensão e delta vs análise anterior.' },
+              { tool: 'get_roi()', tokens: '~250', desc: 'Custo da dívida em tempo e dinheiro, horas economizadas, top módulos por custo.' },
+              { tool: 'get_agent_brief("entidade")', tokens: '~600', desc: 'AGENT-BRIEF completo — Category, Summary, Behavior, Interfaces, Criteria, Scope.' },
+              { tool: 'get_risk_prediction()', tokens: '~300', desc: 'Onde o próximo bug tende a nascer (churn × complexidade × acoplamento).' },
+              { tool: 'list_modules()', tokens: '~2k', desc: 'Lista todos os módulos detectados com contagem de arquivos.' },
+              { tool: 'get_module("nome")', tokens: '~75k', desc: 'Contexto completo de um módulo: arquivos, código, dependências, riscos, endpoints.' },
+              { tool: 'get_arch_rules()', tokens: '~300', desc: 'Regras do .tic-rules.json com status de compliance e violações.' },
+              { tool: 'list_triage(state)', tokens: '~300', desc: 'Fila de triagem com estado (needs-triage, ready-for-agent...) e prioridade.' },
+              { tool: 'update_triage(id, state)', tokens: '~50', desc: 'Transiciona um item da fila de triagem.' },
+              { tool: 'trace_flow("entidade")', tokens: '~1.5k', desc: 'Cadeia ininterrupta: tela → endpoint → service → procedure → tabela.' },
+              { tool: 'search_code("query")', tokens: '~500', desc: 'Busca semântica no índice de código.' },
+              { tool: 'get_metrics("módulo")', tokens: '~500', desc: 'Complexidade ciclomática, debt score e hotspots de um módulo.' },
+              { tool: 'get_hotspots()', tokens: '~1k', desc: 'Top arquivos com maior dívida técnica (alta complexidade + alto acoplamento).' },
+              { tool: 'list_complex_functions()', tokens: '~400', desc: 'Lista funções mais complexas por método (McCabe, cognitiva e aninhamento), com filtro só para ofensoras.' },
+              { tool: 'get_behavioral_hotspots()', tokens: '~400', desc: 'Cruza complexidade com churn do git para apontar hotspots comportamentais.' },
+              { tool: 'get_change_coupling()', tokens: '~400', desc: 'Mostra arquivos que mudam juntos nos mesmos commits (acoplamento temporal).' },
+              { tool: 'get_knowledge_map()', tokens: '~400', desc: 'Bus factor / concentração de autoria por módulo.' },
+              { tool: 'get_violations()', tokens: '~1k', desc: 'Violações arquiteturais: dependências circulares, UI acessando BD direto.' },
             ].map((t) => (
-              <div key={t.tool} style={{ display: 'flex', gap: '12px', padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
-                <div style={{ minWidth: '220px', flexShrink: 0 }}>
-                  <Tag>{t.tool}</Tag>
-                  <span style={{ fontSize: '10px', color: C.muted, marginLeft: '4px' }}>{t.tokens}</span>
+              <div key={t.tool} style={{ display: 'flex', gap: '12px', padding: '10px 0', borderBottom: `1px solid ${C.outlineVariant}` }}>
+                <div style={{ minWidth: '230px', flexShrink: 0 }}>
+                  <DocTag>{t.tool}</DocTag>
+                  <span style={{ fontSize: '10px', color: C.outline, marginLeft: '4px', fontFamily: F.code }}>{t.tokens}</span>
                 </div>
-                <div style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.6 }}>{t.desc}</div>
+                <div style={{ fontSize: '13px', color: C.onSurfaceVariant, lineHeight: 1.6 }}>{t.desc}</div>
               </div>
             ))}
           </div>
         )}
 
-        {/* ── Arquivos Gerados ── */}
         {section === 'arquivos' && (
           <div>
-            <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: '0 0 16px 0' }}>
-              Após a análise, a pasta <Tag>.tic-code/</Tag> é criada dentro do projeto com os seguintes artefatos. Eles são lidos pelo MCP Server e também diretamente pelo Claude Code via CLAUDE.md.
+            <p style={{ fontSize: '14px', color: C.onSurfaceVariant, lineHeight: 1.8, margin: '0 0 16px 0' }}>
+              Após a análise, a pasta <DocTag color={C.secondary}>.tic-code/</DocTag> é criada dentro do projeto com os seguintes artefatos.
             </p>
             {[
-              { file: 'quick-context.md', tokens: '~12k', desc: 'Resumo geral do projeto. Ponto de partida para qualquer IA. Contém stack, módulos, top riscos, top endpoints e instruções de navegação.' },
-              { file: 'index.md', tokens: '~2k', desc: 'Mapa de navegação com links para todos os módulos, contagem de arquivos e linguagens por módulo.' },
-              { file: 'impact-index.json', tokens: 'JSON', desc: 'Índice de impacto de mudança. Para cada arquivo, lista quem depende dele (direto + transitivo). Consultado pontualmente via MCP.' },
-              { file: 'metrics-summary.md', tokens: '~2k', desc: 'Resumo de qualidade: top hotspots, complexidade por função, funções ofensoras, debt score e violações arquiteturais.' },
-              { file: 'complex-functions.json', tokens: 'JSON', desc: 'Funções mais complexas do projeto (nome, linha, ciclomática, cognitiva, aninhamento, flag de ofensora). Consumido pela tool list_complex_functions e pela aba Métricas › Funções.' },
-              { file: 'patterns.md', tokens: '~1k', desc: 'Padrões arquiteturais detectados em todo o projeto (Repository, Service, Controller, Factory, DTO...).' },
-              { file: 'inheritance.md', tokens: '~1k', desc: 'Hierarquia de classes: extends/implements, profundidade máxima de herança.' },
-              { file: 'multigraph.md', tokens: '~3k', desc: 'Diagrama Mermaid do fluxo de chamadas: Frontend → Endpoint → Backend → PL/SQL.' },
-              { file: 'call-graph.json', tokens: 'JSON', desc: 'Dados brutos do call graph para o visualizador interativo na aba Multi-Grafo.' },
-              { file: 'dep-graph.json', tokens: 'JSON', desc: 'Dados brutos do grafo de dependências para o visualizador na aba Métricas.' },
-              { file: 'diagram.md', tokens: '~1k', desc: 'Diagrama Mermaid das dependências entre módulos.' },
-              { file: 'openapi.yaml', tokens: '~2k', desc: 'Especificação OpenAPI 3.0 dos endpoints detectados.' },
-              { file: 'permissions.md', tokens: '~1k', desc: 'Matriz de permissões: rota × método × roles extraídos de decorators/annotations.' },
-              { file: 'gaps.md', tokens: '~500', desc: 'Lacunas: módulos sem endpoints, arquivos isolados, dependências externas não analisadas.' },
-              { file: 'modules/{nome}/context.md', tokens: '~75k', desc: 'Contexto completo de cada módulo: arquivos, código dos mais importantes, riscos, endpoints e dependências.' },
-              { file: 'modules/{nome}/business-rules.md', tokens: '~500', desc: 'Validações, enums, guards e constantes extraídos dos arquivos do módulo.' },
-              { file: 'modules/{nome}/metrics.md', tokens: '~300', desc: 'Complexidade ciclomática, debt score e hotspots específicos do módulo.' },
-              { file: 'modules/{nome}/patterns.md', tokens: '~300', desc: 'Padrões arquiteturais detectados nos arquivos do módulo.' },
-              { file: 'db-schema.md', tokens: '~2k', desc: 'Schema de banco completo: tabelas, colunas, tipos, PKs e FKs detectados de migrations SQL, Prisma, TypeORM, JPA, Django ou Sequelize.' },
-              { file: 'db-schema-summary.md', tokens: '~200', desc: 'Resumo compacto do schema: só nome das tabelas e contagem de colunas. Usado pelo MCP get_db_schema() sem parâmetro.' },
-              { file: 'analysis.json', tokens: 'JSON', desc: 'Exportação estruturada de toda a análise: stack, módulos, endpoints, métricas, violações, padrões, schema de banco. Para integração com CI/CD e ferramentas externas.' },
-              { file: 'file-cache.json', tokens: 'JSON', desc: 'Cache de mtimes para análise incremental. Na próxima análise, módulos sem mudanças são reutilizados do cache e não são re-processados.' },
+              { file: 'quick-context.md', tokens: '~12k', desc: 'Resumo geral do projeto. Ponto de partida para qualquer IA.' },
+              { file: 'index.md', tokens: '~2k', desc: 'Mapa de navegação com links para todos os módulos.' },
+              { file: 'impact-index.json', tokens: 'JSON', desc: 'Índice de impacto por arquivo (direto + transitivo).' },
+              { file: 'index.db', tokens: 'SQLite', desc: 'Fonte de verdade: grafo completo, símbolos, impacto cross-tier, FTS5.' },
+              { file: 'snapshots.json', tokens: 'JSON', desc: 'Histórico de health score entre análises.' },
+              { file: 'triage.json', tokens: 'JSON', desc: 'Fila de triagem com máquina de estados.' },
+              { file: 'arch-violations.json', tokens: 'JSON', desc: 'Regras + violações + decisões out-of-scope.' },
+              { file: 'risk-prediction.json', tokens: 'JSON', desc: 'Predição de risco por arquivo (churn × complexidade × acoplamento).' },
+              { file: 'pr-history.json', tokens: 'JSON', desc: 'Histórico de PR reviews (blast radius, riscos, gates).' },
+              { file: 'roi.json', tokens: 'JSON', desc: 'Custo da dívida em tempo/dinheiro e horas economizadas.' },
+              { file: 'ownership.json', tokens: 'JSON', desc: 'Ownership por módulo, bus-factor e dificuldade de onboarding.' },
+              { file: 'activity.json', tokens: 'JSON', desc: 'Linha do tempo de atividade (sistema vivo).' },
+              { file: 'metrics-summary.md', tokens: '~2k', desc: 'Top hotspots, complexidade por função, debt score e violações.' },
+              { file: 'complex-functions.json', tokens: 'JSON', desc: 'Funções mais complexas com linha, módulo, ciclomática, cognitiva, aninhamento e flag de ofensora.' },
+              { file: 'behavioral-hotspots.md', tokens: '~2k', desc: 'Hotspots comportamentais: complexidade × frequência de mudança no git.' },
+              { file: 'change-coupling.md', tokens: '~2k', desc: 'Acoplamento temporal entre arquivos que costumam mudar juntos.' },
+              { file: 'knowledge-map.md', tokens: '~2k', desc: 'Mapa de conhecimento / bus factor por módulo.' },
+              { file: 'modules/{nome}/context.md', tokens: '~75k', desc: 'Contexto completo de cada módulo.' },
+              { file: 'analysis.json', tokens: 'JSON', desc: 'Exportação estruturada completa para CI/CD e ferramentas externas.' },
+              { file: 'file-cache.json', tokens: 'JSON', desc: 'Cache de mtimes para análise incremental.' },
             ].map((f) => (
-              <div key={f.file} style={{ display: 'flex', gap: '12px', padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
-                <div style={{ minWidth: '260px', flexShrink: 0 }}>
-                  <Tag color={C.green}>{f.file}</Tag>
-                  <span style={{ fontSize: '10px', color: C.muted, display: 'block', marginTop: '3px', paddingLeft: '4px' }}>{f.tokens}</span>
+              <div key={f.file} style={{ display: 'flex', gap: '12px', padding: '10px 0', borderBottom: `1px solid ${C.outlineVariant}` }}>
+                <div style={{ minWidth: '240px', flexShrink: 0 }}>
+                  <DocTag color={C.secondary}>{f.file}</DocTag>
+                  <span style={{ fontSize: '10px', color: C.outline, display: 'block', marginTop: '3px', paddingLeft: '4px', fontFamily: F.code }}>{f.tokens}</span>
                 </div>
-                <div style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.6 }}>{f.desc}</div>
+                <div style={{ fontSize: '13px', color: C.onSurfaceVariant, lineHeight: 1.6 }}>{f.desc}</div>
               </div>
             ))}
           </div>
         )}
 
-        {/* ── CLI ── */}
         {section === 'cli' && (
           <div>
-            <Section title="Usar sem interface gráfica (CLI)">
-              <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: '0 0 12px 0' }}>
-                O TIC Analyzer pode rodar em modo CLI para integrar com pipelines de CI/CD — sem precisar abrir o aplicativo desktop.
-              </p>
-              <Code>{`# Roda a pipeline completa no projeto informado
-node dist/cli.js /caminho/do/projeto
-
-# Ou com ts-node (ambiente de desenvolvimento)
-npx ts-node src/cli.ts /caminho/do/projeto`}</Code>
-              <p style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.7, margin: '12px 0 0 0' }}>
-                O CLI gera todos os mesmos artefatos que o app gráfico — a pasta <Tag>.tic-code/</Tag> e o <Tag>CLAUDE.md</Tag> — e imprime o progresso no terminal.
-              </p>
-            </Section>
-
-            <Section title="Integração com GitHub Actions">
-              <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: '0 0 12px 0' }}>
-                Exemplo de workflow para re-analisar o projeto automaticamente a cada push:
-              </p>
-              <Code>{`# .github/workflows/tic-analyze.yml
-name: TIC Analyzer
-on:
-  push:
-    branches: [main, develop]
-
-jobs:
-  analyze:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Install TIC Analyzer
-        run: |
-          git clone https://github.com/LeonardoForbici/tic-coder-lite tic-analyzer
-          cd tic-analyzer && npm install
-      - name: Analyze project
-        run: node tic-analyzer/dist/cli.js .
-      - name: Commit .tic-code artifacts
-        run: |
-          git config user.name "TIC Analyzer Bot"
-          git config user.email "bot@empresa.com"
-          git add .tic-code/ CLAUDE.md
-          git commit -m "chore: update TIC analysis" || true
-          git push`}</Code>
-            </Section>
-
-            <Section title="Dicas de uso com o Claude Code">
-              {[
-                { tip: 'Comece sempre pelo quick context', desc: 'Peça ao Claude para chamar get_quick_context() antes de qualquer tarefa. Isso dá ao Claude o mapa do território sem gastar tokens carregando código bruto.' },
-                { tip: 'Use get_impact antes de refatorar', desc: 'Antes de mover, renomear ou alterar a assinatura de qualquer arquivo importante, chame get_impact("arquivo") para saber o raio de explosão.' },
-                { tip: 'Git Diff antes do commit', desc: 'Após fazer suas alterações, chame get_diff_impact() para ver o impacto consolidado de tudo que mudou — ideal para revisar antes de abrir um PR.' },
-                { tip: 'Módulos são a unidade de trabalho', desc: 'Nunca peça ao Claude para carregar todos os módulos de uma vez. Identifique o módulo relevante com search_module() e carregue só ele com get_module().' },
-                { tip: 'Re-analise após mudanças grandes', desc: 'O .tic-code/ é um snapshot. Após refatorações grandes ou adição de muitos arquivos, rode a análise novamente para manter o contexto atualizado.' },
-              ].map((item) => (
-                <div key={item.tip} style={{ display: 'flex', gap: '12px', padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
-                  <div style={{ color: C.green, fontSize: '16px', flexShrink: 0, marginTop: '1px' }}>✓</div>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '3px' }}>{item.tip}</div>
-                    <div style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.6 }}>{item.desc}</div>
-                  </div>
-                </div>
-              ))}
-            </Section>
+            <DocSection title="Usar sem interface gráfica">
+              <CodeBlock>{`# Roda a pipeline completa no projeto\nnode dist/cli.js /caminho/do/projeto\n\n# Com ts-node (dev)\nnpx ts-node src/cli.ts /caminho/do/projeto`}</CodeBlock>
+            </DocSection>
+            <DocSection title="GitHub Actions">
+              <CodeBlock>{`# .github/workflows/tic-analyze.yml\nname: TIC Analyzer\non:\n  push:\n    branches: [main]\njobs:\n  analyze:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: '20'\n      - run: |\n          git clone https://github.com/LeonardoForbici/tic-coder-lite tic\n          cd tic && npm install\n          node dist/cli.js $GITHUB_WORKSPACE`}</CodeBlock>
+            </DocSection>
           </div>
         )}
-
       </div>
+    </div>
+  );
+}
+
+// ── SideNav ───────────────────────────────────────────────────────────────────
+const NAV_ITEMS: Array<{ id: Tab; label: string; icon: string; requiresDone?: boolean }> = [
+  { id: 'overview',    label: 'Visão Geral',  icon: 'dashboard' },
+  { id: 'health',      label: 'Saúde',        icon: 'health_metrics',    requiresDone: true },
+  { id: 'value',       label: 'Valor',        icon: 'payments',          requiresDone: true },
+  { id: 'governance',  label: 'Governança',   icon: 'account_balance',   requiresDone: true },
+  { id: 'skills',      label: 'Engenharia',   icon: 'engineering',       requiresDone: true },
+  { id: 'activity',    label: 'Atividade',    icon: 'history',           requiresDone: true },
+  { id: 'explorer',    label: 'Explorador',   icon: 'explore',           requiresDone: true },
+  { id: 'search',      label: 'Busca',        icon: 'search',            requiresDone: true },
+  { id: 'memory',      label: 'Memória',      icon: 'neurology',         requiresDone: true },
+  { id: 'impact',      label: 'Impacto',      icon: 'emergency_home',    requiresDone: true },
+  { id: 'metrics',     label: 'Métricas',     icon: 'analytics',         requiresDone: true },
+  { id: 'files',       label: 'Arquivos',     icon: 'folder',            requiresDone: true },
+  { id: 'portfolio',   label: 'Portfólio',    icon: 'inventory_2' },
+  { id: 'docs',        label: 'Docs',         icon: 'help' },
+  { id: 'http',        label: 'HTTP',         icon: 'http',              requiresDone: true },
+];
+
+function SideNav({ activeTab, onTabChange, isDone }: {
+  activeTab: Tab;
+  onTabChange: (t: Tab) => void;
+  isDone: boolean;
+}) {
+  return (
+    <nav style={{
+      position: 'fixed',
+      left: 0,
+      top: 0,
+      width: '256px',
+      height: '100vh',
+      background: C.bg,
+      borderRight: `1px solid ${C.outlineVariant}`,
+      display: 'flex',
+      flexDirection: 'column',
+      padding: '16px 0',
+      zIndex: 50,
+      overflowY: 'auto',
+    }}>
+      {/* Logo */}
+      <div style={{ padding: '8px 24px 24px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: C.surfaceContainerHigh, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${C.outlineVariant}` }}>
+            <Icon name="architecture" size={18} color={C.primaryFixedDim} fill={1} />
+          </div>
+          <span style={{ fontFamily: F.headline, fontSize: '18px', fontWeight: 700, color: C.primary }}>TIC Analyzer</span>
+        </div>
+        <span style={{ fontFamily: F.code, fontSize: '11px', color: C.onSurfaceVariant, paddingLeft: '42px' }}>V2.4.0-Stable</span>
+      </div>
+
+      {/* Nav Items */}
+      <div style={{ flex: 1, padding: '0 8px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        {NAV_ITEMS.map((item) => {
+          const isActive = activeTab === item.id;
+          const isDisabled = item.requiresDone && !isDone;
+          return (
+            <button
+              key={item.id}
+              onClick={() => !isDisabled && onTabChange(item.id)}
+              disabled={isDisabled}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '10px 16px',
+                borderRadius: '6px',
+                background: isActive ? `${C.primaryFixedDim}18` : 'transparent',
+                border: isActive ? `1px solid ${C.primaryFixedDim}40` : '1px solid transparent',
+                borderRight: isActive ? `2px solid ${C.primaryFixedDim}` : '2px solid transparent',
+                color: isActive ? C.primaryFixedDim : isDisabled ? C.outlineVariant : C.onSurfaceVariant,
+                cursor: isDisabled ? 'not-allowed' : 'pointer',
+                fontFamily: F.body,
+                fontSize: '14px',
+                fontWeight: isActive ? 600 : 400,
+                textAlign: 'left',
+                transition: 'all 0.15s',
+                opacity: isDisabled ? 0.4 : 1,
+              }}
+            >
+              <Icon
+                name={item.icon}
+                size={20}
+                color={isActive ? C.primaryFixedDim : isDisabled ? C.outlineVariant : C.onSurfaceVariant}
+                fill={isActive ? 1 : 0}
+              />
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Bottom user area */}
+      <div style={{ padding: '16px 24px', borderTop: `1px solid ${C.outlineVariant}`, display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: C.surfaceContainerHigh, border: `1px solid ${C.outlineVariant}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Icon name="person" size={16} color={C.onSurfaceVariant} />
+        </div>
+        <div>
+          <div style={{ fontFamily: F.code, fontSize: '12px', color: C.onSurface, fontWeight: 500 }}>Admin</div>
+          <div style={{ fontFamily: F.code, fontSize: '10px', color: C.outline }}>Local Engine</div>
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+// ── TopBar ────────────────────────────────────────────────────────────────────
+function TopBar({ projectPath, mcpRunning, liveMode, liveStatus, onToggleLive, onToggleMcp, isDone }: {
+  projectPath: string;
+  mcpRunning: boolean;
+  liveMode: boolean;
+  liveStatus: { analyzing: boolean; lastRun?: string; runs: number };
+  onToggleLive: () => void;
+  onToggleMcp: () => void;
+  isDone: boolean;
+}) {
+  const projectName = projectPath ? projectPath.split(/[\\/]/).filter(Boolean).pop() ?? projectPath : null;
+
+  return (
+    <header style={{
+      position: 'fixed',
+      top: 0,
+      right: 0,
+      left: '256px',
+      height: '64px',
+      background: `${C.bg}cc`,
+      backdropFilter: 'blur(12px)',
+      borderBottom: `1px solid ${C.outlineVariant}`,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '0 24px',
+      zIndex: 40,
+    }}>
+      {/* Left: project context */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {projectName && (
+          <>
+            <span style={{ fontFamily: F.headline, fontSize: '20px', fontWeight: 700, color: C.primary }}>{projectName}</span>
+            {isDone && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: C.secondary, animation: liveMode ? 'pulse 1.5s infinite' : 'none' }} />
+                <span style={{ fontFamily: F.code, fontSize: '11px', color: C.onSurfaceVariant, letterSpacing: '0.04em' }}>
+                  {liveMode ? (liveStatus.analyzing ? 'Analisando...' : 'Ao Vivo') : 'MCP Online'}
+                </span>
+              </div>
+            )}
+          </>
+        )}
+        {!projectName && (
+          <span style={{ fontFamily: F.headline, fontSize: '18px', fontWeight: 600, color: C.onSurfaceVariant }}>Selecione um projeto</span>
+        )}
+      </div>
+
+      {/* Right: actions */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {isDone && (
+          <button
+            onClick={onToggleLive}
+            title="Re-analisa sozinho ~15s depois que você salva um arquivo"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              background: liveMode ? `${C.secondary}22` : 'transparent',
+              border: `1px solid ${liveMode ? C.secondary : C.outlineVariant}`,
+              borderRadius: '6px',
+              color: liveMode ? C.secondary : C.onSurfaceVariant,
+              cursor: 'pointer',
+              fontFamily: F.code,
+              fontSize: '12px',
+              fontWeight: liveMode ? 600 : 400,
+              transition: 'all 0.15s',
+            }}
+          >
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: liveMode ? C.secondary : C.outline, animation: liveMode ? 'pulse 1.5s infinite' : 'none', flexShrink: 0 }} />
+            Ao Vivo
+          </button>
+        )}
+        {[
+          { icon: 'sensors', title: 'MCP Status', onClick: onToggleMcp, active: mcpRunning },
+          { icon: 'settings', title: 'Configurações', onClick: () => {}, active: false },
+        ].map((btn) => (
+          <button
+            key={btn.icon}
+            onClick={btn.onClick}
+            title={btn.title}
+            style={{
+              width: '36px',
+              height: '36px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: btn.active ? `${C.primaryFixedDim}18` : 'transparent',
+              border: `1px solid ${btn.active ? C.primaryFixedDim : 'transparent'}`,
+              borderRadius: '6px',
+              cursor: 'pointer',
+              color: btn.active ? C.primaryFixedDim : C.onSurfaceVariant,
+              transition: 'all 0.15s',
+            }}
+          >
+            <Icon name={btn.icon} size={20} color={btn.active ? C.primaryFixedDim : C.onSurfaceVariant} />
+          </button>
+        ))}
+      </div>
+    </header>
+  );
+}
+
+// ── KPI card helper ───────────────────────────────────────────────────────────
+function KpiCard({ label, value, color, icon, sub }: { label: string; value: string | number; color: string; icon: string; sub?: string }) {
+  return (
+    <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '16px', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, width: '3px', height: '100%', background: color }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px', paddingLeft: '8px' }}>
+        <span style={{ fontFamily: F.code, fontSize: '10px', color: C.onSurfaceVariant, letterSpacing: '0.08em', textTransform: 'uppercase' as const }}>{label}</span>
+        <Icon name={icon} size={16} color={color} />
+      </div>
+      <div style={{ paddingLeft: '8px' }}>
+        <div style={{ fontFamily: F.headline, fontSize: '28px', fontWeight: 700, color, lineHeight: 1 }}>{value}</div>
+        {sub && <div style={{ fontFamily: F.code, fontSize: '11px', color: C.outline, marginTop: '4px' }}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── Spider Chart (6-axis radar) ───────────────────────────────────────────────
+function SpiderChart({ dims }: { dims: Array<{ label: string; value: number; color: string }> }) {
+  const cx = 50, cy = 50, r = 38;
+  const n = dims.length;
+  const angle = (i: number) => (Math.PI * 2 * i) / n - Math.PI / 2;
+  const pt = (i: number, frac: number) => ({
+    x: cx + r * frac * Math.cos(angle(i)),
+    y: cy + r * frac * Math.sin(angle(i)),
+  });
+  const gridLevels = [0.25, 0.5, 0.75, 1];
+  const dataPoints = dims.map((d, i) => pt(i, Math.max(0.05, d.value / 100)));
+  const dataPath = dataPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ') + 'Z';
+
+  return (
+    <svg viewBox="0 0 100 100" style={{ width: '100%', height: '100%' }}>
+      {/* Grid */}
+      {gridLevels.map((lvl) => {
+        const pts = dims.map((_, i) => pt(i, lvl));
+        return <polygon key={lvl} points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
+          fill="none" stroke={C.outlineVariant} strokeWidth={0.4} opacity={0.6} />;
+      })}
+      {/* Axes */}
+      {dims.map((_, i) => {
+        const end = pt(i, 1);
+        return <line key={i} x1={cx} y1={cy} x2={end.x} y2={end.y} stroke={C.outlineVariant} strokeWidth={0.4} opacity={0.5} />;
+      })}
+      {/* Data fill */}
+      <path d={dataPath} fill={C.secondary} fillOpacity={0.12} stroke={C.secondary} strokeWidth={1.2} />
+      {/* Points */}
+      {dataPoints.map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r={1.8} fill={dims[i].color} />
+      ))}
+      {/* Labels */}
+      {dims.map((d, i) => {
+        const lp = pt(i, 1.28);
+        return (
+          <text key={i} x={lp.x} y={lp.y} textAnchor="middle" dominantBaseline="middle"
+            fontSize={5.5} fill={C.outline} fontFamily="'JetBrains Mono', monospace"
+            letterSpacing="0.04em">{d.label.toUpperCase()}</text>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ── Overview Tab ──────────────────────────────────────────────────────────────
+function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onOpenFolder, prHistory, liveEvents }: {
+  result: AnalysisResult;
+  mcpRunning: boolean;
+  mcpPort: number;
+  tokenStats: TokenStats | null;
+  onToggleMcp: () => void;
+  onOpenFolder: () => void;
+  prHistory: Array<{ date: string; changedFiles: number; totalImpacted: number; newRisks: number; newRuleViolations: number; healthDelta: number | null; gateFailed: boolean }>;
+  liveEvents: ActivityEvent[];
+}) {
+  const score = result.healthScore ?? 0;
+  const grade = result.healthGrade ?? '—';
+  const scoreColor = score >= 75 ? C.secondary : score >= 60 ? C.tertiaryFixedDim : C.error;
+
+  const spiderDims = [
+    { label: 'Dívida', value: Math.max(0, 100 - result.hotspots * 2), color: C.tertiaryFixedDim },
+    { label: 'Risco', value: Math.max(0, 100 - (result.violations ?? 0) * 5), color: C.primaryFixedDim },
+    { label: 'Drift', value: Math.max(0, 100 - (result.violations ?? 0) * 3), color: C.secondary },
+    { label: 'Código Morto', value: Math.max(0, 100 - (result.deadComponents ?? 0) * 10), color: C.primaryFixed },
+    { label: 'Acoplamento', value: Math.max(0, 100 - result.hotspots), color: C.tertiaryFixedDim },
+    { label: 'Heurísticas', value: Math.min(100, (result.patterns ?? 0) * 5 + 60), color: C.secondary },
+  ];
+
+  const sideStats = [
+    { label: 'Violações de Arquitetura', desc: 'Regras do .tic-rules.json que foram quebradas pelo projeto', value: String(result.violations ?? 0), color: C.tertiaryFixed, icon: 'route', borderColor: `${C.tertiaryFixed}50` },
+    { label: 'Arquivos de Alto Risco', desc: 'Alta complexidade + muitas alterações no git (hotspots)', value: String(result.hotspots), color: C.error, icon: 'warning', borderColor: `${C.error}80`, bg: `${C.error}08` },
+    { label: 'Conexões entre Arquivos', desc: 'Total de dependências rastreadas no grafo de impacto', value: (result.impactEdges ?? 0).toLocaleString(), color: C.primaryFixedDim, icon: 'hub', borderColor: `${C.primaryFixedDim}30` },
+  ];
+
+  const recentEvents = [...liveEvents].reverse().slice(0, 8);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {/* Context header */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.secondary, display: 'inline-block', animation: 'pulse 2s infinite' }} />
+          <span style={{ fontFamily: F.code, fontSize: 11, color: C.onSurfaceVariant, letterSpacing: '0.04em' }}>
+            {mcpRunning ? `MCP Online — localhost:${mcpPort}` : 'MCP Parado'}
+          </span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+          <div>
+            <h2 style={{ fontSize: 32, fontWeight: 700, fontFamily: F.headline, color: C.primary, margin: 0, lineHeight: 1 }}>
+              {result.totalFiles.toLocaleString()} arquivos
+            </h2>
+            <span style={{ fontFamily: F.code, fontSize: 13, color: C.outline }}>
+              {result.totalLines.toLocaleString()} linhas · {result.modulesGenerated} módulos
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={onToggleMcp}
+              style={{ padding: '8px 16px', border: `1px solid ${mcpRunning ? C.error : C.primaryFixedDim}`,
+                background: 'transparent', borderRadius: 6, color: mcpRunning ? C.error : C.primaryFixedDim,
+                cursor: 'pointer', fontFamily: F.code, fontSize: 12, fontWeight: 600 }}>
+              {mcpRunning ? 'Parar MCP' : 'Iniciar MCP'}
+            </button>
+            <button onClick={onOpenFolder}
+              style={{ padding: '8px 16px', border: `1px solid ${C.outlineVariant}`, background: 'transparent',
+                borderRadius: 6, color: C.onSurface, cursor: 'pointer', fontFamily: F.code, fontSize: 12 }}>
+              Abrir .tic-code
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Bento grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 16 }}>
+        {/* Hero widget: grade + spider chart */}
+        <div style={{ background: C.surfaceContainer, border: `1px solid ${C.outlineVariant}`, borderRadius: 8,
+          padding: 24, position: 'relative', overflow: 'hidden', display: 'flex', gap: 24, alignItems: 'center' }}>
+          {/* Hex-grid ambient bg */}
+          <div style={{ position: 'absolute', inset: 0, opacity: 0.03, backgroundImage:
+            'repeating-linear-gradient(60deg, transparent, transparent 20px, #dae2fd 20px, #dae2fd 21px)',
+            pointerEvents: 'none' }} />
+          <div style={{ flex: 1, zIndex: 1 }}>
+            <span style={{ fontFamily: F.code, fontSize: 10, color: C.outline, letterSpacing: '0.1em',
+              textTransform: 'uppercase' as const, display: 'block', marginBottom: 8 }}>Saúde do Projeto</span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+              <span style={{ fontSize: 80, lineHeight: 1, fontWeight: 700, fontFamily: F.headline, color: scoreColor,
+                filter: `drop-shadow(0 0 15px ${scoreColor}50)` }}>{grade}</span>
+              <span style={{ fontFamily: F.headline, fontSize: 20, color: C.onSurfaceVariant }}>{score}/100</span>
+            </div>
+            <p style={{ fontFamily: F.body, fontSize: 13, color: C.onSurfaceVariant, maxWidth: 280, lineHeight: 1.5, margin: 0 }}>
+              {score >= 75
+                ? 'Integridade estrutural estável. Mantenha o monitoramento regular.'
+                : score >= 60
+                  ? 'Drift de arquitetura em limites de domínio requer atenção nos próximos sprints.'
+                  : 'Estado crítico. Priorize remediação de riscos e violações.'}
+            </p>
+          </div>
+          <div style={{ flexShrink: 0, position: 'relative', zIndex: 1 }}>
+            <div style={{ width: 220, height: 220 }}>
+              <SpiderChart dims={spiderDims} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 8, width: 220 }}>
+              {[
+                { label: 'Dívida Técnica', desc: 'complexidade dos arquivos', color: C.tertiaryFixedDim },
+                { label: 'Risco', desc: 'hotspots churn × complexidade', color: C.primaryFixedDim },
+                { label: 'Drift', desc: 'violações de arquitetura', color: C.secondary },
+                { label: 'Código Morto', desc: 'componentes sem uso', color: C.primaryFixed },
+                { label: 'Acoplamento', desc: 'dependências excessivas', color: C.tertiaryFixedDim },
+                { label: 'Heurísticas', desc: 'padrões arquiteturais', color: C.secondary },
+              ].map((d) => (
+                <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: d.color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 10, fontFamily: F.code, color: C.onSurfaceVariant, lineHeight: 1.3, whiteSpace: 'nowrap' }} title={d.desc}>{d.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Key stats sidebar */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {sideStats.map((s) => (
+            <div key={s.label} style={{ background: s.bg ?? C.surfaceContainer, border: `1px solid ${s.borderColor}`,
+              borderRadius: 8, padding: '14px 16px',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', flex: 1,
+              cursor: 'pointer', transition: 'background 0.15s' }}
+              title={'desc' in s ? (s as any).desc : undefined}
+              onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceContainerHigh)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = s.bg ?? C.surfaceContainer)}>
+              <div>
+                <span style={{ fontFamily: F.code, fontSize: 10, color: s.color, letterSpacing: '0.08em',
+                  textTransform: 'uppercase' as const, display: 'block', marginBottom: 4 }}>{s.label}</span>
+                <span style={{ fontFamily: F.headline, fontSize: 20, fontWeight: 700, color: s.color }}>{s.value}</span>
+                {'desc' in s && <span style={{ fontSize: 11, color: C.onSurfaceVariant, display: 'block', marginTop: 4, lineHeight: 1.4 }}>{(s as any).desc}</span>}
+              </div>
+              <div style={{ width: 40, height: 40, borderRadius: 8, border: `1px solid ${s.color}40`,
+                background: `${s.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={s.icon} size={20} color={s.color} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Bottom row: PR gates + live telemetry */}
+      <div style={{ display: 'grid', gridTemplateColumns: '7fr 5fr', gap: 16 }}>
+        {/* Recent Analysis Gates */}
+        <div style={{ background: C.surface, border: `1px solid ${C.outlineVariant}`, borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.outlineVariant}`,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontFamily: F.code, fontSize: 13, color: C.onSurface }}>Histórico de PRs Analisados</span>
+          </div>
+          {prHistory.length === 0 ? (
+            <div style={{ padding: '24px 16px', fontFamily: F.body, fontSize: 13, color: C.onSurfaceVariant, textAlign: 'center' as const }}>
+              Nenhum PR analisado ainda. Use <code style={{ fontFamily: F.code, color: C.primaryFixedDim }}>tic-analyzer pr-review</code>.
+            </div>
+          ) : (
+            prHistory.slice(0, 4).map((p, i) => {
+              const status = p.gateFailed ? 'REPROVADO' : (p.newRisks > 0 || p.newRuleViolations > 0) ? 'ATENÇÃO' : 'APROVADO';
+              const statusColor = status === 'REJECTED' ? C.error : status === 'WARNING' ? C.tertiaryFixed : C.secondary;
+              const impactBars = Math.min(4, Math.ceil(p.totalImpacted / 5));
+              return (
+                <div key={i} style={{ padding: '12px 16px', borderBottom: `1px solid ${C.outlineVariant}50`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  background: i % 2 === 1 ? C.surfaceContainerLow : 'transparent',
+                  transition: 'background 0.1s', cursor: 'pointer' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceContainerLowest)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = i % 2 === 1 ? C.surfaceContainerLow : 'transparent')}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontFamily: F.code, fontSize: 10, letterSpacing: '0.06em', fontWeight: 700,
+                      padding: '2px 8px', borderRadius: 2, border: `1px solid ${statusColor}`,
+                      color: statusColor }}>{status}</span>
+                    <div>
+                      <div style={{ fontFamily: F.code, fontSize: 13, color: C.onSurface }}>
+                        {new Date(p.date).toLocaleDateString('pt-BR')} · {p.changedFiles} arquivos
+                      </div>
+                      <div style={{ fontFamily: F.body, fontSize: 12, color: C.onSurfaceVariant, marginTop: 1 }}>
+                        {p.newRisks > 0 ? `+${p.newRisks} riscos · ` : ''}{p.totalImpacted} arquivos afetados em cadeia
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                    <span style={{ fontFamily: F.code, fontSize: 10, color: C.outline, letterSpacing: '0.06em' }} title="Quantos arquivos podem ser afetados por este PR em cadeia">RAIO DE IMPACTO</span>
+                    <div style={{ display: 'flex', gap: 3 }}>
+                      {[0,1,2,3].map((j) => (
+                        <div key={j} style={{ width: 14, height: 14, background: j < impactBars ? statusColor : C.surfaceVariant, borderRadius: 2 }} />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Live Telemetry */}
+        <div style={{ background: C.surfaceContainerLowest, border: `1px solid ${C.outlineVariant}`,
+          borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden', height: 300 }}>
+          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${C.outlineVariant}`,
+            background: C.surface, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontFamily: F.code, fontSize: 13, color: C.onSurface }}>Log em Tempo Real</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: F.code, fontSize: 11,
+              color: C.secondary }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.secondary,
+                display: 'inline-block', animation: 'pulse 2s infinite' }} />
+              {mcpRunning ? 'Connected' : 'Offline'}
+            </span>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {recentEvents.length === 0 ? (
+              <div style={{ display: 'flex', gap: 16, fontFamily: F.code, fontSize: 11, color: C.outline }}>
+                <span>{new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                <span style={{ color: C.outline }}>[IDLE]</span>
+                <span>Aguardando próximo evento do sistema…</span>
+              </div>
+            ) : recentEvents.map((e, i) => {
+              const typeColor = e.type === 'analysis' ? C.primaryFixedDim : e.severity === 'critical' ? C.error : e.severity === 'warn' ? C.tertiaryFixedDim : C.secondary;
+              const tag = e.type === 'analysis' ? '[SCAN]' : e.type === 'risk-new' ? '[WARN]' : e.type === 'health-up' ? '[OK]' : e.type === 'alert-sent' ? '[MCP]' : '[SYS]';
+              return (
+                <div key={i} style={{ display: 'flex', gap: 16, fontFamily: F.code, fontSize: 11, color: C.onSurfaceVariant }}>
+                  <span style={{ color: C.outline, flexShrink: 0 }}>{new Date(e.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                  <span style={{ color: typeColor, flexShrink: 0, fontWeight: 700 }}>{tag}</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{e.title}</span>
+                </div>
+              );
+            })}
+            <div style={{ display: 'flex', gap: 16, fontFamily: F.code, fontSize: 11, color: C.outline, opacity: 0.5 }}>
+              <span>{new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+              <span>[IDLE]</span>
+              <span>Awaiting next file system event...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* MCP config (when running) */}
+      {mcpRunning && (
+        <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: 8, padding: 20 }}>
+          <div style={{ fontFamily: F.code, fontSize: 10, color: C.outline, fontWeight: 600, marginBottom: 12,
+            letterSpacing: '0.08em', textTransform: 'uppercase' as const, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Icon name="sensors" size={13} color={C.secondary} fill={1} />
+            MCP Server — 50 Ferramentas
+          </div>
+          <div style={{ fontFamily: F.code, fontSize: 12, color: C.onSurfaceVariant, background: C.surfaceContainerLowest,
+            padding: '10px 14px', borderRadius: 6, marginBottom: 14, border: `1px solid ${C.outlineVariant}` }}>
+            {`{"mcpServers":{"tic-analyzer":{"url":"http://localhost:${mcpPort}/mcp"}}}`}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 16 }}>
+            {['get_blast_radius','get_impact_of','get_health','get_graph_level','get_diff_impact','get_arch_rules','get_risk_prediction','get_agent_brief','list_triage','update_triage','get_quick_context','search_code','trace_flow','get_zoom_out','get_roi','get_ownership'].map((tool) => (
+              <span key={tool} style={{ padding: '2px 8px', background: C.surfaceContainerLowest,
+                border: `1px solid ${C.outlineVariant}`, borderRadius: 3, fontSize: 10,
+                color: C.primaryFixedDim, fontFamily: F.code }}>{tool}</span>
+            ))}
+          </div>
+          <div style={{ borderTop: `1px solid ${C.outlineVariant}`, paddingTop: 16 }}>
+            <div style={{ fontFamily: F.code, fontSize: 10, color: C.outline, fontWeight: 600, marginBottom: 12,
+              letterSpacing: '0.08em', textTransform: 'uppercase' as const }}>Monitor de Tokens em Tempo Real</div>
+            <TokenMonitor stats={tokenStats} onClear={() => {}} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1030,16 +1460,17 @@ export function App() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [mcpRunning, setMcpRunning] = useState(false);
   const [mcpPort] = useState(7432);
+  const [liveMode, setLiveMode] = useState(false);
+  const [liveStatus, setLiveStatus] = useState<{ analyzing: boolean; lastRun?: string; runs: number }>({ analyzing: false, runs: 0 });
   const [activeTab, setActiveTab] = useState<Tab>('overview');
-  const [multigraphCode, setMultigraphCode] = useState('');
-  const [diagramCode, setDiagramCode] = useState('');
   const [tokenStats, setTokenStats] = useState<TokenStats | null>(null);
+  const [prHistory, setPrHistory] = useState<any[]>([]);
+  const [liveEvents, setLiveEvents] = useState<ActivityEvent[]>([]);
 
   useEffect(() => { window.ticAnalyzer?.getMcpStatus().then((s) => setMcpRunning(s.running)); }, []);
 
   useEffect(() => {
     if (!mcpRunning) return;
-    // Load existing stats and subscribe to live updates
     window.ticAnalyzer?.getTokenStats().then((s) => setTokenStats(s as TokenStats | null));
     const cleanup = window.ticAnalyzer?.onTokenUpdate((entry) => {
       setTokenStats((prev) => {
@@ -1054,13 +1485,6 @@ export function App() {
     return () => { cleanup?.(); };
   }, [mcpRunning]);
 
-  useEffect(() => {
-    if (state !== 'done' || !result) return;
-    const ticDir = result.outputPath;
-    window.ticAnalyzer.readFile(`${ticDir}/multigraph.md`).then((c) => { if (c) setMultigraphCode(extractMermaid(c)); });
-    window.ticAnalyzer.readFile(`${ticDir}/diagram.md`).then((c) => { if (c) setDiagramCode(extractMermaid(c)); });
-  }, [state, result]);
-
   const handleSelectFolder = useCallback(async () => {
     const folder = await window.ticAnalyzer.selectFolder();
     if (folder) setProjectPath(folder);
@@ -1069,15 +1493,54 @@ export function App() {
   const handleAnalyze = useCallback(async () => {
     if (!projectPath) return;
     setState('analyzing'); setProgress(null); setResult(null);
-    setMultigraphCode(''); setDiagramCode(''); setActiveTab('overview');
+    setActiveTab('overview');
     const cleanup = window.ticAnalyzer.onProgress((p) => setProgress(p));
     window.ticAnalyzer.onAnalysisDone((r) => {
       cleanup();
       setResult(r as AnalysisResult);
       setState((r as AnalysisResult).success ? 'done' : 'error');
+      if ((r as AnalysisResult).success && (r as AnalysisResult).outputPath) {
+        const op = (r as AnalysisResult).outputPath;
+        window.ticAnalyzer.readFile(`${op}/pr-history.json`).then((c) => {
+          try { if (c) setPrHistory(JSON.parse(c)); } catch { /* ok */ }
+        });
+        window.ticAnalyzer.getActivity(projectPath, 50).then((e) => {
+          if (Array.isArray(e)) setLiveEvents(e);
+        });
+      }
     });
     await window.ticAnalyzer.runAnalysis(projectPath);
   }, [projectPath]);
+
+  const toggleLive = useCallback(async () => {
+    const next = !liveMode;
+    const r = await window.ticAnalyzer.setLiveMode(projectPath, next);
+    setLiveMode(r.ok && r.live);
+    if (!(r.ok && r.live)) setLiveStatus({ analyzing: false, runs: 0 });
+  }, [liveMode, projectPath]);
+
+  useEffect(() => {
+    const off = window.ticAnalyzer.onLiveStatus?.((s) => {
+      setLiveStatus((prev) => ({
+        analyzing: s.analyzing ?? prev.analyzing,
+        lastRun: s.lastRun ?? prev.lastRun,
+        runs: s.analyzing === false ? prev.runs + 1 : prev.runs
+      }));
+    });
+    return off;
+  }, []);
+
+  useEffect(() => {
+    const off = window.ticAnalyzer.onActivity((e) => {
+      setLiveEvents((prev) => [...prev.slice(-49), e]);
+      if (e.type === 'analysis' && result?.outputPath) {
+        window.ticAnalyzer.readFile(`${result.outputPath}/pr-history.json`).then((c) => {
+          try { if (c) setPrHistory(JSON.parse(c)); } catch { /* ok */ }
+        });
+      }
+    });
+    return off;
+  }, [projectPath, result?.outputPath]);
 
   const handleToggleMcp = useCallback(async () => {
     if (mcpRunning) { await window.ticAnalyzer.stopMcp(); setMcpRunning(false); }
@@ -1087,274 +1550,247 @@ export function App() {
   const isTicCodePath = projectPath.replace(/[\\/]$/, '').endsWith('.tic-code');
   const parentPath = isTicCodePath ? projectPath.replace(/[\\/]?\.tic-code[\\/]?$/, '') : '';
   const overallPct = progress ? Math.round(progress.phases.filter((p) => p.status === 'done').length / progress.phases.length * 100) : 0;
-
-  const TABS: Array<{ id: Tab; label: string }> = [
-    { id: 'overview', label: 'Visão Geral' },
-    { id: 'impact', label: 'Impacto' },
-    { id: 'metrics', label: 'Métricas' },
-    { id: 'multigraph', label: 'Multi-Grafo' },
-    { id: 'modules', label: 'Módulos' },
-    { id: 'files', label: 'Arquivos' },
-    { id: 'docs', label: 'Docs' },
-  ];
+  const isDone = state === 'done' && !!result;
 
   return (
-    <div style={S.app}>
-      {/* Header */}
-      <div style={S.header}>
-        <div>
-          <div style={{ fontSize: '18px', fontWeight: 700, color: C.accent }}>TIC Analyzer</div>
-          <div style={{ fontSize: '11px', color: C.muted }}>Motor local de análise — zero tokens de IA</div>
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          {state === 'done' && result && TABS.filter((t) => t.id !== 'docs').map((t) => (
-            <button key={t.id} style={S.tab(activeTab === t.id)} onClick={() => setActiveTab(t.id)}>{t.label}</button>
-          ))}
-          <button style={S.tab(activeTab === 'docs')} onClick={() => setActiveTab('docs')}>Docs</button>
-        </div>
-      </div>
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.onSurface, fontFamily: F.body }}>
+      <SideNav activeTab={activeTab} onTabChange={setActiveTab} isDone={isDone} />
+      <TopBar
+        projectPath={projectPath}
+        mcpRunning={mcpRunning}
+        liveMode={liveMode}
+        liveStatus={liveStatus}
+        onToggleLive={toggleLive}
+        onToggleMcp={handleToggleMcp}
+        isDone={isDone}
+      />
 
-      <div style={S.body}>
-        {/* Folder picker */}
-        <div style={S.card}>
-          <div style={{ marginBottom: '10px', fontWeight: 600, fontSize: '13px', color: C.muted }}>PROJETO</div>
-          <div style={S.folderRow}>
-            <input style={S.folderInput} value={projectPath} onChange={(e) => setProjectPath(e.target.value)}
-              placeholder="C:\empresa\projeto ou /home/user/projeto" readOnly={state === 'analyzing'} />
-            <button style={S.btn()} onClick={handleSelectFolder} disabled={state === 'analyzing'}>Selecionar</button>
-            <button style={state === 'analyzing' || !projectPath ? S.btnDisabled : S.btn(C.green)}
-              onClick={handleAnalyze} disabled={state === 'analyzing' || !projectPath}>
-              {state === 'analyzing' ? 'Analisando...' : 'Analisar'}
-            </button>
+      {/* Main content */}
+      <main style={{ marginLeft: '256px', paddingTop: '64px', minHeight: '100vh' }}>
+        <div style={{ padding: '24px', maxWidth: '1400px' }}>
+
+          {/* Project picker — always visible */}
+          <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '20px', marginBottom: '20px' }}>
+            <div style={{ fontFamily: F.code, fontSize: '10px', color: C.outline, marginBottom: '12px', letterSpacing: '0.08em', textTransform: 'uppercase' as const, display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Icon name="folder_open" size={14} color={C.outline} />
+              Projeto
+            </div>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <input
+                style={{ flex: 1, background: C.surfaceContainerLowest, border: `1px solid ${C.outlineVariant}`, borderRadius: '6px', padding: '10px 14px', color: C.onSurface, fontSize: '13px', fontFamily: F.code, outline: 'none' }}
+                value={projectPath}
+                onChange={(e) => setProjectPath(e.target.value)}
+                placeholder="/caminho/do/projeto ou C:\empresa\projeto"
+                readOnly={state === 'analyzing'}
+              />
+              <button
+                style={{ padding: '10px 18px', background: 'transparent', border: `1px solid ${C.outlineVariant}`, borderRadius: '6px', color: C.onSurface, cursor: 'pointer', fontFamily: F.code, fontSize: '13px', whiteSpace: 'nowrap' as const }}
+                onClick={handleSelectFolder}
+                disabled={state === 'analyzing'}
+              >
+                Selecionar
+              </button>
+              <button
+                style={{ padding: '10px 18px', background: (!projectPath || state === 'analyzing') ? C.surfaceContainerHighest : C.primaryFixedDim, border: 'none', borderRadius: '6px', color: (!projectPath || state === 'analyzing') ? C.outline : C.onPrimary, cursor: (!projectPath || state === 'analyzing') ? 'not-allowed' : 'pointer', fontFamily: F.code, fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap' as const }}
+                onClick={handleAnalyze}
+                disabled={state === 'analyzing' || !projectPath}
+              >
+                {state === 'analyzing' ? 'Analisando...' : 'Analisar'}
+              </button>
+            </div>
+            {isTicCodePath && (
+              <div style={{ marginTop: '12px', padding: '10px 14px', background: `${C.tertiaryFixedDim}18`, borderRadius: '6px', border: `1px solid ${C.tertiaryFixedDim}44`, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Icon name="warning" size={16} color={C.tertiaryFixedDim} />
+                <span style={{ fontSize: '13px', color: C.tertiaryFixedDim, flex: 1, fontFamily: F.code }}>Pasta de saída selecionada. Use a pasta pai: <code>{parentPath}</code></span>
+                <button style={{ padding: '6px 12px', background: 'transparent', border: `1px solid ${C.tertiaryFixedDim}`, borderRadius: '4px', color: C.tertiaryFixedDim, cursor: 'pointer', fontFamily: F.code, fontSize: '12px' }} onClick={() => setProjectPath(parentPath)}>Usar pasta pai</button>
+              </div>
+            )}
           </div>
-          {isTicCodePath && (
-            <div style={{ marginTop: '10px', padding: '10px', background: '#1a1500', borderRadius: '8px', border: '1px solid #7a6000', display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ color: '#f0c000', fontSize: '12px', flex: 1 }}>Pasta de saída selecionada. Use a pasta pai: <code style={{ color: '#f0c000' }}>{parentPath}</code></span>
-              <button style={S.btn('#7a6000')} onClick={() => setProjectPath(parentPath)}>Usar pasta pai</button>
+
+          {/* Progress */}
+          {state === 'analyzing' && progress && (
+            <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '20px', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <span style={{ fontFamily: F.headline, fontWeight: 600, fontSize: '16px', color: C.onSurface }}>Analisando...</span>
+                <span style={{ fontFamily: F.code, fontSize: '14px', color: C.primaryFixedDim, fontWeight: 600 }}>{overallPct}%</span>
+              </div>
+              <div style={{ height: '4px', borderRadius: '2px', background: C.outlineVariant, overflow: 'hidden', margin: '8px 0 12px' }}>
+                <div style={{ height: '100%', width: `${overallPct}%`, background: `linear-gradient(90deg, ${C.primaryFixedDim}, ${C.secondary})`, borderRadius: '2px', transition: 'width 0.3s ease' }} />
+              </div>
+              <div style={{ fontSize: '12px', color: C.onSurfaceVariant, marginBottom: '16px', fontFamily: F.code }}>{progress.detail}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
+                {progress.phases.map((phase) => {
+                  const statusColor = phase.status === 'done' ? C.secondary : phase.status === 'running' ? C.primaryFixedDim : phase.status === 'error' ? C.error : C.outlineVariant;
+                  return (
+                    <div key={phase.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0', opacity: phase.status === 'pending' ? 0.4 : 1, fontSize: '12px', fontFamily: F.code }}>
+                      <span style={{ padding: '1px 6px', borderRadius: '3px', fontSize: '10px', fontWeight: 600, background: `${statusColor}22`, color: statusColor, border: `1px solid ${statusColor}44`, fontFamily: F.code }}>
+                        {phase.status === 'done' ? '✓' : phase.status === 'running' ? '◈' : phase.status === 'error' ? '✗' : '○'}
+                      </span>
+                      <span style={{ color: C.onSurfaceVariant }}>{phase.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Error */}
+          {state === 'error' && result?.error && (
+            <div style={{ background: `${C.errorContainer}44`, border: `1px solid ${C.error}44`, borderRadius: '8px', padding: '20px', marginBottom: '20px' }}>
+              <div style={{ color: C.error, fontWeight: 600, marginBottom: '8px', fontFamily: F.headline, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Icon name="error" size={18} color={C.error} />
+                Erro na análise
+              </div>
+              <code style={{ fontSize: '12px', color: C.error, whiteSpace: 'pre-wrap' as const, fontFamily: F.code }}>{result.error}</code>
+            </div>
+          )}
+
+          {/* Tab content */}
+          {activeTab === 'docs' && <DocsTab />}
+
+          {activeTab === 'portfolio' && (
+            <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '20px' }}>
+              <PortfolioDashboard />
+            </div>
+          )}
+
+          {isDone && activeTab !== 'docs' && activeTab !== 'portfolio' && (
+            <>
+              {activeTab === 'overview' && (
+                <OverviewTab
+                  result={result!}
+                  mcpRunning={mcpRunning}
+                  mcpPort={mcpPort}
+                  tokenStats={tokenStats}
+                  onToggleMcp={handleToggleMcp}
+                  onOpenFolder={() => window.ticAnalyzer.openFolder(result!.outputPath)}
+                  prHistory={prHistory}
+                  liveEvents={liveEvents}
+                />
+              )}
+
+              {activeTab === 'health' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <HealthDashboard ticCodeDir={result!.outputPath} />
+                </div>
+              )}
+
+              {activeTab === 'value' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <ValueDashboard ticCodeDir={result!.outputPath} projectPath={projectPath} />
+                </div>
+              )}
+
+              {activeTab === 'governance' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <GovernanceDashboard ticCodeDir={result!.outputPath} projectPath={projectPath} />
+                </div>
+              )}
+
+              {activeTab === 'skills' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <SkillsConsole projectPath={projectPath} />
+                </div>
+              )}
+
+              {activeTab === 'activity' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <ActivityFeed ticCodeDir={result!.outputPath} projectPath={projectPath} />
+                </div>
+              )}
+
+              {activeTab === 'explorer' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <div style={{ marginBottom: '16px' }}>
+                    <div style={{ fontFamily: F.headline, fontWeight: 600, fontSize: '20px', marginBottom: '4px', color: C.onSurface }}>Explorador Hierárquico</div>
+                    <div style={{ fontSize: '13px', color: C.onSurfaceVariant }}>Aplicação → Camadas → Módulos → Arquivos → Símbolos · peso da aresta = nº de dependências agregadas</div>
+                  </div>
+                  <HierGraphViewer projectPath={projectPath} />
+                </div>
+              )}
+
+              {activeTab === 'search' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <SearchCodeViewer projectPath={projectPath} />
+                </div>
+              )}
+
+              {activeTab === 'memory' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <MemoryViewer ticCodeDir={result!.outputPath} />
+                </div>
+              )}
+
+              {activeTab === 'http' && projectPath && (
+                <HttpFlowsViewer projectPath={projectPath} />
+              )}
+
+              {activeTab === 'impact' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <ImpactTab ticCodeDir={result!.outputPath} projectPath={projectPath} />
+                </div>
+              )}
+
+              {activeTab === 'metrics' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <MetricsTab ticCodeDir={result!.outputPath} />
+                </div>
+              )}
+
+              {activeTab === 'files' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <div style={{ marginBottom: '16px' }}>
+                    <div style={{ fontFamily: F.headline, fontWeight: 600, fontSize: '20px', color: C.onSurface }}>Artefatos Gerados</div>
+                    <div style={{ fontSize: '13px', color: C.onSurfaceVariant, marginTop: '4px' }}>Pasta <code style={{ fontFamily: F.code, color: C.primaryFixedDim }}>.tic-code/</code> com todos os arquivos gerados pela análise</div>
+                  </div>
+                  <div style={{ fontFamily: F.code, fontSize: '12px', color: C.onSurfaceVariant, lineHeight: '2.2', background: C.surfaceContainerLowest, borderRadius: '8px', padding: '16px', border: `1px solid ${C.outlineVariant}` }}>
+                    {[
+                      { path: `${result!.outputPath}/`, color: C.outline, indent: 0 },
+                      { path: 'quick-context.md', note: `(~${result!.quickContextTokens.toLocaleString()} tokens)`, color: C.secondary, indent: 1 },
+                      { path: 'metrics-summary.md', note: 'complexidade por função + hotspots + violações', color: C.tertiaryFixedDim, indent: 1 },
+                      { path: 'complex-functions.json', note: 'funções mais complexas (McCabe + cognitiva + aninhamento)', color: C.tertiaryFixedDim, indent: 1 },
+                      { path: 'behavioral-hotspots.md + change-coupling.md + knowledge-map.md', note: 'histórico git: hotspots, coupling e bus factor', color: C.secondary, indent: 1 },
+                      { path: 'impact-index.json', note: 'índice de impacto de mudança', color: C.primaryFixedDim, indent: 1 },
+                      { path: 'patterns.md + inheritance.md', note: 'padrões e hierarquia', color: C.primaryFixedDim, indent: 1 },
+                      { path: 'multigraph.md + diagram.md', note: 'diagramas Mermaid', color: C.outline, indent: 1 },
+                      { path: 'openapi.yaml', note: 'endpoints OpenAPI 3.0', color: C.outline, indent: 1 },
+                      { path: `modules/ x${result!.modulesGenerated}`, note: 'context + business-rules + metrics + patterns', color: C.outline, indent: 1 },
+                      ...(result!.dbTables > 0 ? [{ path: 'db-schema.md + db-schema-summary.md', note: `${result!.dbTables} tabelas detectadas`, color: C.tertiaryFixedDim, indent: 1 }] : []),
+                      { path: 'roi.json + ownership.json + activity.json', note: 'valor e atividade', color: C.outline, indent: 1 },
+                      { path: 'snapshots.json + triage.json', note: 'histórico e triagem', color: C.outline, indent: 1 },
+                      { path: 'analysis.json', note: 'export estruturado completo', color: '#7c83fd', indent: 1 },
+                      { path: 'file-cache.json', note: `cache incremental${result!.cacheHits > 0 ? ` (${result!.cacheHits} módulos reutilizados)` : ''}`, color: C.secondary, indent: 1 },
+                      { path: 'CLAUDE.md + .github/copilot-instructions.md', note: '', color: '#7c83fd', indent: 0 },
+                    ].map((row, i) => (
+                      <div key={i} style={{ paddingLeft: `${row.indent * 16}px` }}>
+                        <span style={{ color: row.color }}>{row.path}</span>
+                        {row.note && <span style={{ color: C.outline }}> — {row.note}</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: '16px' }}>
+                    <button
+                      style={{ padding: '10px 18px', background: `${C.primaryFixedDim}18`, border: `1px solid ${C.primaryFixedDim}`, borderRadius: '6px', color: C.primaryFixedDim, cursor: 'pointer', fontFamily: F.code, fontSize: '13px', fontWeight: 600 }}
+                      onClick={() => window.ticAnalyzer.openFolder(result!.outputPath)}
+                    >
+                      Abrir pasta .tic-code
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Empty state for tabs that require done analysis */}
+          {!isDone && activeTab !== 'docs' && activeTab !== 'portfolio' && activeTab !== 'overview' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 24px', gap: '16px' }}>
+              <Icon name="analytics" size={48} color={C.outlineVariant} />
+              <div style={{ fontFamily: F.headline, fontSize: '20px', color: C.onSurfaceVariant, fontWeight: 500 }}>Análise necessária</div>
+              <div style={{ fontSize: '14px', color: C.outline, textAlign: 'center', maxWidth: '400px' }}>Selecione um projeto e clique em <strong style={{ color: C.primaryFixedDim }}>Analisar</strong> para ver os dados desta aba.</div>
             </div>
           )}
         </div>
-
-        {/* Progress */}
-        {state === 'analyzing' && progress && (
-          <div style={S.card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontWeight: 600, fontSize: '14px' }}>
-              <span>Analisando...</span><span style={{ color: C.accent }}>{overallPct}%</span>
-            </div>
-            <div style={S.progressBar}><div style={S.progressFill(overallPct)} /></div>
-            <div style={{ fontSize: '12px', color: C.muted, marginBottom: '14px' }}>{progress.detail}</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px' }}>
-              {progress.phases.map((phase) => (
-                <div key={phase.id} style={S.phaseRow(phase.status)}>
-                  <span style={S.badge(phase.status)}>
-                    {phase.status === 'done' ? '✓' : phase.status === 'running' ? '◈' : phase.status === 'error' ? '✗' : '○'}
-                  </span>
-                  <span style={{ fontSize: '12px' }}>{phase.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Error */}
-        {state === 'error' && result?.error && (
-          <div style={{ ...S.card, border: `1px solid ${C.red}`, background: '#1a0d0d' }}>
-            <div style={{ color: C.red, fontWeight: 600, marginBottom: '8px' }}>Erro na análise</div>
-            <code style={{ fontSize: '12px', color: '#ffaaaa', whiteSpace: 'pre-wrap' as const }}>{result.error}</code>
-          </div>
-        )}
-
-        {/* Docs — always visible, regardless of analysis state */}
-        {activeTab === 'docs' && (
-          <div style={S.card}><DocsTab /></div>
-        )}
-
-        {/* Results */}
-        {state === 'done' && result && activeTab !== 'docs' && (
-          <>
-            {activeTab === 'overview' && (
-              <>
-                <div style={S.card}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-                    <span style={{ fontSize: '16px' }}>✅</span>
-                    <span style={{ fontWeight: 700, fontSize: '15px', color: C.green }}>Análise concluída</span>
-                  </div>
-
-                  {/* Linha primária — tamanho do projeto */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '14px', padding: '14px', background: '#0d1117', borderRadius: '10px' }}>
-                    {[
-                      { num: result.totalFiles.toLocaleString(), label: 'Arquivos', color: C.accent },
-                      { num: result.totalLines.toLocaleString(), label: 'Linhas', color: C.accent },
-                      { num: result.modulesGenerated.toString(), label: 'Módulos', color: C.accent },
-                      { num: `~${result.quickContextTokens.toLocaleString()}`, label: 'Tokens p/ IA', color: C.green },
-                    ].map((s) => (
-                      <div key={s.label} style={S.stat(s.color)}>
-                        <div style={{ ...S.statNum(s.color), fontSize: '26px' }}>{s.num}</div>
-                        <div style={S.statLabel}>{s.label}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Linha de saúde — onde focar a atenção */}
-                  <div style={{ fontSize: '11px', color: C.muted, fontWeight: 600, letterSpacing: '0.05em', margin: '16px 0 8px' }}>SAÚDE DO CÓDIGO</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '12px' }}>
-                    {[
-                      { num: result.hotspots.toString(), label: 'Hotspots', color: result.hotspots > 0 ? C.orange : C.green, icon: '🔥' },
-                      { num: result.offenderFunctions.toString(), label: 'Funções críticas', color: result.offenderFunctions > 0 ? C.red : C.green, icon: '🧩' },
-                      { num: result.violations.toString(), label: 'Violações Arq.', color: result.violations > 0 ? C.red : C.green, icon: '⚠️' },
-                      { num: result.patterns.toString(), label: 'Padrões', color: C.accent, icon: '🏛️' },
-                      { num: result.impactedFiles.toString(), label: 'Impacto Mapeado', color: C.accent, icon: '🎯' },
-                    ].map((s) => (
-                      <div key={s.label} style={{ textAlign: 'center' as const, padding: '12px 8px', background: C.card, border: `1px solid ${C.border}`, borderRadius: '10px' }}>
-                        <div style={{ fontSize: '14px', marginBottom: '2px' }}>{s.icon}</div>
-                        <div style={{ fontSize: '20px', fontWeight: 700, color: s.color }}>{s.num}</div>
-                        <div style={S.statLabel}>{s.label}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Linha de detalhes — só o que foi detectado */}
-                  {(() => {
-                    const extra = [
-                      ...(result.functionsAnalyzed > 0 ? [{ num: result.functionsAnalyzed.toLocaleString(), label: 'Funções (AST)', color: '#a0a0ff' }] : []),
-                      ...(result.dbTables > 0 ? [{ num: result.dbTables.toString(), label: 'Tabelas BD', color: '#f0c000' }] : []),
-                      ...(result.inheritanceClasses > 0 ? [{ num: result.inheritanceClasses.toString(), label: 'Herança', color: '#a0a0ff' }] : []),
-                      ...(result.cacheHits > 0 ? [{ num: result.cacheHits.toString(), label: 'Cache Hits', color: C.green }] : []),
-                      ...(result.plsqlObjects > 0 ? [{ num: result.plsqlObjects.toString(), label: 'PL/SQL', color: '#f0c000' }] : []),
-                      ...(result.frontendCalls > 0 ? [{ num: result.frontendCalls.toString(), label: 'HTTP calls', color: C.accent }] : []),
-                      ...(result.dbCalls > 0 ? [{ num: result.dbCalls.toString(), label: 'Backend→BD', color: '#f0c000' }] : []),
-                      ...(result.transactions > 0 ? [{ num: result.transactions.toString(), label: '@Transactional', color: '#7c83fd' }] : []),
-                      ...(result.batchJobs > 0 ? [{ num: result.batchJobs.toString(), label: 'Batch/Async', color: C.orange }] : []),
-                      ...(result.angularModules > 0 ? [{ num: result.angularModules.toString(), label: 'Ng Módulos', color: '#dd0031' }] : []),
-                      ...(result.deadComponents > 0 ? [{ num: result.deadComponents.toString(), label: 'Dead Comps', color: C.muted }] : []),
-                    ];
-                    if (extra.length === 0) return null;
-                    return (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '12px', marginTop: '16px', paddingTop: '16px', borderTop: `1px solid ${C.border}` }}>
-                        {extra.map((s) => (
-                          <div key={s.label} style={S.stat(s.color)}>
-                            <div style={S.statNum(s.color)}>{s.num}</div>
-                            <div style={S.statLabel}>{s.label}</div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
-                </div>
-
-                <div style={S.card}>
-                  <div style={{ marginBottom: '12px', fontWeight: 600, fontSize: '13px', color: C.muted }}>MCP SERVER — 35 FERRAMENTAS</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={S.dot(mcpRunning)} />
-                    <span style={{ fontSize: '13px', color: mcpRunning ? C.green : C.muted, flex: 1 }}>
-                      {mcpRunning ? `localhost:${mcpPort}/mcp` : 'Parado'}
-                    </span>
-                    <button style={S.btn(mcpRunning ? C.red : C.accent)} onClick={handleToggleMcp}>{mcpRunning ? 'Parar MCP' : 'Iniciar MCP'}</button>
-                    <button style={S.btn('#333')} onClick={() => window.ticAnalyzer.openFolder(result.outputPath)}>Abrir .tic-code</button>
-                  </div>
-                  {mcpRunning && (
-                    <>
-                      <div style={{ marginTop: '10px', fontSize: '12px', color: C.muted, fontFamily: 'monospace', background: '#0d1117', padding: '10px', borderRadius: '6px' }}>
-                        {`{"mcpServers":{"tic-analyzer":{"url":"http://localhost:${mcpPort}/mcp"}}}`}
-                      </div>
-                      <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_diff_impact','get_metrics','get_hotspots','list_complex_functions','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_table_columns','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','get_behavioral_hotspots','get_change_coupling','get_knowledge_map','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
-                          <span key={tool} style={{ padding: '2px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '4px', fontSize: '11px', color: C.accent, fontFamily: 'monospace' }}>{tool}</span>
-                        ))}
-                      </div>
-                      <div style={{ marginTop: '14px', borderTop: `1px solid ${C.border}`, paddingTop: '14px' }}>
-                        <div style={{ fontSize: '11px', color: C.muted, fontWeight: 600, marginBottom: '8px', letterSpacing: '0.05em' }}>MONITOR DE TOKENS EM TEMPO REAL</div>
-                        <TokenMonitor
-                          stats={tokenStats}
-                          onClear={() => { window.ticAnalyzer.clearTokenStats(); setTokenStats(null); }}
-                        />
-                      </div>
-                    </>
-                  )}
-                </div>
-              </>
-            )}
-
-            {activeTab === 'impact' && (
-              <div style={S.card}><ImpactTab ticCodeDir={result.outputPath} projectPath={projectPath} /></div>
-            )}
-
-            {activeTab === 'metrics' && (
-              <div style={S.card}><MetricsTab ticCodeDir={result.outputPath} /></div>
-            )}
-
-            {activeTab === 'multigraph' && (
-              <div style={S.card}>
-                <div style={{ marginBottom: '12px' }}>
-                  <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>Multi-Grafo de Chamadas</div>
-                  <div style={{ fontSize: '12px', color: C.muted }}>Frontend → Endpoint REST → Backend → PL/SQL</div>
-                </div>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: C.muted, marginBottom: '8px' }}>Grafo Interativo</div>
-                <GraphViewer ticCodeDir={result.outputPath} mode="call" />
-                {multigraphCode && (
-                  <div style={{ marginTop: '20px' }}>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: C.muted, marginBottom: '8px' }}>Diagrama Estatico (Mermaid)</div>
-                    <MermaidDiagram code={multigraphCode} id="multigraph" />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {activeTab === 'modules' && (
-              <div style={S.card}>
-                <div style={{ marginBottom: '16px' }}>
-                  <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>Diagrama de Modulos</div>
-                  <div style={{ fontSize: '12px', color: C.muted }}>Dependencias entre modulos detectadas por analise de imports</div>
-                </div>
-                {diagramCode ? <MermaidDiagram code={diagramCode} id="diagram" /> : (
-                  <div style={{ color: C.muted, fontSize: '13px', padding: '40px', textAlign: 'center' as const }}>Diagrama nao gerado — menos de 2 modulos detectados.</div>
-                )}
-              </div>
-            )}
-
-            {activeTab === 'files' && (
-              <div style={S.card}>
-                <div style={{ marginBottom: '12px', fontWeight: 600, fontSize: '13px', color: C.muted }}>ARTEFATOS GERADOS</div>
-                <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#aaa', lineHeight: '2' }}>
-                  {[
-                    { path: `${result.outputPath}/`, color: C.muted, indent: 0 },
-                    { path: 'quick-context.md', note: `(~${result.quickContextTokens.toLocaleString()} tokens)`, color: C.green, indent: 1 },
-                    { path: 'metrics-summary.md', note: 'complexidade por função + hotspots + violações', color: C.orange, indent: 1 },
-                    { path: 'complex-functions.json', note: 'funções mais complexas (CC + cognitiva + aninhamento)', color: C.orange, indent: 1 },
-                    { path: 'impact-index.json', note: 'indice de impacto de mudanca', color: C.accent, indent: 1 },
-                    { path: 'patterns.md', note: 'padroes arquiteturais', color: C.accent, indent: 1 },
-                    { path: 'inheritance.md', note: 'hierarquia de classes', color: '#a0a0ff', indent: 1 },
-                    { path: 'call-graph.json + dep-graph.json', note: 'grafos interativos', color: C.muted, indent: 1 },
-                    { path: 'multigraph.md + diagram.md', note: 'diagramas Mermaid', color: C.muted, indent: 1 },
-                    { path: 'openapi.yaml', note: 'endpoints OpenAPI 3.0', color: C.muted, indent: 1 },
-                    { path: 'gaps.md + permissions.md + index.md', note: '', color: C.muted, indent: 1 },
-                    { path: `modules/ x${result.modulesGenerated}`, note: 'context + business-rules + metrics + patterns', color: C.muted, indent: 1 },
-                    ...(result.dbTables > 0 ? [{ path: `db-schema.md + db-schema-summary.md`, note: `${result.dbTables} tabelas detectadas`, color: '#f0c000', indent: 1 }] : []),
-                    ...(result.transactions > 0 ? [{ path: 'transactions.md', note: '@Transactional boundaries Spring', color: C.accent, indent: 1 }] : []),
-                    ...(result.batchJobs > 0 ? [{ path: 'batch-jobs.md', note: '@Scheduled, @Async, Quartz, Spring Batch', color: C.orange, indent: 1 }] : []),
-                    ...(result.angularModules > 0 ? [{ path: 'angular-modules.md', note: 'NgModule + lazy routes + NgRx', color: '#dd0031', indent: 1 }] : []),
-                    ...(result.plsqlObjects > 0 ? [{ path: 'plsql-objects.json', note: 'procedures/functions com tabelas lidas/escritas', color: '#f0c000', indent: 1 }] : []),
-                    ...(result.plsqlObjects > 0 ? [{ path: 'dead-plsql.json', note: 'procedures/functions sem referenciadores', color: C.muted, indent: 1 }] : []),
-                    ...(result.deadComponents > 0 ? [{ path: 'dead-components.json', note: 'React/Angular components com inDegree=0', color: C.muted, indent: 1 }] : []),
-                    { path: 'search-index.json', note: 'índice de busca semântica (terms + snippets)', color: C.accent, indent: 1 },
-                    { path: 'analysis.json', note: 'export estruturado completo', color: '#7c83fd', indent: 1 },
-                    { path: 'file-cache.json', note: `cache incremental${result.cacheHits > 0 ? ` (${result.cacheHits} módulos reutilizados)` : ''}`, color: C.green, indent: 1 },
-                    { path: 'CLAUDE.md + .github/copilot-instructions.md', note: '', color: '#7c83fd', indent: 0 },
-                  ].map((row, i) => (
-                    <div key={i} style={{ paddingLeft: `${row.indent * 16}px` }}>
-                      <span style={{ color: row.color }}>{row.path}</span>
-                      {row.note && <span style={{ color: '#666' }}> — {row.note}</span>}
-                    </div>
-                  ))}
-                </div>
-                <div style={{ marginTop: '14px' }}>
-                  <button style={S.btn()} onClick={() => window.ticAnalyzer.openFolder(result.outputPath)}>Abrir pasta .tic-code</button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      </main>
     </div>
   );
 }

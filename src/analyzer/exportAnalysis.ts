@@ -15,6 +15,7 @@ import type { ImpactIndex } from './buildImpactIndex';
 import type { TransactionBoundary } from './detectTransactions';
 import type { BatchJob } from './detectBatchJobs';
 import type { AngularModule, NgRxItem } from './detectAngularModules';
+import type { HealthScore } from './computeHealthScore';
 
 export interface ExportData {
   projectName: string;
@@ -39,6 +40,15 @@ export interface ExportData {
   angularModules: AngularModule[];
   ngrxItems: NgRxItem[];
   deadComponents: Array<{ file: string; type: 'react' | 'angular' }>;
+  health?: HealthScore;
+  /** Governança: violações de regra (.tic-rules.json). */
+  archViolations?: { items: unknown[]; errorCount: number; warnCount: number; ruleCount: number };
+  /** Predição de risco (top 20). */
+  riskPrediction?: unknown[];
+  /** ROI: débito em tempo/dinheiro. */
+  roi?: unknown;
+  /** Ownership, bus-factor, onboarding. */
+  ownership?: unknown;
 }
 
 export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
@@ -47,6 +57,11 @@ export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
   const analysis = {
     version: '2.0',
     analyzedAt: new Date().toISOString(),
+    health: data.health,
+    archViolations: data.archViolations,
+    riskPrediction: data.riskPrediction,
+    roi: data.roi,
+    ownership: data.ownership,
     project: {
       name: data.projectName,
       totalFiles: data.files.length,
@@ -139,7 +154,9 @@ export function exportAnalysis(ticCodeDir: string, data: ExportData): void {
       critical: risksByLevel('critical'),
       high: risksByLevel('high'),
       medium: risksByLevel('medium'),
-      low: risksByLevel('low')
+      low: risksByLevel('low'),
+      // Lista por arquivo+regra (sem linha — linhas deslocam) p/ delta entre análises (PR review)
+      items: data.risks.map((r) => ({ level: r.level, title: r.title, file: r.file }))
     },
     impact: {
       indexedFiles: Object.keys(data.impactIndex).length,

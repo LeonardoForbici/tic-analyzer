@@ -15,6 +15,8 @@ import type { CallGraph } from '../buildCallGraph';
 import type { SearchIndexEntry } from '../buildSearchIndex';
 import type { MethodEdge } from '../semantic/resolveReferences';
 import type { ColumnAccess } from '../detectOrmMappings';
+import type { ProjectModule } from '../detectModules';
+import type { ImpactEdge } from '../buildImpactGraph';
 import { vectorToBlob } from '../semantic/embeddings';
 
 export const INDEX_DB_FILE = 'index.db';
@@ -25,8 +27,31 @@ CREATE TABLE files (
   ext TEXT,
   lines INTEGER,
   in_degree INTEGER,
-  out_degree INTEGER
+  out_degree INTEGER,
+  module TEXT,
+  layer TEXT,
+  role TEXT
 );
+CREATE INDEX idx_files_module ON files(module);
+
+CREATE TABLE modules (
+  name TEXT PRIMARY KEY,
+  file_count INTEGER,
+  layer TEXT
+);
+
+-- Grafo de impacto unificado (file/method/plsql/table/column). Aresta A→B
+-- significa "A depende de B"; impacto de B = BFS reverso a partir de B.
+CREATE TABLE impact_edges (
+  from_id TEXT NOT NULL,
+  to_id TEXT NOT NULL,
+  from_kind TEXT,
+  to_kind TEXT,
+  via TEXT,
+  confidence TEXT
+);
+CREATE INDEX idx_impact_to ON impact_edges(to_id);
+CREATE INDEX idx_impact_from ON impact_edges(from_id);
 CREATE TABLE edges (
   from_file TEXT NOT NULL,
   to_file TEXT NOT NULL,
@@ -85,6 +110,14 @@ CREATE TABLE embeddings (
   file TEXT PRIMARY KEY,
   vec BLOB NOT NULL
 );
+
+-- Comunidades do grafo (Louvain) — clusters por topologia, não por pasta.
+CREATE TABLE communities (
+  node_id TEXT PRIMARY KEY,   -- id canônico do impacto (file:/method:/plsql:/table:/column:)
+  community INTEGER NOT NULL,  -- id numérico do cluster
+  name TEXT                    -- rótulo heurístico do cluster
+);
+CREATE INDEX idx_communities_community ON communities(community);
 `;
 
 export interface IndexDbInput {
@@ -94,8 +127,14 @@ export interface IndexDbInput {
   searchEntries: SearchIndexEntry[];
   methodEdges?: MethodEdge[];
   columnAccess?: ColumnAccess[];
+  /** Módulos detectados — persistidos para agregação (grafo drill-down). */
+  modules?: ProjectModule[];
+  /** Grafo de impacto unificado (file/method/plsql/table/column). */
+  impactEdges?: ImpactEdge[];
   /** Embeddings por arquivo (Fase 4). Ausente quando o modelo não está disponível. */
   embeddings?: Array<{ file: string; vector: Float32Array }>;
+  /** Comunidades do grafo (Louvain): node id → cluster id + nome. */
+  communities?: Array<{ nodeId: string; community: number; name: string }>;
 }
 
 /** (Re)constrói o index.db a partir dos resultados já computados na pipeline. */
@@ -115,9 +154,25 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
     const linesByPath = new Map<string, ScannedFile>();
     for (const f of input.files) linesByPath.set(f.relativePath, f);
 
+    // Mapa arquivo→módulo + camada predominante por módulo (a camada do ARQUIVO
+    // é individual — um módulo misto não pinta um package.json de "backend")
+    const moduleByFile = new Map<string, string>();
+    const moduleLayers: Array<{ name: string; fileCount: number; layer: string }> = [];
+    for (const mod of input.modules ?? []) {
+      const counts = { frontend: 0, backend: 0, database: 0 };
+      for (const f of mod.files) {
+        moduleByFile.set(f.relativePath, mod.name);
+        counts[fileLayer(f.relativePath, f.extension)]++;
+      }
+      const layer = (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0]) ?? 'backend';
+      moduleLayers.push({ name: mod.name, fileCount: mod.fileCount, layer });
+    }
+
     const insertFile = db.prepare(
-      'INSERT OR REPLACE INTO files (rel_path, ext, lines, in_degree, out_degree) VALUES (?, ?, ?, ?, ?)'
+      'INSERT OR REPLACE INTO files (rel_path, ext, lines, in_degree, out_degree, module, layer, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
+    const insertModule = db.prepare('INSERT OR REPLACE INTO modules (name, file_count, layer) VALUES (?, ?, ?)');
+    const insertImpact = db.prepare('INSERT INTO impact_edges (from_id, to_id, from_kind, to_kind, via, confidence) VALUES (?, ?, ?, ?, ?, ?)');
     const insertEdge = db.prepare('INSERT INTO edges (from_file, to_file, kind, confidence) VALUES (?, ?, ?, ?)');
     const insertSymbol = db.prepare('INSERT INTO symbols (file, kind, simple_name, line) VALUES (?, ?, ?, ?)');
     const insertMethodEdge = db.prepare('INSERT INTO method_edges (from_file, from_type, from_method, to_file, to_method, confidence) VALUES (?, ?, ?, ?, ?, ?)');
@@ -126,11 +181,16 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
     const insertSearch = db.prepare('INSERT INTO search_fts (file, snippet, terms) VALUES (?, ?, ?)');
     const insertColumn = db.prepare('INSERT INTO column_access (from_file, "table", column, mode, confidence) VALUES (?, ?, ?, ?, ?)');
     const insertEmbedding = db.prepare('INSERT OR REPLACE INTO embeddings (file, vec) VALUES (?, ?)');
+    const insertCommunity = db.prepare('INSERT OR REPLACE INTO communities (node_id, community, name) VALUES (?, ?, ?)');
 
     const writeAll = db.transaction(() => {
       for (const n of input.graph.nodes) {
         const sf = linesByPath.get(n.path);
-        insertFile.run(n.path, sf?.extension ?? null, sf?.lines ?? null, n.inDegree, n.outDegree);
+        insertFile.run(n.path, sf?.extension ?? null, sf?.lines ?? null, n.inDegree, n.outDegree, moduleByFile.get(n.path) ?? null, fileLayer(n.path, sf?.extension ?? ''), null);
+      }
+      for (const m of moduleLayers) insertModule.run(m.name, m.fileCount, m.layer);
+      for (const e of input.impactEdges ?? []) {
+        insertImpact.run(e.from, e.to, e.fromKind, e.toKind, e.via, e.confidence);
       }
       for (const e of input.graph.edges) {
         insertEdge.run(e.from, e.to, e.kind ?? 'import', e.confidence ?? 'inferred');
@@ -156,6 +216,9 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
       for (const e of input.embeddings ?? []) {
         insertEmbedding.run(e.file, vectorToBlob(e.vector));
       }
+      for (const c of input.communities ?? []) {
+        insertCommunity.run(c.nodeId, c.community, c.name);
+      }
     });
     writeAll();
 
@@ -163,6 +226,23 @@ export function writeIndexDb(dbPath: string, input: IndexDbInput): { nodes: numb
   } finally {
     db.close();
   }
+}
+
+const FRONTEND_EXTS = new Set(['.tsx', '.jsx', '.vue', '.html', '.css', '.scss', '.less', '.osw']);
+const DB_EXTS = new Set(['.sql', '.plsql', '.pls', '.pck', '.pks', '.pkb', '.prc', '.fnc', '.trg', '.pkg']);
+const FRONTEND_SEGS = new Set(['frontend', 'front', 'ui', 'web', 'webapp', 'client', 'pages', 'components', 'views']);
+
+/** Camada de um ARQUIVO individual (extensão + path), independente do módulo. */
+export function fileLayer(relPath: string, ext: string): 'frontend' | 'backend' | 'database' {
+  if (DB_EXTS.has(ext)) return 'database';
+  if (FRONTEND_EXTS.has(ext)) return 'frontend';
+  if (['.ts', '.js', '.json', '.md'].includes(ext)) {
+    const segs = relPath.toLowerCase().split('/');
+    // Segmento exato (pages, components...) OU sufixo de subprojeto no padrão
+    // <projeto>-frontend (ex.: pending-approval-frontend/src/api.ts)
+    if (segs.some((s) => FRONTEND_SEGS.has(s) || /(^|[-_.])(frontend|front|ui|web|client)$/.test(s))) return 'frontend';
+  }
+  return 'backend';
 }
 
 /** Abre o index.db em modo leitura para o MCP. Retorna null se ausente. */

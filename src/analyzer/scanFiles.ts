@@ -22,7 +22,7 @@ const SUPPORTED_EXTENSIONS = new Set([
   '.php', '.swift', '.dart',
   '.html', '.htm', '.css', '.scss', '.sass', '.less',
   '.sql', '.plsql', '.pls', '.pck', '.pks', '.pkb', '.prc', '.fnc', '.trg', '.pkg',
-  '.json', '.yaml', '.yml', '.toml', '.xml', '.properties', '.env',
+  '.json', '.yaml', '.yml', '.toml', '.xml', '.properties', '.env', '.osw',
   '.md', '.mdx', '.graphql', '.gql', '.proto'
 ]);
 

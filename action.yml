@@ -1,0 +1,191 @@
+name: 'TIC Analyzer PR Review'
+description: >
+  Análise estática local (zero tokens de IA) que comenta no PR o impacto
+  cross-tier das mudanças, riscos novos, violações arquiteturais e delta do
+  health score. Compara a branch base (merge-base) com o head do PR.
+author: 'TIC Analyzer'
+
+inputs:
+  base-ref:
+    description: 'Branch base do PR (default: github.base_ref)'
+    required: false
+    default: ${{ github.base_ref }}
+  gate:
+    description: 'Quality gates: new-high-risks, new-violations, health-drop:N (separados por vírgula). Vazio = só comenta.'
+    required: false
+    default: ''
+  comment:
+    description: 'Postar/atualizar comentário sticky no PR (precisa de permissions: pull-requests: write)'
+    required: false
+    default: 'true'
+  create-issues:
+    description: 'Quando um gate falha, cria issue com labels bug/needs-triage e corpo = AGENT-BRIEF (skill triage). Precisa de permissions: issues: write'
+    required: false
+    default: 'false'
+  github-token:
+    description: 'Token para o comentário no PR'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    # hashFiles() only works inside GITHUB_WORKSPACE; copy the action's lock file there first
+    - name: Expose action lock file for cache key
+      shell: bash
+      run: cp "${{ github.action_path }}/package-lock.json" "${{ github.workspace }}/.tic-action-lock.json"
+
+    - name: Cache npm dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm
+        key: npm-${{ runner.os }}-${{ hashFiles('.tic-action-lock.json') }}
+        restore-keys: |
+          npm-${{ runner.os }}-
+
+    - name: Remove lock file temporário do workspace
+      shell: bash
+      run: rm -f "${{ github.workspace }}/.tic-action-lock.json"
+
+    - name: Build analyzer (sem electron-builder — better-sqlite3 usa prebuild Node)
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        npm ci --no-audit --no-fund
+        npm run build:electron
+
+    - name: Resolve merge-base
+      id: mb
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+      run: |
+        set -euo pipefail
+        git fetch origin "$BASE_REF" --depth=200 || git fetch origin "$BASE_REF"
+        echo "sha=$(git merge-base "origin/$BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
+
+    # Cache da análise da branch base: o engine é incremental (file-cache),
+    # então restaurar QUALQUER análise anterior (restore-keys) já faz a
+    # re-análise tocar só nos arquivos que mudaram desde então. Em runner
+    # self-hosted o mesmo diretório persiste em disco entre execuções.
+    - name: Cache análise base
+      uses: actions/cache@v4
+      with:
+        path: ~/.tic-analyzer-cache/base
+        key: tic-base-${{ runner.os }}-${{ steps.mb.outputs.sha }}
+        restore-keys: |
+          tic-base-${{ runner.os }}-
+
+    - name: Analyze base (merge-base) e head
+      shell: bash
+      env:
+        MERGE_BASE: ${{ steps.mb.outputs.sha }}
+      run: |
+        set -euo pipefail
+        echo "merge-base: $MERGE_BASE"
+        git worktree add /tmp/tic-base "$MERGE_BASE"
+        CACHE_DIR="$HOME/.tic-analyzer-cache/base"
+        if [ -d "$CACHE_DIR" ]; then
+          echo "cache de análise base encontrado — re-análise será incremental"
+          mkdir -p /tmp/tic-base/.tic-code
+          cp -r "$CACHE_DIR/." /tmp/tic-base/.tic-code/
+        fi
+        node "$GITHUB_ACTION_PATH/dist/src/cli/index.js" analyze /tmp/tic-base --no-ai-files
+        mkdir -p "$CACHE_DIR"
+        rm -rf "$CACHE_DIR"
+        cp -r /tmp/tic-base/.tic-code "$CACHE_DIR"
+        node "$GITHUB_ACTION_PATH/dist/src/cli/index.js" analyze "$PWD" --no-ai-files
+
+    - name: Compare e gera report
+      id: review
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+        GATE: ${{ inputs.gate }}
+      run: |
+        set +e
+        node "$GITHUB_ACTION_PATH/dist/src/cli/index.js" pr-review \
+          --base /tmp/tic-base --head "$PWD" \
+          --base-ref "origin/$BASE_REF" \
+          ${GATE:+--gate "$GATE"} \
+          --out /tmp/tic-report.md \
+          --brief-out /tmp/tic-brief.md
+        echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+    - name: Persiste pr-history no branch base
+      if: github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        BASE_REF: ${{ inputs.base-ref }}
+        REPO: ${{ github.repository }}
+      run: |
+        HIST="$PWD/.tic-code/pr-history.json"
+        [ -f "$HIST" ] || exit 0
+        CONTENT=$(base64 -w0 "$HIST")
+        FILE_PATH=".tic-code/pr-history.json"
+        SHA=$(gh api "repos/$REPO/contents/$FILE_PATH?ref=$BASE_REF" --jq '.sha' 2>/dev/null || true)
+        if [ -n "$SHA" ] && [ "$SHA" != "null" ]; then
+          gh api -X PUT "repos/$REPO/contents/$FILE_PATH" \
+            -f message="chore(tic): update PR history [skip ci]" \
+            -f content="$CONTENT" \
+            -f branch="$BASE_REF" \
+            -f sha="$SHA" || true
+        else
+          gh api -X PUT "repos/$REPO/contents/$FILE_PATH" \
+            -f message="chore(tic): update PR history [skip ci]" \
+            -f content="$CONTENT" \
+            -f branch="$BASE_REF" || true
+        fi
+
+    - name: Comentário sticky no PR
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        MARKER='<!-- tic-analyzer-report -->'
+        EXISTING=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq ".[] | select(.body | startswith(\"$MARKER\")) | .id" | head -1)
+        if [ -n "$EXISTING" ]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$EXISTING" -F body=@/tmp/tic-report.md
+        else
+          gh api "repos/$REPO/issues/$PR/comments" -F body=@/tmp/tic-report.md
+        fi
+
+    - name: Issue de triagem (skill triage — gate falhou)
+      if: inputs.create-issues == 'true' && steps.review.outputs.exit_code == '1' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+      run: |
+        set -euo pipefail
+        [ -f /tmp/tic-brief.md ] || { echo "sem brief gerado — pulando issue"; exit 0; }
+        TITLE="[TIC] Quality gate falhou no PR #$PR"
+        # Evita duplicar: procura issue aberta com o mesmo título
+        EXISTING=$(gh api "search/issues?q=repo:$REPO+state:open+in:title+%22$TITLE%22" --jq '.items[0].number' 2>/dev/null || true)
+        if [ -z "$EXISTING" ] || [ "$EXISTING" = "null" ]; then
+          gh api "repos/$REPO/issues" -f title="$TITLE" -F body=@/tmp/tic-brief.md \
+            -f "labels[]=bug" -f "labels[]=needs-triage"
+        fi
+
+    - name: Quality gate
+      shell: bash
+      run: |
+        if [ "${{ steps.review.outputs.exit_code }}" = "1" ]; then
+          echo "::error::Quality gate do TIC Analyzer falhou (veja o comentário no PR)"
+          exit 1
+        elif [ "${{ steps.review.outputs.exit_code }}" != "0" ]; then
+          echo "::error::tic-analyzer pr-review terminou com erro"
+          exit 1
+        fi
