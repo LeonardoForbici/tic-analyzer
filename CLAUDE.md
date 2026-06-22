@@ -59,7 +59,7 @@ src/
     server.ts           ← MCP Server HTTP/SSE (localhost:7432) + push SSE em /events
   ui/
     App.tsx             ← interface React (abas: Visão Geral, Saúde, Explorador, Impacto...)
-    HierGraphViewer.tsx ← drill-down hierárquico estilo CAST Imaging
+    HierGraphViewer.tsx ← drill-down hierárquico (app → camadas → módulos → arquivos → símbolos)
     HealthDashboard.tsx ← gauge + breakdown + tendência (snapshots)
     main.tsx
 ```
