@@ -79,6 +79,8 @@ export interface PipelineResult {
   deadComponents: number;
   gitCommits: number;
   behavioralHotspots: number;
+  functionsAnalyzed: number;
+  offenderFunctions: number;
   error?: string;
 }
 
@@ -127,6 +129,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0,
       hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0,
       transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, gitCommits: 0, behavioralHotspots: 0,
+      functionsAnalyzed: 0, offenderFunctions: 0,
       error: `Pasta inválida: "${projectPath}"\n\nSelecione a pasta RAIZ do projeto, não a pasta .tic-code.\nExemplo correto: C:\\Git\\meu-projeto`
     };
   }
@@ -506,7 +509,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       angularModules: angularModules.length,
       deadComponents: deadComponents.length,
       gitCommits: gitHistory.available ? gitHistory.analyzedCommits : 0,
-      behavioralHotspots: gitReport.behavioralHotspots
+      behavioralHotspots: gitReport.behavioralHotspots,
+      functionsAnalyzed: metrics.functions.length,
+      offenderFunctions: metrics.offenderFunctionCount
     };
 
   } catch (err) {
@@ -515,7 +520,8 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       success: false, outputPath: ticCodeDir, totalFiles: 0, totalLines: 0, modulesGenerated: 0,
       quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0,
       hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0,
-      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, gitCommits: 0, behavioralHotspots: 0, error
+      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, gitCommits: 0, behavioralHotspots: 0,
+      functionsAnalyzed: 0, offenderFunctions: 0, error
     };
   }
 }

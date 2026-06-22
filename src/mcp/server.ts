@@ -184,7 +184,7 @@ export class TicAnalyzerMcpServer {
         },
         {
           name: 'list_complex_functions',
-          description: 'Lista as funções mais complexas do projeto, POR FUNÇÃO via AST (Java/TS/JS): complexidade ciclomática McCabe, cognitiva (estilo SonarSource) e profundidade de aninhamento. Use offendersOnly para ver só as que excedem os limites e module para filtrar. É a granularidade acionável — aponta o método a refatorar, não só o arquivo. ~400 tokens.',
+          description: 'Lista as funções mais complexas do projeto, POR FUNÇÃO via AST (Java/TS/JS): complexidade ciclomática McCabe, cognitiva e profundidade de aninhamento. Use offendersOnly para ver só as que excedem os limites e module para filtrar. É a granularidade acionável — aponta o método a refatorar, não só o arquivo. ~400 tokens.',
           inputSchema: {
             type: 'object',
             properties: {
@@ -196,7 +196,7 @@ export class TicAnalyzerMcpServer {
         },
         {
           name: 'get_behavioral_hotspots',
-          description: 'Retorna os hotspots COMPORTAMENTAIS: arquivos que combinam alta complexidade com alta frequência de mudança no histórico do git (análise temporal, estilo CodeScene). É onde os bugs nascem — priorize refatoração aqui.',
+          description: 'Retorna os hotspots COMPORTAMENTAIS: arquivos que combinam alta complexidade com alta frequência de mudança no histórico do git (análise temporal do histórico). É onde os bugs nascem — priorize refatoração aqui.',
           inputSchema: { type: 'object', properties: {} }
         },
         {

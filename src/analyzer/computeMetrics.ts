@@ -8,7 +8,7 @@ import { isOffenderFunction, FUNCTION_COMPLEXITY_THRESHOLDS } from './semantic/c
 export interface FileMetrics {
   file: string;
   cyclomaticComplexity: number;
-  /** Complexidade cognitiva (estilo SonarSource). 0 quando origem = regex. */
+  /** Complexidade cognitiva. 0 quando origem = regex. */
   cognitiveComplexity: number;
   /** Profundidade máxima de aninhamento. 0 quando origem = regex. */
   maxNesting: number;

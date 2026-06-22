@@ -10,15 +10,15 @@ export interface BehavioralHotspot {
   linesOfCode: number;
   ageDays: number;
   mainAuthor: string;
-  /** 0–100: alta complexidade × alta frequência de mudança (estilo CodeScene). */
+  /** 0–100: alta complexidade × alta frequência de mudança. */
   score: number;
 }
 
 /**
  * Hotspot comportamental = complexidade × frequência de mudança. Um arquivo
  * complexo que ninguém toca é dívida fria; um arquivo complexo que muda toda
- * semana é onde os bugs nascem. É a métrica-assinatura do CodeScene, impossível
- * de calcular sem o histórico do git.
+ * semana é onde os bugs nascem. É uma métrica comportamental, impossível de
+ * calcular sem o histórico do git.
  */
 export function computeBehavioralHotspots(churn: FileChurn[], metrics: FileMetrics[]): BehavioralHotspot[] {
   if (churn.length === 0) return [];

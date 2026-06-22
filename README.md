@@ -39,8 +39,9 @@ código (74k+ arquivos) → engine local → resumo compacto → IA (mínimo de 
 
 ## Análise semântica (AST + resolução de símbolos)
 
-A partir da Fase 1 da evolução rumo a paridade com o CAST Imaging, o grafo de
-dependências deixou de ser regex e passa a usar **parsing AST real**
+A partir da Fase 1 da evolução rumo a uma análise estática profunda de
+engenharia reversa, o grafo de dependências deixou de ser regex e passa a usar
+**parsing AST real**
 (`tree-sitter`, 100% local/offline) com **resolução de símbolos** para
 TypeScript/JS/TSX e Java:
 
@@ -107,6 +108,30 @@ o MCP embeda a query e ranqueia por cosseno. Onde o host do modelo é bloqueado
 
 ---
 
+## Complexidade por função
+
+As métricas de qualidade são calculadas **por função** via AST real
+(`tree-sitter`) para Java, TypeScript, JS e TSX/JSX — não por arquivo nem por
+regex. Para cada função top-level são medidas:
+
+- **Ciclomática (McCabe)** — `1 + nº de pontos de decisão` (if/for/while/case/
+  catch/ternário/`&&`/`||`).
+- **Cognitiva** — penaliza o **aninhamento**: cada estrutura de controle soma
+  `1 + nível de aninhamento corrente`. Captura o custo de leitura que a
+  ciclomática pura ignora.
+- **Profundidade de aninhamento** — quão fundo entram os blocos.
+
+Funções que excedem os limites (`CC>10`, `cognitiva>15` ou `aninhamento>4`) são
+marcadas como **ofensoras** — a lista acionável do que refatorar primeiro.
+Linguagens sem gramática (Python/Go/C#/...) usam o fallback regex por arquivo.
+
+A tool MCP `list_complex_functions` devolve essa lista (filtros `module` e
+`offendersOnly`), e o artefato `complex-functions.json` é gerado em `.tic-code/`.
+Verificação: `npm run verify` roda `verify-ast-metrics` sobre
+`test/fixtures/complexity`.
+
+---
+
 ## O que é analisado — 30 fases
 
 | # | Fase | O que produz |
@@ -130,7 +155,7 @@ o MCP embeda a query e ranqueia por cosseno. Onde o host do modelo é bloqueado
 | 17 | Relatório de gaps | Módulos sem contexto, endpoints sem docs |
 | 18 | Multi-grafo | Frontend → Endpoint → Backend → PL/SQL (`call-graph.json`) |
 | 19 | Índice de impacto | `impact-index.json` — quem depende de quem |
-| 20 | Métricas de qualidade | Complexidade ciclomática, dívida técnica, hotspots |
+| 20 | Métricas de qualidade | Complexidade **por função** (ciclomática McCabe + cognitiva + aninhamento) via AST, funções ofensoras, dívida técnica e hotspots; fallback regex p/ linguagens sem AST |
 | 21 | Hierarquia de classes | `inheritance.md` — extends, implements, abstract, interface |
 | 22 | Padrões arquiteturais | Repository, Service, Factory, Observer, etc. |
 | 23 | Schema de banco | Tabelas de migrations, ORM models, DDL |
@@ -144,7 +169,7 @@ o MCP embeda a query e ranqueia por cosseno. Onde o host do modelo é bloqueado
 
 ---
 
-## 27 MCP Tools
+## Ferramentas MCP (35)
 
 | Tool | ~Tokens | Descrição |
 |------|---------|-----------|
@@ -176,6 +201,13 @@ o MCP embeda a query e ranqueia por cosseno. Onde o host do modelo é bloqueado
 | `get_dead_components` | ~200 | Componentes React/Angular sem uso |
 | `find_path` | ~200 | Menor caminho entre dois arquivos no grafo |
 | `get_table_columns` | ~200 | Lineage coluna-a-coluna: colunas lidas/escritas de uma tabela e onde |
+| `list_complex_functions` | ~400 | Funções mais complexas por função (ciclomática + cognitiva + aninhamento); filtros `module`/`offendersOnly` |
+| `get_behavioral_hotspots` | ~400 | Hotspots comportamentais: complexidade × frequência de mudança no histórico do git |
+| `get_change_coupling` | ~400 | Acoplamento temporal: arquivos que mudam juntos nos mesmos commits |
+| `get_knowledge_map` | ~400 | Knowledge map / bus factor por módulo (concentração de autoria) |
+| `trace_flow` | ~1.5k | Fluxo vertical completo a partir de um ponto de entrada (upstream + downstream) |
+| `search_code` | ~400 | Busca semântica no código-fonte (FTS5 ou vetorial local) |
+| `get_concept_map` | ~800 | Mapa cruzado de um conceito de negócio em todos os artefatos |
 
 ---
 
@@ -190,7 +222,8 @@ o MCP embeda a query e ranqueia por cosseno. Onde o host do modelo é bloqueado
 ├── call-graph.json           # grafo multi-camada
 ├── impact-index.json         # índice de impacto de mudanças
 ├── analysis.json             # export estruturado completo
-├── metrics-summary.md        # complexidade + hotspots + violações
+├── metrics-summary.md        # complexidade (por função) + hotspots + violações
+├── complex-functions.json    # funções mais complexas (CC + cognitiva + aninhamento + ofensoras)
 ├── patterns.md               # padrões arquiteturais
 ├── inheritance.md            # hierarquia de classes
 ├── openapi.yaml              # endpoints em OpenAPI 3.0
@@ -250,21 +283,21 @@ npm run dist:linux   # → release/TIC Analyzer.AppImage
 
 ---
 
-## TIC Analyzer vs CAST Imaging
+## Capacidades
 
-| Feature | CAST Imaging | TIC Analyzer |
-|---------|-------------|-------------|
-| Grafo por AST + símbolos resolvidos (TS/Java) | Sim | Sim (Fase 1) |
-| Confiança por aresta (resolved/inferred) | Parcial | Sim |
-| Índice consultável em escala (70k+ arquivos) | Sim | Sim (SQLite, Fase 2) |
-| Trace de impacto cross-tier (React→Java→PL/SQL) | Sim | Sim (Fase 3) |
-| PL/SQL data flow (tabelas por procedure) | Sim | Sim |
-| Dead PL/SQL detection | Sim | Sim |
-| Spring @Transactional mapping | Sim | Sim |
-| Batch jobs (@Scheduled, Quartz) | Sim | Sim |
-| Angular NgRx store analysis | Parcial | Sim |
-| Dead components (React/Angular) | Não | Sim |
-| MCP integration (Claude Code) | Não | Sim |
-| Funciona offline / sem cloud | Não | Sim |
-| Custo | ~$50k/ano | Open source |
-| Token budget para IA | N/A | ~12k tokens (quick-context) |
+| Recurso | Status |
+|---------|--------|
+| Grafo por AST + símbolos resolvidos (TS/Java) | ✅ Fase 1 |
+| Confiança por aresta (`resolved`/`inferred`) | ✅ |
+| Índice consultável em escala (70k+ arquivos) | ✅ SQLite (Fase 2) |
+| Trace de impacto cross-tier (React→Java→PL/SQL) | ✅ Fase 3 |
+| Complexidade por função (ciclomática + cognitiva + aninhamento) | ✅ AST (Java/TS/JS) |
+| PL/SQL data flow (tabelas por procedure) | ✅ |
+| Dead PL/SQL detection | ✅ |
+| Spring @Transactional mapping | ✅ |
+| Batch jobs (@Scheduled, @Async, Quartz, Spring Batch) | ✅ |
+| Angular NgRx store analysis | ✅ |
+| Dead components (React/Angular) | ✅ |
+| Integração MCP (Claude Code) | ✅ |
+| Funciona 100% offline / sem cloud | ✅ |
+| Orçamento de tokens para IA | ~12k tokens (quick-context) |

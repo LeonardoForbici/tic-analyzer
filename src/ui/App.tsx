@@ -41,6 +41,7 @@ interface AnalysisResult {
   impactedFiles: number; inheritanceClasses: number;
   dbTables: number; cacheHits: number;
   transactions: number; batchJobs: number; angularModules: number; deadComponents: number;
+  functionsAnalyzed: number; offenderFunctions: number;
   error?: string;
 }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
@@ -380,10 +381,84 @@ function ImpactTab({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPat
   );
 }
 
+// ── ComplexFunctionsView ───────────────────────────────────────────────────────
+interface FnEntry { file: string; module: string; name: string; line: number; cyclomatic: number; cognitive: number; maxNesting: number; offender: boolean; }
+interface FnPayload { thresholds: { cyclomatic: number; cognitive: number; maxNesting: number }; totalFunctions: number; offenderCount: number; functions: FnEntry[]; }
+
+function ComplexFunctionsView({ ticCodeDir }: { ticCodeDir: string }) {
+  const [data, setData] = useState<FnPayload | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [onlyOffenders, setOnlyOffenders] = useState(false);
+
+  useEffect(() => {
+    window.ticAnalyzer.readFile(`${ticCodeDir}/complex-functions.json`).then((c) => {
+      if (c) { try { setData(JSON.parse(c)); } catch { setData(null); } }
+      setLoaded(true);
+    });
+  }, [ticCodeDir]);
+
+  if (!loaded) return <div style={{ color: C.muted, fontSize: '13px', padding: '20px' }}>Carregando funções...</div>;
+  if (!data || data.functions.length === 0) {
+    return <div style={{ color: C.muted, fontSize: '13px', padding: '40px', textAlign: 'center' as const }}>Nenhuma função complexa detectada (requer linguagens com AST: Java, TypeScript ou JavaScript).</div>;
+  }
+
+  const t = data.thresholds;
+  const rows = onlyOffenders ? data.functions.filter((f) => f.offender) : data.functions;
+  const ccColor = (cc: number) => (cc > 30 ? C.red : cc > t.cyclomatic ? C.orange : cc > 7 ? '#d9c200' : C.green);
+  const th = { textAlign: 'left' as const, padding: '8px 10px', color: C.muted, fontWeight: 600, fontSize: '11px', textTransform: 'uppercase' as const, letterSpacing: '0.04em', position: 'sticky' as const, top: 0, background: '#0d1117' };
+  const td = { padding: '7px 10px', fontSize: '12px', borderBottom: `1px solid ${C.border}` };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' as const }}>
+        <div style={{ display: 'flex', gap: '14px', flex: 1, flexWrap: 'wrap' as const }}>
+          <span style={{ fontSize: '12px', color: C.muted }}>Funções analisadas <strong style={{ color: C.text }}>{data.totalFunctions.toLocaleString()}</strong></span>
+          <span style={{ fontSize: '12px', color: C.muted }}>Acima do limite <strong style={{ color: data.offenderCount > 0 ? C.red : C.green }}>{data.offenderCount}</strong></span>
+        </div>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button style={S.tab(!onlyOffenders)} onClick={() => setOnlyOffenders(false)}>Todas</button>
+          <button style={S.tab(onlyOffenders)} onClick={() => setOnlyOffenders(true)}>Só ofensoras</button>
+        </div>
+      </div>
+
+      <div style={{ fontSize: '11px', color: C.muted, marginBottom: '10px', padding: '8px 10px', background: '#0d1b2a', borderRadius: '6px', border: `1px solid ${C.border}` }}>
+        🔴 ofensora = ultrapassa um limite: complexidade ciclomática &gt; {t.cyclomatic}, cognitiva &gt; {t.cognitive} ou aninhamento &gt; {t.maxNesting}.
+      </div>
+
+      <div style={{ background: '#0d1117', borderRadius: '8px', maxHeight: '460px', overflowY: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' as const }}>
+          <thead>
+            <tr>
+              <th style={th}>Função</th>
+              <th style={th}>Arquivo</th>
+              <th style={{ ...th, textAlign: 'right' as const }}>CC</th>
+              <th style={{ ...th, textAlign: 'right' as const }}>Cognitiva</th>
+              <th style={{ ...th, textAlign: 'right' as const }}>Aninham.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((f, i) => (
+              <tr key={`${f.file}:${f.name}:${f.line}:${i}`} style={{ background: f.offender ? '#2a141422' : 'transparent' }}>
+                <td style={{ ...td, fontFamily: 'monospace', color: f.offender ? C.red : C.text, whiteSpace: 'nowrap' as const }}>
+                  {f.offender ? '🔴 ' : ''}{f.name}<span style={{ color: '#666' }}>:{f.line}</span>
+                </td>
+                <td style={{ ...td, fontFamily: 'monospace', color: C.muted, maxWidth: '320px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }} title={f.file}>{f.file}</td>
+                <td style={{ ...td, textAlign: 'right' as const, fontWeight: 700, color: ccColor(f.cyclomatic) }}>{f.cyclomatic}</td>
+                <td style={{ ...td, textAlign: 'right' as const, color: f.cognitive > t.cognitive ? C.orange : C.text }}>{f.cognitive}</td>
+                <td style={{ ...td, textAlign: 'right' as const, color: f.maxNesting > t.maxNesting ? C.orange : C.text }}>{f.maxNesting}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── MetricsTab ─────────────────────────────────────────────────────────────────
 function MetricsTab({ ticCodeDir }: { ticCodeDir: string }) {
   const [content, setContent] = useState('');
-  const [activeSubTab, setActiveSubTab] = useState<'summary' | 'graph'>('summary');
+  const [activeSubTab, setActiveSubTab] = useState<'summary' | 'functions' | 'graph'>('summary');
 
   useEffect(() => {
     window.ticAnalyzer.readFile(`${ticCodeDir}/metrics-summary.md`).then((c) => {
@@ -393,13 +468,14 @@ function MetricsTab({ ticCodeDir }: { ticCodeDir: string }) {
 
   return (
     <div>
-      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' as const, gap: '8px' }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '4px' }}>Métricas de Qualidade</div>
-          <div style={{ fontSize: '12px', color: C.muted }}>Complexidade Ciclomática · Dívida Técnica · Hotspots · Violações</div>
+          <div style={{ fontSize: '12px', color: C.muted }}>Complexidade por função · Dívida Técnica · Hotspots · Violações</div>
         </div>
         <div style={{ display: 'flex', gap: '6px' }}>
           <button style={S.tab(activeSubTab === 'summary')} onClick={() => setActiveSubTab('summary')}>Relatório</button>
+          <button style={S.tab(activeSubTab === 'functions')} onClick={() => setActiveSubTab('functions')}>Funções</button>
           <button style={S.tab(activeSubTab === 'graph')} onClick={() => setActiveSubTab('graph')}>Grafo de Deps</button>
         </div>
       </div>
@@ -409,6 +485,8 @@ function MetricsTab({ ticCodeDir }: { ticCodeDir: string }) {
           {content}
         </div>
       )}
+
+      {activeSubTab === 'functions' && <ComplexFunctionsView ticCodeDir={ticCodeDir} />}
 
       {activeSubTab === 'graph' && (
         <GraphViewer ticCodeDir={ticCodeDir} mode="deps" />
@@ -502,7 +580,7 @@ function DocsTab() {
                 <span style={{ color: C.red }}>Não selecione a pasta <Tag>.tic-code</Tag> — sempre a pasta pai.</span>
               </Step>
               <Step n={2} title="Clique em Analisar">
-                O progresso aparece em tempo real com 25 fases. Para projetos grandes (10k–200k arquivos) o processo leva de 30 segundos a alguns minutos. A partir da segunda análise, o cache incremental acelera significativamente os módulos não alterados.
+                O progresso aparece em tempo real, fase a fase. Para projetos grandes (10k–200k arquivos) o processo leva de 30 segundos a alguns minutos. A partir da segunda análise, o cache incremental acelera significativamente os módulos não alterados.
               </Step>
               <Step n={3} title="Explore os resultados">
                 Após a análise, as abas <Tag>Impacto</Tag>, <Tag>Métricas</Tag>, <Tag>Multi-Grafo</Tag> e <Tag>Módulos</Tag> ficam disponíveis.
@@ -510,7 +588,7 @@ function DocsTab() {
               </Step>
               <Step n={4} title="(Opcional) Configure a IA de sua escolha">
                 Para o <strong>Claude Code</strong>: ative o MCP Server e configure <Tag>.claude/settings.json</Tag> — veja a aba <em>Claude Code</em>.<br />
-                Para o <strong>GitHub Copilot</strong>: o <Tag>copilot-instructions.md</Tag> já foi gerado. Para as 19 ferramentas, veja a aba <em>VS Code / Copilot</em>.
+                Para o <strong>GitHub Copilot</strong>: o <Tag>copilot-instructions.md</Tag> já foi gerado. Para as 35 ferramentas, veja a aba <em>VS Code / Copilot</em>.
               </Step>
             </Section>
 
@@ -569,7 +647,7 @@ New-Item -ItemType Directory -Force -Path C:\seu\projeto\.claude`}</Code>
 
 # Verifique se o MCP está conectado:
 /mcp
-# → Deve mostrar: tic-analyzer  connected  19 tools`}</Code>
+# → Deve mostrar: tic-analyzer  connected  35 tools`}</Code>
               </Step>
               <Step n={5} title="Use normalmente — o Claude sabe o que fazer">
                 Basta conversar. O Claude vai consultar as ferramentas automaticamente:
@@ -621,7 +699,7 @@ New-Item -ItemType Directory -Force -Path C:\seu\projeto\.claude`}</Code>
                 <div style={{ padding: '14px', background: '#0d1b2a', borderRadius: '10px', border: `1px solid ${C.accent}44` }}>
                   <div style={{ fontWeight: 700, color: C.accent, marginBottom: '6px', fontSize: '13px' }}>Modo MCP (VS Code 1.99+)</div>
                   <div style={{ fontSize: '12px', color: '#b0b0c0', lineHeight: 1.8 }}>
-                    Acesso às 19 ferramentas do TIC Analyzer.<br />
+                    Acesso às 35 ferramentas do TIC Analyzer.<br />
                     Requer configurar <Tag>.vscode/mcp.json</Tag>.<br />
                     Ferramentas ativadas manualmente no Copilot Chat.<br />
                     Monitor de tokens em tempo real.
@@ -724,7 +802,7 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
                       ['copilot-instructions.md automático', '✓', '✓', '—'],
                       ['CLAUDE.md automático', '—', '—', '✓'],
                       ['Contexto via #file: (manual)', '✓', '✓', '✓'],
-                      ['19 ferramentas MCP disponíveis', '—', '✓', '✓'],
+                      ['35 ferramentas MCP disponíveis', '—', '✓', '✓'],
                       ['Ferramentas ativadas automaticamente', '—', '—', '✓'],
                       ['get_impact() ~200 tokens', '—', '✓ (manual)', '✓ (auto)'],
                       ['get_diff_impact() antes do commit', '—', '✓ (manual)', '✓ (auto)'],
@@ -761,8 +839,8 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
               },
               {
                 name: 'Métricas',
-                desc: 'Complexidade ciclomática por arquivo, debt score por módulo, hotspots (alta complexidade + alto acoplamento) e violações arquiteturais (dependências circulares, frontend importando backend diretamente, etc).',
-                dica: 'Arquivos com complexidade > 30 (🔴) merecem refatoração antes de novos features.'
+                desc: 'Três visões: Relatório (debt score, hotspots e violações arquiteturais), Funções (complexidade por função — ciclomática, cognitiva e aninhamento — com as ofensoras destacadas) e Grafo de Deps. A complexidade é medida por AST real em Java/TS/JS.',
+                dica: 'Use a aba Funções e filtre por "Só ofensoras" para a lista acionável do que refatorar primeiro.'
               },
               {
                 name: 'Multi-Grafo',
@@ -793,7 +871,7 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
         {section === 'ferramentas' && (
           <div>
             <p style={{ fontSize: '13px', color: '#b0b0c0', lineHeight: 1.8, margin: '0 0 16px 0' }}>
-              Com o MCP Server ativo, o Claude Code (e o Copilot em modo Agent) pode chamar estas 19 ferramentas. Cada uma retorna apenas o necessário — de ~200 a ~75k tokens dependendo do escopo.
+              Com o MCP Server ativo, o Claude Code (e o Copilot em modo Agent) pode chamar 35 ferramentas. Estas são as principais — cada uma retorna apenas o necessário, de ~200 a ~75k tokens dependendo do escopo.
             </p>
             {[
               { tool: 'get_quick_context()', tokens: '~12k', desc: 'Visão geral compacta do projeto: stack, módulos, riscos, top endpoints. Use como ponto de partida em qualquer conversa.' },
@@ -804,6 +882,7 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
               { tool: 'get_diff_impact()', tokens: '~300', desc: 'Lê git diff + staged + untracked e retorna o impacto consolidado de TODAS as mudanças pendentes. Use antes de commitar.' },
               { tool: 'get_metrics("módulo")', tokens: '~500', desc: 'Complexidade ciclomática, debt score e hotspots de um módulo. Sem parâmetro, retorna o resumo do projeto inteiro.' },
               { tool: 'get_hotspots()', tokens: '~1k', desc: 'Top arquivos com maior dívida técnica do projeto (alta complexidade + alto acoplamento).' },
+              { tool: 'list_complex_functions()', tokens: '~400', desc: 'Funções mais complexas POR FUNÇÃO (ciclomática McCabe + cognitiva + aninhamento). Filtros: module e offendersOnly (só as que excedem os limites). Aponta o método a refatorar, não só o arquivo.' },
               { tool: 'get_violations()', tokens: '~1k', desc: 'Lista violações arquiteturais: dependências circulares, frontend importando backend, controller acessando BD direto.' },
               { tool: 'get_patterns("módulo")', tokens: '~500', desc: 'Padrões arquiteturais detectados: Repository, Service, Controller, Factory, DTO, Entity, Mapper, UseCase, etc.' },
               { tool: 'get_inheritance()', tokens: '~2k', desc: 'Hierarquia de herança de classes (extends/implements) para Java, TypeScript e Python.' },
@@ -837,7 +916,8 @@ Use tic-analyzer get_diff_impact to review my current changes`}</Code>
               { file: 'quick-context.md', tokens: '~12k', desc: 'Resumo geral do projeto. Ponto de partida para qualquer IA. Contém stack, módulos, top riscos, top endpoints e instruções de navegação.' },
               { file: 'index.md', tokens: '~2k', desc: 'Mapa de navegação com links para todos os módulos, contagem de arquivos e linguagens por módulo.' },
               { file: 'impact-index.json', tokens: 'JSON', desc: 'Índice de impacto de mudança. Para cada arquivo, lista quem depende dele (direto + transitivo). Consultado pontualmente via MCP.' },
-              { file: 'metrics-summary.md', tokens: '~2k', desc: 'Resumo de qualidade: top hotspots, complexidade por módulo, debt score e violações arquiteturais.' },
+              { file: 'metrics-summary.md', tokens: '~2k', desc: 'Resumo de qualidade: top hotspots, complexidade por função, funções ofensoras, debt score e violações arquiteturais.' },
+              { file: 'complex-functions.json', tokens: 'JSON', desc: 'Funções mais complexas do projeto (nome, linha, ciclomática, cognitiva, aninhamento, flag de ofensora). Consumido pela tool list_complex_functions e pela aba Métricas › Funções.' },
               { file: 'patterns.md', tokens: '~1k', desc: 'Padrões arquiteturais detectados em todo o projeto (Repository, Service, Controller, Factory, DTO...).' },
               { file: 'inheritance.md', tokens: '~1k', desc: 'Hierarquia de classes: extends/implements, profundidade máxima de herança.' },
               { file: 'multigraph.md', tokens: '~3k', desc: 'Diagrama Mermaid do fluxo de chamadas: Frontend → Endpoint → Backend → PL/SQL.' },
@@ -1095,38 +1175,75 @@ export function App() {
             {activeTab === 'overview' && (
               <>
                 <div style={S.card}>
-                  <div style={{ marginBottom: '16px', fontWeight: 600, fontSize: '14px', color: C.green }}>Analise concluida</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+                    <span style={{ fontSize: '16px' }}>✅</span>
+                    <span style={{ fontWeight: 700, fontSize: '15px', color: C.green }}>Análise concluída</span>
+                  </div>
+
+                  {/* Linha primária — tamanho do projeto */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '14px', padding: '14px', background: '#0d1117', borderRadius: '10px' }}>
                     {[
                       { num: result.totalFiles.toLocaleString(), label: 'Arquivos', color: C.accent },
                       { num: result.totalLines.toLocaleString(), label: 'Linhas', color: C.accent },
-                      { num: result.modulesGenerated.toString(), label: 'Modulos', color: C.accent },
-                      { num: `~${result.quickContextTokens.toLocaleString()}`, label: 'Tokens Copilot', color: C.green },
-                      { num: result.hotspots.toString(), label: 'Hotspots', color: result.hotspots > 0 ? C.orange : C.green },
-                      { num: result.violations.toString(), label: 'Violacoes Arq.', color: result.violations > 0 ? C.red : C.green },
-                      { num: result.patterns.toString(), label: 'Padroes', color: C.accent },
-                      { num: result.impactedFiles.toString(), label: 'Impacto Mapeado', color: C.accent },
-                      ...(result.dbTables > 0 ? [{ num: result.dbTables.toString(), label: 'Tabelas BD', color: '#f0c000' }] : []),
-                      ...(result.inheritanceClasses > 0 ? [{ num: result.inheritanceClasses.toString(), label: 'Heranca', color: '#a0a0ff' }] : []),
-                      ...(result.cacheHits > 0 ? [{ num: result.cacheHits.toString(), label: 'Cache Hits', color: C.green }] : []),
-                      ...(result.plsqlObjects > 0 ? [{ num: result.plsqlObjects.toString(), label: 'PL/SQL', color: '#f0c000' }] : []),
-                      ...(result.frontendCalls > 0 ? [{ num: result.frontendCalls.toString(), label: 'HTTP calls', color: C.accent }] : []),
-                      ...(result.dbCalls > 0 ? [{ num: result.dbCalls.toString(), label: 'Backend->BD', color: '#f0c000' }] : []),
-                      ...(result.transactions > 0 ? [{ num: result.transactions.toString(), label: '@Transactional', color: '#7c83fd' }] : []),
-                      ...(result.batchJobs > 0 ? [{ num: result.batchJobs.toString(), label: 'Batch/Async', color: C.orange }] : []),
-                      ...(result.angularModules > 0 ? [{ num: result.angularModules.toString(), label: 'Ng Modulos', color: '#dd0031' }] : []),
-                      ...(result.deadComponents > 0 ? [{ num: result.deadComponents.toString(), label: 'Dead Comps', color: C.muted }] : []),
+                      { num: result.modulesGenerated.toString(), label: 'Módulos', color: C.accent },
+                      { num: `~${result.quickContextTokens.toLocaleString()}`, label: 'Tokens p/ IA', color: C.green },
                     ].map((s) => (
                       <div key={s.label} style={S.stat(s.color)}>
-                        <div style={S.statNum(s.color)}>{s.num}</div>
+                        <div style={{ ...S.statNum(s.color), fontSize: '26px' }}>{s.num}</div>
                         <div style={S.statLabel}>{s.label}</div>
                       </div>
                     ))}
                   </div>
+
+                  {/* Linha de saúde — onde focar a atenção */}
+                  <div style={{ fontSize: '11px', color: C.muted, fontWeight: 600, letterSpacing: '0.05em', margin: '16px 0 8px' }}>SAÚDE DO CÓDIGO</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '12px' }}>
+                    {[
+                      { num: result.hotspots.toString(), label: 'Hotspots', color: result.hotspots > 0 ? C.orange : C.green, icon: '🔥' },
+                      { num: result.offenderFunctions.toString(), label: 'Funções críticas', color: result.offenderFunctions > 0 ? C.red : C.green, icon: '🧩' },
+                      { num: result.violations.toString(), label: 'Violações Arq.', color: result.violations > 0 ? C.red : C.green, icon: '⚠️' },
+                      { num: result.patterns.toString(), label: 'Padrões', color: C.accent, icon: '🏛️' },
+                      { num: result.impactedFiles.toString(), label: 'Impacto Mapeado', color: C.accent, icon: '🎯' },
+                    ].map((s) => (
+                      <div key={s.label} style={{ textAlign: 'center' as const, padding: '12px 8px', background: C.card, border: `1px solid ${C.border}`, borderRadius: '10px' }}>
+                        <div style={{ fontSize: '14px', marginBottom: '2px' }}>{s.icon}</div>
+                        <div style={{ fontSize: '20px', fontWeight: 700, color: s.color }}>{s.num}</div>
+                        <div style={S.statLabel}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Linha de detalhes — só o que foi detectado */}
+                  {(() => {
+                    const extra = [
+                      ...(result.functionsAnalyzed > 0 ? [{ num: result.functionsAnalyzed.toLocaleString(), label: 'Funções (AST)', color: '#a0a0ff' }] : []),
+                      ...(result.dbTables > 0 ? [{ num: result.dbTables.toString(), label: 'Tabelas BD', color: '#f0c000' }] : []),
+                      ...(result.inheritanceClasses > 0 ? [{ num: result.inheritanceClasses.toString(), label: 'Herança', color: '#a0a0ff' }] : []),
+                      ...(result.cacheHits > 0 ? [{ num: result.cacheHits.toString(), label: 'Cache Hits', color: C.green }] : []),
+                      ...(result.plsqlObjects > 0 ? [{ num: result.plsqlObjects.toString(), label: 'PL/SQL', color: '#f0c000' }] : []),
+                      ...(result.frontendCalls > 0 ? [{ num: result.frontendCalls.toString(), label: 'HTTP calls', color: C.accent }] : []),
+                      ...(result.dbCalls > 0 ? [{ num: result.dbCalls.toString(), label: 'Backend→BD', color: '#f0c000' }] : []),
+                      ...(result.transactions > 0 ? [{ num: result.transactions.toString(), label: '@Transactional', color: '#7c83fd' }] : []),
+                      ...(result.batchJobs > 0 ? [{ num: result.batchJobs.toString(), label: 'Batch/Async', color: C.orange }] : []),
+                      ...(result.angularModules > 0 ? [{ num: result.angularModules.toString(), label: 'Ng Módulos', color: '#dd0031' }] : []),
+                      ...(result.deadComponents > 0 ? [{ num: result.deadComponents.toString(), label: 'Dead Comps', color: C.muted }] : []),
+                    ];
+                    if (extra.length === 0) return null;
+                    return (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '12px', marginTop: '16px', paddingTop: '16px', borderTop: `1px solid ${C.border}` }}>
+                        {extra.map((s) => (
+                          <div key={s.label} style={S.stat(s.color)}>
+                            <div style={S.statNum(s.color)}>{s.num}</div>
+                            <div style={S.statLabel}>{s.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div style={S.card}>
-                  <div style={{ marginBottom: '12px', fontWeight: 600, fontSize: '13px', color: C.muted }}>MCP SERVER — 30 FERRAMENTAS</div>
+                  <div style={{ marginBottom: '12px', fontWeight: 600, fontSize: '13px', color: C.muted }}>MCP SERVER — 35 FERRAMENTAS</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div style={S.dot(mcpRunning)} />
                     <span style={{ fontSize: '13px', color: mcpRunning ? C.green : C.muted, flex: 1 }}>
@@ -1141,7 +1258,7 @@ export function App() {
                         {`{"mcpServers":{"tic-analyzer":{"url":"http://localhost:${mcpPort}/mcp"}}}`}
                       </div>
                       <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_diff_impact','get_metrics','get_hotspots','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
+                        {['list_modules','get_module','get_quick_context','search_module','get_impact','get_diff_impact','get_metrics','get_hotspots','list_complex_functions','get_patterns','get_violations','get_inheritance','get_db_schema','get_analysis_json','get_multigraph','get_diagram','get_openapi','get_gaps','get_permissions','get_business_rules','get_plsql_object','get_table_access','get_table_columns','get_dead_plsql','get_transactions','get_batch_jobs','get_angular_modules','get_dead_components','get_behavioral_hotspots','get_change_coupling','get_knowledge_map','find_path','trace_flow','search_code','get_concept_map'].map((tool) => (
                           <span key={tool} style={{ padding: '2px 8px', background: '#0d1b2a', border: `1px solid ${C.border}`, borderRadius: '4px', fontSize: '11px', color: C.accent, fontFamily: 'monospace' }}>{tool}</span>
                         ))}
                       </div>
@@ -1202,7 +1319,8 @@ export function App() {
                   {[
                     { path: `${result.outputPath}/`, color: C.muted, indent: 0 },
                     { path: 'quick-context.md', note: `(~${result.quickContextTokens.toLocaleString()} tokens)`, color: C.green, indent: 1 },
-                    { path: 'metrics-summary.md', note: 'complexidade + hotspots + violacoes', color: C.orange, indent: 1 },
+                    { path: 'metrics-summary.md', note: 'complexidade por função + hotspots + violações', color: C.orange, indent: 1 },
+                    { path: 'complex-functions.json', note: 'funções mais complexas (CC + cognitiva + aninhamento)', color: C.orange, indent: 1 },
                     { path: 'impact-index.json', note: 'indice de impacto de mudanca', color: C.accent, indent: 1 },
                     { path: 'patterns.md', note: 'padroes arquiteturais', color: C.accent, indent: 1 },
                     { path: 'inheritance.md', note: 'hierarquia de classes', color: '#a0a0ff', indent: 1 },

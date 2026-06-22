@@ -2,7 +2,7 @@ import { execSync } from 'child_process';
 
 /**
  * Análise temporal via histórico do git — a dimensão "comportamental" que falta
- * aos analisadores puramente estáticos (é o núcleo do CodeScene).
+ * aos analisadores puramente estáticos.
  *
  * 100% offline: lê `git log` localmente, zero rede e zero tokens de IA.
  * Resiliente: se a pasta não for um repositório git (ou o git não existir),

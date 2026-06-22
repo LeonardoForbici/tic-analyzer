@@ -5,11 +5,11 @@
  *
  * Mede, por função:
  *   - Ciclomática (McCabe): 1 + nº de pontos de decisão.
- *   - Cognitiva (aproximação SonarSource): +1 por estrutura de controle, somado
- *     ao nível de aninhamento corrente; +1 por operador lógico (&&/||). É uma
- *     aproximação — não reproduz cada regra do whitepaper SonarSource (ex.:
- *     `else if` é tratado como `if` aninhado), mas captura bem o custo de
- *     aninhamento que a ciclomática pura ignora.
+ *   - Cognitiva (aproximação): +1 por estrutura de controle, somado ao nível de
+ *     aninhamento corrente; +1 por operador lógico (&&/||). É uma aproximação —
+ *     não reproduz cada regra formal da complexidade cognitiva (ex.: `else if` é
+ *     tratado como `if` aninhado), mas captura bem o custo de aninhamento que a
+ *     ciclomática pura ignora.
  *   - maxNesting: profundidade máxima de estruturas de controle aninhadas.
  *
  * Linguagens sem gramática (Python/Go/C#/...) não aparecem no resultado: o

@@ -129,7 +129,7 @@ export function generateMetricsReport(
 
   lines.push('---');
   lines.push('> **Complexidade Ciclomática (McCabe)**: 1-10 = baixa 🟢, 11-20 = média 🟡, 21-30 = alta 🟠, >30 = crítica 🔴');
-  lines.push('> **Cognitiva** (estilo SonarSource) e **Aninhamento**: medidos por função via AST real (Java/TS/JS); `—` indica fallback regex (linguagem sem gramática).');
+  lines.push('> **Cognitiva** e **Aninhamento**: medidos por função via AST real (Java/TS/JS); `—` indica fallback regex (linguagem sem gramática).');
   lines.push('> **Pior Função**: função de maior complexidade ciclomática no arquivo (`nome:linha`).');
   lines.push(`> **Funções acima do limite** 🔴: CC>${metrics.thresholds.cyclomatic}, cognitiva>${metrics.thresholds.cognitive} ou aninhamento>${metrics.thresholds.maxNesting}.`);
   lines.push('> **Debt Score**: pontos de dívida técnica ponderados (complexidade + cognitiva + tamanho + acoplamento)');
