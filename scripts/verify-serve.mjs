@@ -65,7 +65,7 @@ async function waitHealth(timeoutMs = 15000) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
     });
-    check('S2: /mcp SEM token → 401', noAuth.status === 401, `status=${noAuth.status}`);
+    check('S2: /mcp SEM token → 401', noAuth.status === 401);
 
     const withAuth = await fetch(`http://127.0.0.1:${PORT}/mcp`, {
       method: 'POST',

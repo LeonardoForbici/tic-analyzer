@@ -70,7 +70,7 @@ const cleanup = (dir) => { for (const p of ['.tic-code', '.github', 'CLAUDE.md']
     ownership: { knowledgeRisk: [{ file: 'crit.ts', author: 'ana', reason: '12 dependentes' }], modules: [] },
     snapshots: [{ timestamp: 't1', score: 70 }, { timestamp: 't2', score: 72 }]
   });
-  check('H1: HTML tem doctype e Tailwind', html.includes('<!doctype html') && html.includes('cdn.tailwindcss.com'));
+  check('H1: HTML tem doctype e Tailwind', html.includes('<!doctype html') && html.includes('src="https://cdn.tailwindcss.com"'));
   check('H2: seções Health/ROI/Riscos/Bus-factor', html.includes('Health') && html.includes('Custo da dívida') && html.includes('Principais riscos') && html.includes('conhecimento'));
   check('H3: buildExecReportData lê analysis.json', (() => { const d = buildExecReportData((f) => f === 'analysis.json' ? { project: { name: 'P' }, health: { score: 80, grade: 'B' } } : null); return d.projectName === 'P' && d.health.score === 80; })());
 

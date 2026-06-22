@@ -510,9 +510,136 @@ function CrossTierImpactView({ impact, blast, onSelect }: {
   );
 }
 
+interface FnEntry {
+  file: string;
+  module: string;
+  name: string;
+  line: number;
+  cyclomatic: number;
+  cognitive: number;
+  maxNesting: number;
+  offender: boolean;
+}
+
+interface FnPayload {
+  thresholds: { cyclomatic: number; cognitive: number; maxNesting: number };
+  totalFunctions: number;
+  offenderCount: number;
+  functions: FnEntry[];
+}
+
+function ComplexFunctionsView({ ticCodeDir }: { ticCodeDir: string }) {
+  const [data, setData] = useState<FnPayload | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [onlyOffenders, setOnlyOffenders] = useState(false);
+
+  useEffect(() => {
+    window.ticAnalyzer.readFile(`${ticCodeDir}/complex-functions.json`).then((c) => {
+      if (c) {
+        try {
+          setData(JSON.parse(c));
+        } catch {
+          setData(null);
+        }
+      }
+      setLoaded(true);
+    });
+  }, [ticCodeDir]);
+
+  if (!loaded) {
+    return <div style={{ color: C.onSurfaceVariant, fontSize: '13px', padding: '20px' }}>Carregando funções...</div>;
+  }
+
+  if (!data || data.functions.length === 0) {
+    return (
+      <div style={{ color: C.onSurfaceVariant, fontSize: '13px', padding: '40px', textAlign: 'center' as const }}>
+        Nenhuma função complexa detectada (requer linguagens com AST: Java, TypeScript ou JavaScript).
+      </div>
+    );
+  }
+
+  const thresholds = data.thresholds;
+  const rows = onlyOffenders ? data.functions.filter((f) => f.offender) : data.functions;
+  const toggleStyle = (active: boolean) => ({
+    padding: '8px 12px',
+    borderRadius: '6px',
+    border: `1px solid ${active ? C.primaryFixedDim : C.outlineVariant}`,
+    background: active ? `${C.primaryFixedDim}18` : 'transparent',
+    color: active ? C.primaryFixedDim : C.onSurfaceVariant,
+    cursor: 'pointer',
+    fontFamily: F.code,
+    fontSize: '12px',
+    fontWeight: active ? 600 : 400
+  });
+  const metricColor = (value: number, warn: number, severe: number) =>
+    value > severe ? C.error : value > warn ? C.tertiaryFixedDim : C.onSurface;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' as const, marginBottom: '12px' }}>
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' as const, fontFamily: F.code, fontSize: '12px' }}>
+          <span style={{ color: C.onSurfaceVariant }}>Funções analisadas <strong style={{ color: C.onSurface }}>{data.totalFunctions.toLocaleString()}</strong></span>
+          <span style={{ color: C.onSurfaceVariant }}>Ofensoras <strong style={{ color: data.offenderCount > 0 ? C.error : C.secondary }}>{data.offenderCount}</strong></span>
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button style={toggleStyle(!onlyOffenders)} onClick={() => setOnlyOffenders(false)}>Todas</button>
+          <button style={toggleStyle(onlyOffenders)} onClick={() => setOnlyOffenders(true)}>Só ofensoras</button>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: '12px', padding: '10px 12px', background: C.surfaceContainerLowest, borderRadius: '8px', border: `1px solid ${C.outlineVariant}`, fontFamily: F.code, fontSize: '11px', color: C.onSurfaceVariant }}>
+        Limites: ciclomática &gt; {thresholds.cyclomatic}, cognitiva &gt; {thresholds.cognitive}, aninhamento &gt; {thresholds.maxNesting}.
+      </div>
+
+      <div style={{ background: C.surfaceContainerLowest, borderRadius: '8px', border: `1px solid ${C.outlineVariant}`, overflow: 'hidden' }}>
+        <div style={{ maxHeight: '520px', overflowY: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' as const }}>
+            <thead>
+              <tr style={{ background: C.surfaceContainerLow }}>
+                {['Função', 'Módulo', 'Arquivo', 'CC', 'Cognitiva', 'Aninhamento'].map((label) => (
+                  <th
+                    key={label}
+                    style={{
+                      textAlign: label === 'CC' || label === 'Cognitiva' || label === 'Aninhamento' ? 'right' : 'left',
+                      padding: '10px 12px',
+                      fontFamily: F.code,
+                      fontSize: '10px',
+                      color: C.outline,
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase'
+                    }}
+                  >
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((fn, index) => (
+                <tr key={`${fn.file}:${fn.name}:${fn.line}:${index}`} style={{ borderTop: `1px solid ${C.outlineVariant}`, background: fn.offender ? `${C.error}0f` : 'transparent' }}>
+                  <td style={{ padding: '10px 12px', fontFamily: F.code, fontSize: '12px', color: fn.offender ? C.error : C.onSurface }}>
+                    {fn.name}
+                    <span style={{ color: C.outline, marginLeft: '6px' }}>:{fn.line}</span>
+                  </td>
+                  <td style={{ padding: '10px 12px', fontFamily: F.code, fontSize: '12px', color: C.secondaryFixedDim }}>{fn.module}</td>
+                  <td style={{ padding: '10px 12px', fontFamily: F.code, fontSize: '12px', color: C.onSurfaceVariant, maxWidth: '320px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }} title={fn.file}>{fn.file}</td>
+                  <td style={{ padding: '10px 12px', fontFamily: F.code, fontSize: '12px', textAlign: 'right' as const, color: metricColor(fn.cyclomatic, thresholds.cyclomatic, thresholds.cyclomatic + 10), fontWeight: 700 }}>{fn.cyclomatic}</td>
+                  <td style={{ padding: '10px 12px', fontFamily: F.code, fontSize: '12px', textAlign: 'right' as const, color: metricColor(fn.cognitive, thresholds.cognitive, thresholds.cognitive + 10) }}>{fn.cognitive}</td>
+                  <td style={{ padding: '10px 12px', fontFamily: F.code, fontSize: '12px', textAlign: 'right' as const, color: metricColor(fn.maxNesting, thresholds.maxNesting, thresholds.maxNesting + 2) }}>{fn.maxNesting}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── MetricsTab ─────────────────────────────────────────────────────────────────
 function MetricsTab({ ticCodeDir }: { ticCodeDir: string }) {
   const [content, setContent] = useState('');
+  const [activeSubTab, setActiveSubTab] = useState<'summary' | 'functions'>('summary');
 
   useEffect(() => {
     window.ticAnalyzer.readFile(`${ticCodeDir}/metrics-summary.md`).then((c) => {
@@ -520,15 +647,37 @@ function MetricsTab({ ticCodeDir }: { ticCodeDir: string }) {
     });
   }, [ticCodeDir]);
 
+  const tabStyle = (active: boolean) => ({
+    padding: '8px 12px',
+    borderRadius: '6px',
+    border: `1px solid ${active ? C.primaryFixedDim : C.outlineVariant}`,
+    background: active ? `${C.primaryFixedDim}18` : 'transparent',
+    color: active ? C.primaryFixedDim : C.onSurfaceVariant,
+    cursor: 'pointer',
+    fontFamily: F.code,
+    fontSize: '12px',
+    fontWeight: active ? 600 : 400
+  });
+
   return (
     <div>
-      <div style={{ marginBottom: '20px' }}>
-        <div style={{ fontWeight: 600, fontSize: '20px', marginBottom: '4px', fontFamily: F.headline, color: C.onSurface }}>Métricas de Qualidade</div>
-        <div style={{ fontSize: '13px', color: C.onSurfaceVariant }}>Complexidade Ciclomática · Dívida Técnica · Hotspots · Violações</div>
+      <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' as const }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: '20px', marginBottom: '4px', fontFamily: F.headline, color: C.onSurface }}>Métricas de Qualidade</div>
+          <div style={{ fontSize: '13px', color: C.onSurfaceVariant }}>Complexidade por função · Dívida Técnica · Hotspots · Violações</div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button style={tabStyle(activeSubTab === 'summary')} onClick={() => setActiveSubTab('summary')}>Relatório</button>
+          <button style={tabStyle(activeSubTab === 'functions')} onClick={() => setActiveSubTab('functions')}>Funções</button>
+        </div>
       </div>
-      <div style={{ background: C.surfaceContainerLowest, borderRadius: '8px', padding: '16px', maxHeight: '600px', overflowY: 'auto', fontFamily: F.code, fontSize: '12px', color: C.onSurfaceVariant, whiteSpace: 'pre-wrap', lineHeight: 1.7, border: `1px solid ${C.outlineVariant}` }}>
-        {content}
-      </div>
+      {activeSubTab === 'summary' ? (
+        <div style={{ background: C.surfaceContainerLowest, borderRadius: '8px', padding: '16px', maxHeight: '600px', overflowY: 'auto', fontFamily: F.code, fontSize: '12px', color: C.onSurfaceVariant, whiteSpace: 'pre-wrap', lineHeight: 1.7, border: `1px solid ${C.outlineVariant}` }}>
+          {content}
+        </div>
+      ) : (
+        <ComplexFunctionsView ticCodeDir={ticCodeDir} />
+      )}
     </div>
   );
 }
@@ -630,7 +779,7 @@ function DocsTab() {
                 <CodeBlock>{`{\n  "mcpServers": {\n    "tic-analyzer": {\n      "url": "http://localhost:7432/mcp"\n    }\n  }\n}`}</CodeBlock>
               </DocStep>
               <DocStep n={4} title="Teste no Claude Code">
-                <CodeBlock>{`claude\n/mcp\n# → tic-analyzer  connected  19 tools`}</CodeBlock>
+                <CodeBlock>{`claude\n/mcp\n# → tic-analyzer  connected  62 tools`}</CodeBlock>
               </DocStep>
             </DocSection>
           </div>
@@ -646,7 +795,7 @@ function DocsTab() {
                 </div>
                 <div style={{ padding: '14px', background: C.surfaceContainerLow, borderRadius: '8px', border: `1px solid ${C.primaryFixedDim}44` }}>
                   <div style={{ fontWeight: 700, color: C.primaryFixedDim, marginBottom: '6px', fontSize: '14px', fontFamily: F.headline }}>Modo MCP (VS Code 1.99+)</div>
-                  <div style={{ fontSize: '13px', color: C.onSurfaceVariant, lineHeight: 1.8 }}>Acesso às 19 ferramentas.<br />Requer configurar <DocTag>.vscode/mcp.json</DocTag>.</div>
+                  <div style={{ fontSize: '13px', color: C.onSurfaceVariant, lineHeight: 1.8 }}>Acesso às 62 ferramentas.<br />Requer configurar <DocTag>.vscode/mcp.json</DocTag>.</div>
                 </div>
               </div>
             </DocSection>
@@ -667,7 +816,7 @@ function DocsTab() {
               { name: 'Atividade', desc: 'Linha do tempo do que mudou a cada análise: health, riscos, regras, módulos, predições. Atualiza ao vivo.', dica: 'Ligue "Ao Vivo" no topo: o app re-analisa sozinho ao salvar um arquivo.' },
               { name: 'Explorador', desc: 'Drill-down hierárquico: aplicação → camadas → módulos → arquivos → símbolos. Duplo-clique expande.', dica: 'Verde = dependência resolvida por AST; âmbar = heurística.' },
               { name: 'Impacto', desc: 'Cross-tier (qualquer entidade), Arquivo (dependentes por imports) e Git Diff (impacto de tudo que mudou).', dica: 'Use Git Diff antes de commitar.' },
-              { name: 'Métricas', desc: 'Complexidade ciclomática, debt score, hotspots e violações arquiteturais.', dica: 'Arquivos com complexidade > 30 🔴 merecem refatoração.' },
+              { name: 'Métricas', desc: 'Relatório geral + visão por função: ciclomática, cognitiva, aninhamento, hotspots e violações arquiteturais.', dica: 'Use a subaba Funções para filtrar só as ofensoras e ir direto aos métodos mais caros de manter.' },
             ].map((tab) => (
               <div key={tab.name} style={{ marginBottom: '12px', padding: '16px', background: C.surfaceContainerLow, borderRadius: '8px', border: `1px solid ${C.outlineVariant}` }}>
                 <div style={{ fontWeight: 700, fontSize: '14px', color: C.primaryFixedDim, marginBottom: '6px', fontFamily: F.headline }}>{tab.name}</div>
@@ -702,6 +851,10 @@ function DocsTab() {
               { tool: 'search_code("query")', tokens: '~500', desc: 'Busca semântica no índice de código.' },
               { tool: 'get_metrics("módulo")', tokens: '~500', desc: 'Complexidade ciclomática, debt score e hotspots de um módulo.' },
               { tool: 'get_hotspots()', tokens: '~1k', desc: 'Top arquivos com maior dívida técnica (alta complexidade + alto acoplamento).' },
+              { tool: 'list_complex_functions()', tokens: '~400', desc: 'Lista funções mais complexas por método (McCabe, cognitiva e aninhamento), com filtro só para ofensoras.' },
+              { tool: 'get_behavioral_hotspots()', tokens: '~400', desc: 'Cruza complexidade com churn do git para apontar hotspots comportamentais.' },
+              { tool: 'get_change_coupling()', tokens: '~400', desc: 'Mostra arquivos que mudam juntos nos mesmos commits (acoplamento temporal).' },
+              { tool: 'get_knowledge_map()', tokens: '~400', desc: 'Bus factor / concentração de autoria por módulo.' },
               { tool: 'get_violations()', tokens: '~1k', desc: 'Violações arquiteturais: dependências circulares, UI acessando BD direto.' },
             ].map((t) => (
               <div key={t.tool} style={{ display: 'flex', gap: '12px', padding: '10px 0', borderBottom: `1px solid ${C.outlineVariant}` }}>
@@ -733,7 +886,11 @@ function DocsTab() {
               { file: 'roi.json', tokens: 'JSON', desc: 'Custo da dívida em tempo/dinheiro e horas economizadas.' },
               { file: 'ownership.json', tokens: 'JSON', desc: 'Ownership por módulo, bus-factor e dificuldade de onboarding.' },
               { file: 'activity.json', tokens: 'JSON', desc: 'Linha do tempo de atividade (sistema vivo).' },
-              { file: 'metrics-summary.md', tokens: '~2k', desc: 'Top hotspots, complexidade por módulo, debt score e violações.' },
+              { file: 'metrics-summary.md', tokens: '~2k', desc: 'Top hotspots, complexidade por função, debt score e violações.' },
+              { file: 'complex-functions.json', tokens: 'JSON', desc: 'Funções mais complexas com linha, módulo, ciclomática, cognitiva, aninhamento e flag de ofensora.' },
+              { file: 'behavioral-hotspots.md', tokens: '~2k', desc: 'Hotspots comportamentais: complexidade × frequência de mudança no git.' },
+              { file: 'change-coupling.md', tokens: '~2k', desc: 'Acoplamento temporal entre arquivos que costumam mudar juntos.' },
+              { file: 'knowledge-map.md', tokens: '~2k', desc: 'Mapa de conhecimento / bus factor por módulo.' },
               { file: 'modules/{nome}/context.md', tokens: '~75k', desc: 'Contexto completo de cada módulo.' },
               { file: 'analysis.json', tokens: 'JSON', desc: 'Exportação estruturada completa para CI/CD e ferramentas externas.' },
               { file: 'file-cache.json', tokens: 'JSON', desc: 'Cache de mtimes para análise incremental.' },
@@ -1590,7 +1747,9 @@ export function App() {
                     {[
                       { path: `${result!.outputPath}/`, color: C.outline, indent: 0 },
                       { path: 'quick-context.md', note: `(~${result!.quickContextTokens.toLocaleString()} tokens)`, color: C.secondary, indent: 1 },
-                      { path: 'metrics-summary.md', note: 'complexidade + hotspots + violacoes', color: C.tertiaryFixedDim, indent: 1 },
+                      { path: 'metrics-summary.md', note: 'complexidade por função + hotspots + violações', color: C.tertiaryFixedDim, indent: 1 },
+                      { path: 'complex-functions.json', note: 'funções mais complexas (McCabe + cognitiva + aninhamento)', color: C.tertiaryFixedDim, indent: 1 },
+                      { path: 'behavioral-hotspots.md + change-coupling.md + knowledge-map.md', note: 'histórico git: hotspots, coupling e bus factor', color: C.secondary, indent: 1 },
                       { path: 'impact-index.json', note: 'índice de impacto de mudança', color: C.primaryFixedDim, indent: 1 },
                       { path: 'patterns.md + inheritance.md', note: 'padrões e hierarquia', color: C.primaryFixedDim, indent: 1 },
                       { path: 'multigraph.md + diagram.md', note: 'diagramas Mermaid', color: C.outline, indent: 1 },

@@ -121,7 +121,7 @@ const cleanup = (dir) => { for (const p of ['.tic-code', '.github', 'CLAUDE.md']
 
     // 401 sem token
     const noAuth = await fetch(`http://127.0.0.1:${PORT}/events`);
-    check('S1: /events sem token → 401', noAuth.status === 401, `status=${noAuth.status}`);
+    check('S1: /events sem token → 401', noAuth.status === 401);
 
     // conecta SSE com ?token= e recebe um emit
     const received = [];

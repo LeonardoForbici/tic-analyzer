@@ -222,7 +222,7 @@ Exit codes do `pr-review`: `0` ok · `1` gate falhou · `2` erro. Cada execuçã
 
 ---
 
-## O que o engine analisa (pipeline de 44 fases)
+## O que o engine analisa (pipeline de 45 fases)
 
 | Área | Detalhe |
 |------|---------|
@@ -232,16 +232,16 @@ Exit codes do `pr-review`: `0` ok · `1` gate falhou · `2` erro. Cada execuçã
 | **Monorepo** | Pastas `<projeto>-backend` / `<projeto>-frontend` lado a lado viram subprojetos automaticamente (nomes curtos: `backend`, `frontend`), com camada frontend/backend/database **por arquivo** |
 | **Governança** | Regras `.tic-rules.json` (drift), predição de risco, triagem (máquina de estados), candidatos a deepening, zoom-out executivo |
 | **Health score** | 0–100, grade A–E, 6 dimensões: dívida/KLOC, riscos ponderados (OWASP), violações + drift, dead code, acoplamento, % de arestas heurísticas. Snapshots históricos |
-| **Qualidade** | Complexidade ciclomática, hotspots, dívida técnica, dependências circulares, padrões arquiteturais, hierarquia de herança |
+| **Qualidade** | Complexidade **por função** (McCabe, cognitiva e aninhamento) via AST para Java/TS/JS, hotspots comportamentais (complexidade × churn git), dívida técnica, dependências circulares, padrões arquiteturais e hierarquia de herança |
 | **Spring/Angular** | `@Transactional`, `@Scheduled`/batch jobs, `@NgModule`/NgRx, permissões (roles × rotas), endpoints → OpenAPI 3.0 |
 | **Busca** | FTS5 sempre ativa; embeddings locais opcionais (`TIC_EMBEDDINGS=1`, modelo ONNX ~25MB, 100% offline) |
 | **Incremental** | file-cache por hash: re-análises só tocam o que mudou |
 
-Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `snapshots.json`, `triage.json`, `pr-history.json`, `arch-violations.json`, `risk-prediction.json`, `zoom-out.md`, contextos por módulo e relatórios.
+Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `complex-functions.json`, `behavioral-hotspots.md`, `change-coupling.md`, `knowledge-map.md`, `snapshots.json`, `triage.json`, `pr-history.json`, `arch-violations.json`, `risk-prediction.json`, `zoom-out.md`, contextos por módulo e relatórios.
 
 ---
 
-## As 57 ferramentas MCP
+## As 62 ferramentas MCP
 
 **Impacto (use primeiro):** `get_blast_radius` (resumo ~200 tokens — **comece por ele**) · `get_impact_of` · `get_impact_path` (caminho explicado entre duas entidades — "por que X afeta Y") · `get_table_impact` · `get_diff_impact` · `get_impact`
 
@@ -255,9 +255,9 @@ Artefatos em `.tic-code/` (gitignored): `index.db`, `analysis.json`, `snapshots.
 
 **Contexto:** `get_quick_context` · `list_modules` · `get_module(detail)` · `search_module` · `get_multigraph(detail)` · `get_diagram`
 
-**Valor & custo:** `get_roi` · `get_ownership` · `suggest_reviewers` · `get_portfolio`
+**Valor & custo:** `get_roi` · `get_ownership` · `suggest_reviewers` · `get_portfolio` · `get_knowledge_map`
 
-**Qualidade e saúde:** `get_health` · `get_activity` (timeline do sistema vivo) · `get_metrics` · `get_hotspots` · `get_violations` · `get_patterns` · `get_inheritance` · `get_dead_components`
+**Qualidade e saúde:** `get_health` · `get_activity` (timeline do sistema vivo) · `get_metrics` · `get_hotspots` · `list_complex_functions` · `get_behavioral_hotspots` · `get_change_coupling` · `get_violations` · `get_patterns` · `get_inheritance` · `get_dead_components`
 
 **Banco:** `get_db_schema` · `get_table_columns` · `get_table_access` · `get_plsql_object` · `get_dead_plsql`
 
@@ -295,7 +295,8 @@ npm run dev          # Vite (5173) + Electron
 npm run verify       # build + 18 suítes: semantic, store, crosstier, orm,
                      # impacto, graph-insights, export, communities,
                      # health, pr-review, serve, governança, vivo, valor,
-                     # portfólio, incremental, ux, embeddings
+                     # portfólio, incremental, ux, embeddings, git-history,
+                     # ast-metrics
 ```
 
 > ⚠️ **Nunca rode `rebuild:electron` em CI** — recompila o better-sqlite3 para a ABI do Electron e quebra a execução em Node puro.
@@ -315,7 +316,7 @@ npm run dist:linux   # → release/TIC Analyzer.AppImage
 ```
 electron/            processo principal (janela, IPC, lifecycle do MCP)
 src/
-  analyzer/          engine puro Node (zero IA): pipeline de 44 fases
+  analyzer/          engine puro Node (zero IA): pipeline de 45 fases
     buildDependencyGraph   AST tree-sitter + resolução de símbolos
     buildImpactGraph       grafo de impacto unificado cross-tier
     computeHealthScore     health 0-100 em 6 dimensões

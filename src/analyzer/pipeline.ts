@@ -30,8 +30,11 @@ import { buildImpactIndex } from './buildImpactIndex';
 import { buildImpactGraph } from './buildImpactGraph';
 import { detectCommunities } from './detectCommunities';
 import { computeMetrics } from './computeMetrics';
+import { computeAstMetrics } from './semantic/computeAstMetrics';
 import { detectLayerViolations } from './detectLayerViolations';
 import { generateMetricsReport } from './generateMetricsReport';
+import { analyzeGitHistory } from './analyzeGitHistory';
+import { generateGitReport } from './generateGitReport';
 import { detectInheritance, formatInheritanceReport } from './detectInheritance';
 import { detectPatterns, formatPatternsReport } from './detectPatterns';
 import { detectDbSchema, formatDbSchemaReport, formatDbSchemaSummary } from './detectDbSchema';
@@ -88,6 +91,10 @@ export interface PipelineResult {
   batchJobs: number;
   angularModules: number;
   deadComponents: number;
+  gitCommits: number;
+  behavioralHotspots: number;
+  functionsAnalyzed: number;
+  offenderFunctions: number;
   /** Arestas do grafo de impacto unificado (file/method/plsql/table/column). */
   impactEdges?: number;
   /** Nº de god nodes (hubs) destacados no relatório de insights do grafo. */
@@ -141,6 +148,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'impact-graph', label: 'Consolidando grafo de impacto unificado', status: 'pending' },
   { id: 'communities', label: 'Detectando comunidades do grafo (Louvain)', status: 'pending' },
   { id: 'metrics', label: 'Computando métricas de qualidade', status: 'pending' },
+  { id: 'git-history', label: 'Analisando histórico git (hotspots comportamentais, coupling, bus factor)', status: 'pending' },
   { id: 'arch-rules', label: 'Validando regras de arquitetura (.tic-rules.json)', status: 'pending' },
   { id: 'predict', label: 'Predição de risco (churn × acoplamento)', status: 'pending' },
   { id: 'ownership', label: 'Mapeando ownership e bus-factor', status: 'pending' },
@@ -200,7 +208,8 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
       success: false, outputPath: '', totalFiles: 0, totalLines: 0, modulesGenerated: 0,
       quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0,
       hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0,
-      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0,
+      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, gitCommits: 0, behavioralHotspots: 0,
+      functionsAnalyzed: 0, offenderFunctions: 0,
       error: `Pasta inválida: "${projectPath}"\n\nSelecione a pasta RAIZ do projeto, não a pasta .tic-code.\nExemplo correto: C:\\Git\\meu-projeto`
     };
   }
@@ -473,12 +482,26 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
     report('communities', 100, `${communityResult.communities.length} comunidades, ${communityResult.surprising.length} acoplamentos atípicos`);
 
     // ── 17. MÉTRICAS ─────────────────────────────────────────────────────────────
-    report('metrics', 78, 'Computando complexidade ciclomática e dívida técnica...');
-    const metrics = computeMetrics(files, graph, modules);
+    report('metrics', 78, 'Computando complexidade real (AST) e dívida técnica...');
+    const astMetrics = await computeAstMetrics(files);
+    const metrics = computeMetrics(files, graph, modules, astMetrics);
     const violations = detectLayerViolations(files, graph);
     generateMetricsReport(ticCodeDir, metrics, violations);
     markDone('metrics');
-    report('metrics', 100, `${metrics.hotspotCount} hotspots, ${violations.length} violações arquiteturais`);
+    const astCount = metrics.files.filter((f) => f.complexitySource === 'ast').length;
+    report('metrics', 100, `${metrics.hotspotCount} hotspots, ${astCount} arquivos com complexidade AST, ${violations.length} violações arquiteturais`);
+
+    // ── 17b. HISTÓRICO GIT (análise temporal/comportamental) ─────────────────────
+    report('git-history', 80, 'Lendo git log (churn, change coupling, autoria)...');
+    const knownFiles = new Set(files.map((f) => f.relativePath));
+    const fileModule = new Map<string, string>();
+    for (const mod of modules) for (const f of mod.files) fileModule.set(f.relativePath, mod.name);
+    const gitHistory = analyzeGitHistory(projectPath, { knownFiles, fileModule });
+    const gitReport = generateGitReport(ticCodeDir, gitHistory, metrics.files);
+    markDone('git-history');
+    report('git-history', 100, gitHistory.available
+      ? `${gitHistory.analyzedCommits.toLocaleString()} commits, ${gitReport.behavioralHotspots} hotspots comportamentais, ${gitHistory.coupling.length} acoplamentos temporais`
+      : `indisponível (${gitHistory.reason})`);
 
     // ── 17b. REGRAS DE ARQUITETURA (.tic-rules.json) ─────────────────────────────
     report('arch-rules', 80, 'Validando regras de arquitetura do projeto...');
@@ -826,6 +849,10 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
       batchJobs: batchJobs.length,
       angularModules: angularModules.length,
       deadComponents: deadComponents.length,
+      gitCommits: gitHistory.available ? gitHistory.analyzedCommits : 0,
+      behavioralHotspots: gitReport.behavioralHotspots,
+      functionsAnalyzed: metrics.functions.length,
+      offenderFunctions: metrics.offenderFunctionCount,
       impactEdges: impactEdges.length,
       godNodes: graphReport.godNodes.length,
       communities: communityResult.communities.length,
@@ -847,7 +874,8 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
       success: false, outputPath: ticCodeDir, totalFiles: 0, totalLines: 0, modulesGenerated: 0,
       quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0,
       hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0,
-      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, error
+      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, gitCommits: 0, behavioralHotspots: 0,
+      functionsAnalyzed: 0, offenderFunctions: 0, error
     };
   }
 }
