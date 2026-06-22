@@ -29,6 +29,8 @@ import { buildImpactIndex } from './buildImpactIndex';
 import { computeMetrics } from './computeMetrics';
 import { detectLayerViolations } from './detectLayerViolations';
 import { generateMetricsReport } from './generateMetricsReport';
+import { analyzeGitHistory } from './analyzeGitHistory';
+import { generateGitReport } from './generateGitReport';
 import { detectInheritance, formatInheritanceReport } from './detectInheritance';
 import { detectPatterns, formatPatternsReport } from './detectPatterns';
 import { detectDbSchema, formatDbSchemaReport, formatDbSchemaSummary } from './detectDbSchema';
@@ -74,6 +76,8 @@ export interface PipelineResult {
   batchJobs: number;
   angularModules: number;
   deadComponents: number;
+  gitCommits: number;
+  behavioralHotspots: number;
   error?: string;
 }
 
@@ -100,6 +104,7 @@ const PHASES: PipelinePhase[] = [
   { id: 'multigraph', label: 'Gerando multi-grafo (frontend→endpoint→backend→PL/SQL)', status: 'pending' },
   { id: 'impact', label: 'Construindo índice de impacto', status: 'pending' },
   { id: 'metrics', label: 'Computando métricas de qualidade', status: 'pending' },
+  { id: 'git-history', label: 'Analisando histórico git (hotspots comportamentais, coupling, bus factor)', status: 'pending' },
   { id: 'inheritance', label: 'Detectando hierarquia de classes', status: 'pending' },
   { id: 'patterns', label: 'Identificando padrões arquiteturais', status: 'pending' },
   { id: 'db-schema', label: 'Detectando schema de banco de dados', status: 'pending' },
@@ -120,7 +125,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       success: false, outputPath: '', totalFiles: 0, totalLines: 0, modulesGenerated: 0,
       quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0,
       hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0,
-      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0,
+      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, gitCommits: 0, behavioralHotspots: 0,
       error: `Pasta inválida: "${projectPath}"\n\nSelecione a pasta RAIZ do projeto, não a pasta .tic-code.\nExemplo correto: C:\\Git\\meu-projeto`
     };
   }
@@ -345,6 +350,18 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
     markDone('metrics');
     report('metrics', 100, `${metrics.hotspotCount} hotspots, ${violations.length} violações arquiteturais`);
 
+    // ── 17b. HISTÓRICO GIT (análise temporal/comportamental) ─────────────────────
+    report('git-history', 80, 'Lendo git log (churn, change coupling, autoria)...');
+    const knownFiles = new Set(files.map((f) => f.relativePath));
+    const fileModule = new Map<string, string>();
+    for (const mod of modules) for (const f of mod.files) fileModule.set(f.relativePath, mod.name);
+    const gitHistory = analyzeGitHistory(projectPath, { knownFiles, fileModule });
+    const gitReport = generateGitReport(ticCodeDir, gitHistory, metrics.files);
+    markDone('git-history');
+    report('git-history', 100, gitHistory.available
+      ? `${gitHistory.analyzedCommits.toLocaleString()} commits, ${gitReport.behavioralHotspots} hotspots comportamentais, ${gitHistory.coupling.length} acoplamentos temporais`
+      : `indisponível (${gitHistory.reason})`);
+
     // ── 18. HERANÇA ───────────────────────────────────────────────────────────────
     report('inheritance', 84, 'Detectando hierarquia de classes...');
     const inheritanceTree = detectInheritance(files, graph.semanticClasses);
@@ -484,7 +501,9 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       transactions: transactionBoundaries.length,
       batchJobs: batchJobs.length,
       angularModules: angularModules.length,
-      deadComponents: deadComponents.length
+      deadComponents: deadComponents.length,
+      gitCommits: gitHistory.available ? gitHistory.analyzedCommits : 0,
+      behavioralHotspots: gitReport.behavioralHotspots
     };
 
   } catch (err) {
@@ -493,7 +512,7 @@ export async function runPipeline(projectPath: string, onProgress: ProgressCallb
       success: false, outputPath: ticCodeDir, totalFiles: 0, totalLines: 0, modulesGenerated: 0,
       quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0,
       hotspots: 0, violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0, cacheHits: 0,
-      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, error
+      transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0, gitCommits: 0, behavioralHotspots: 0, error
     };
   }
 }

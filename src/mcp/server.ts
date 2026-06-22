@@ -183,6 +183,26 @@ export class TicAnalyzerMcpServer {
           inputSchema: { type: 'object', properties: {} }
         },
         {
+          name: 'get_behavioral_hotspots',
+          description: 'Retorna os hotspots COMPORTAMENTAIS: arquivos que combinam alta complexidade com alta frequência de mudança no histórico do git (análise temporal, estilo CodeScene). É onde os bugs nascem — priorize refatoração aqui.',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
+          name: 'get_change_coupling',
+          description: 'Retorna o acoplamento temporal: arquivos que mudam juntos nos mesmos commits (dependências ocultas, invisíveis ao grafo de imports). Opcionalmente filtra pelos acoplamentos de um arquivo.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              file: { type: 'string', description: 'Caminho relativo do arquivo para filtrar seus acoplamentos (opcional).' }
+            }
+          }
+        },
+        {
+          name: 'get_knowledge_map',
+          description: 'Retorna o knowledge map / bus factor por módulo: concentração de autoria e risco de pessoa-chave (bus factor 1-2 = conhecimento concentrado em poucos devs).',
+          inputSchema: { type: 'object', properties: {} }
+        },
+        {
           name: 'get_patterns',
           description: 'Retorna os padrões arquiteturais detectados (Repository, Service, Factory, etc). Opcionalmente filtra por módulo.',
           inputSchema: {
@@ -488,6 +508,41 @@ export class TicAnalyzerMcpServer {
           // Extrai apenas a seção de hotspots (compacto)
           const hotspotsSection = content.split('## 📊')[0];
           return respond({ content: [{ type: 'text', text: hotspotsSection || content.slice(0, 2000) }] });
+        }
+
+        case 'get_behavioral_hotspots':
+          return respond({ content: [{ type: 'text', text: this.readFile('behavioral-hotspots.md') }] });
+
+        case 'get_knowledge_map':
+          return respond({ content: [{ type: 'text', text: this.readFile('knowledge-map.md') }] });
+
+        case 'get_change_coupling': {
+          const fileArg = (args as { file?: string }).file;
+          if (!fileArg) {
+            return respond({ content: [{ type: 'text', text: this.readFile('change-coupling.md') }] });
+          }
+          const ghPath = path.join(this.ticCodePath, 'git-history.json');
+          if (!fs.existsSync(ghPath)) {
+            return respond({ content: [{ type: 'text', text: 'git-history.json não encontrado. Execute a análise novamente.' }] });
+          }
+          const gh = JSON.parse(fs.readFileSync(ghPath, 'utf8')) as {
+            available?: boolean;
+            coupling?: Array<{ a: string; b: string; coChanges: number; degree: number }>;
+          };
+          if (!gh.available || !Array.isArray(gh.coupling)) {
+            return respond({ content: [{ type: 'text', text: 'Análise temporal indisponível (sem histórico git).' }] });
+          }
+          const needle = fileArg.toLowerCase();
+          const matches = gh.coupling.filter((c) => c.a.toLowerCase().includes(needle) || c.b.toLowerCase().includes(needle));
+          if (matches.length === 0) {
+            return respond({ content: [{ type: 'text', text: `Nenhum acoplamento temporal relevante para "${fileArg}".` }] });
+          }
+          const cplLines = [`# Change coupling — ${fileArg}`, '', '| Acoplado com | Co-mudanças | Grau |', '| --- | --- | --- |'];
+          for (const c of matches.slice(0, 25)) {
+            const other = c.a.toLowerCase().includes(needle) ? c.b : c.a;
+            cplLines.push(`| \`${other}\` | ${c.coChanges} | ${c.degree} |`);
+          }
+          return respond({ content: [{ type: 'text', text: cplLines.join('\n') }] });
         }
 
         case 'get_patterns': {
