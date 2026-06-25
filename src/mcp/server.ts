@@ -1522,14 +1522,16 @@ export class TicAnalyzerMcpServer {
             '',
           ];
 
-          if (found.tablesRead.length > 0) {
+          const tablesRead = found.tablesRead ?? [];
+          const tablesWritten = found.tablesWritten ?? [];
+          if (tablesRead.length > 0) {
             lines.push('## Tabelas Lidas (SELECT/FROM/CURSOR)');
-            found.tablesRead.forEach((t) => lines.push(`- \`${t}\``));
+            tablesRead.forEach((t) => lines.push(`- \`${t}\``));
             lines.push('');
           }
-          if (found.tablesWritten.length > 0) {
+          if (tablesWritten.length > 0) {
             lines.push('## Tabelas Escritas (INSERT/UPDATE/DELETE/MERGE)');
-            found.tablesWritten.forEach((t) => lines.push(`- \`${t}\``));
+            tablesWritten.forEach((t) => lines.push(`- \`${t}\``));
             lines.push('');
           }
           if (callersOf.length > 0) {
@@ -1542,7 +1544,7 @@ export class TicAnalyzerMcpServer {
             calleesOf.slice(0, 10).forEach((c) => lines.push(`- \`${c}\``));
             lines.push('');
           }
-          if (found.tablesRead.length === 0 && found.tablesWritten.length === 0) {
+          if (tablesRead.length === 0 && tablesWritten.length === 0) {
             lines.push('> Nenhuma tabela detectada. Pode usar SQL dinâmico (EXECUTE IMMEDIATE) ou não acessar tabelas diretamente.');
           }
 
@@ -1558,14 +1560,14 @@ export class TicAnalyzerMcpServer {
           type ObjTA = { type: string; name: string; packageName?: string; file: string; line: number; tablesRead: string[]; tablesWritten: string[] };
           const allObjs: ObjTA[] = JSON.parse(fs.readFileSync(objsPath, 'utf8'));
 
-          const readers = allObjs.filter((o) => o.tablesRead.some((t) => t.includes(tableName)));
-          const writers = allObjs.filter((o) => o.tablesWritten.some((t) => t.includes(tableName)));
+          const readers = allObjs.filter((o) => (o.tablesRead ?? []).some((t) => t.includes(tableName)));
+          const writers = allObjs.filter((o) => (o.tablesWritten ?? []).some((t) => t.includes(tableName)));
 
           if (readers.length === 0 && writers.length === 0) {
             // Try partial match
             const allTables = new Set([
-              ...allObjs.flatMap((o) => o.tablesRead),
-              ...allObjs.flatMap((o) => o.tablesWritten),
+              ...allObjs.flatMap((o) => o.tablesRead ?? []),
+              ...allObjs.flatMap((o) => o.tablesWritten ?? []),
             ]);
             const similar = [...allTables].filter((t) => t.includes(tableName.slice(0, 4))).slice(0, 10).join(', ');
             return respond({ content: [{ type: 'text', text: `Nenhuma procedure/function acessa a tabela "${tableName}". Tabelas similares: ${similar || 'nenhuma'}` }] });
@@ -2126,8 +2128,8 @@ export class TicAnalyzerMcpServer {
       if (!node) continue;
       const plsql = plsqlMap.get(node.label.toUpperCase());
       if (plsql) {
-        plsql.tablesRead.forEach((t) => allReads.add(t));
-        plsql.tablesWritten.forEach((t) => allWrites.add(t));
+        (plsql.tablesRead ?? []).forEach((t) => allReads.add(t));
+        (plsql.tablesWritten ?? []).forEach((t) => allWrites.add(t));
       }
     }
     if (allReads.size > 0 || allWrites.size > 0) {
@@ -2388,8 +2390,8 @@ export class TicAnalyzerMcpServer {
       const matched = cachedPlsql.filter((o) =>
         o.name.toLowerCase().includes(lower) ||
         (o.packageName?.toLowerCase().includes(lower) ?? false) ||
-        o.tablesRead.some((t) => t.toLowerCase().includes(lower)) ||
-        o.tablesWritten.some((t) => t.toLowerCase().includes(lower))
+        (o.tablesRead ?? []).some((t) => t.toLowerCase().includes(lower)) ||
+        (o.tablesWritten ?? []).some((t) => t.toLowerCase().includes(lower))
       );
       if (matched.length > 0) {
         lines.push(`### Procedures PL/SQL (${matched.length})`);
@@ -2397,7 +2399,7 @@ export class TicAnalyzerMcpServer {
         lines.push('|------|----|---------|');
         matched.slice(0, 8).forEach((o) => {
           const name = o.packageName ? `${o.packageName}.${o.name}` : o.name;
-          lines.push(`| \`${name}\` | ${o.tablesRead.slice(0, 3).join(', ') || '—'} | ${o.tablesWritten.slice(0, 3).join(', ') || '—'} |`);
+          lines.push(`| \`${name}\` | ${(o.tablesRead ?? []).slice(0, 3).join(', ') || '—'} | ${(o.tablesWritten ?? []).slice(0, 3).join(', ') || '—'} |`);
         });
         lines.push('');
       }
@@ -2414,7 +2416,7 @@ export class TicAnalyzerMcpServer {
         const plsqlObjs = cachedPlsql ?? [];
         matchedTables.slice(0, 8).forEach((t) => {
           const accessors = plsqlObjs.filter(
-            (o) => o.tablesRead.includes(t.name) || o.tablesWritten.includes(t.name)
+            (o) => (o.tablesRead ?? []).includes(t.name) || (o.tablesWritten ?? []).includes(t.name)
           ).length;
           lines.push(`- \`${t.name}\`${accessors > 0 ? ` — acessada por ${accessors} procedure(s)` : ''}`);
         });
