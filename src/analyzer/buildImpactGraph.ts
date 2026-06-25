@@ -141,8 +141,8 @@ export function buildImpactGraph(input: ImpactGraphInput): ImpactEdge[] {
   for (const obj of input.plsqlObjects) {
     if (obj.type === 'SYNONYM' || obj.type === 'SEQUENCE') continue;
     const id = plsqlId(obj.name, obj.packageName);
-    for (const t of obj.tablesRead) add(id, `table:${t}`, 'reads', 'resolved');
-    for (const t of obj.tablesWritten) add(id, `table:${t}`, 'writes', 'resolved');
+    for (const t of obj.tablesRead ?? []) add(id, `table:${t}`, 'reads', 'resolved');
+    for (const t of obj.tablesWritten ?? []) add(id, `table:${t}`, 'writes', 'resolved');
     // Trigger dispara em mudanças na tabela: mudar a tabela afeta o trigger.
     if (obj.type === 'TRIGGER' && obj.onTable) add(id, `table:${obj.onTable}`, 'trigger-on', 'resolved');
     // Objeto depende do arquivo que o define (mudar o .sql afeta os chamadores).
