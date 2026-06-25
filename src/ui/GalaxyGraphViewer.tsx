@@ -37,6 +37,20 @@ const PALETTE = [
 function colorForIndex(i: number): string {
   return PALETTE[i % PALETTE.length];
 }
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+// mix a hex color toward white by t (0..1) → an rgb() string
+function lighten(hex: string, t: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  const L = (c: number) => Math.round(c + (255 - c) * t);
+  return `rgb(${L(r)},${L(g)},${L(b)})`;
+}
+function hexA(hex: string, a: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
+}
 
 interface GalaxyData {
   modules: AggNode[];
@@ -116,7 +130,7 @@ function buildGraph(g: GalaxyData): { gnodes: GNode[]; glinks: GLink[]; deplinks
         fx: mx + Math.cos(aF) * distF,
         fy: my + Math.sin(aF) * distF,
         isModule: false, depth: 1, r,
-        color: '#fdf6e3', glowId: 'none',
+        color: lighten(color, 0.5), glowId: 'none',
         floatOffset: idSeed(f.id), layer: f.layer, moduleId: mod.id,
         modIndex: i, labelAngle: aF,
       };
@@ -144,7 +158,7 @@ function buildGraph(g: GalaxyData): { gnodes: GNode[]; glinks: GLink[]; deplinks
           fx: gf.fx + Math.cos(aF2) * distF2,
           fy: gf.fy + Math.sin(aF2) * distF2,
           isModule: false, depth: 2, r: 3,
-          color: '#efe8d0', glowId: 'none',
+          color: lighten(color, 0.35), glowId: 'none',
           floatOffset: idSeed(depId), layer: dn.layer, moduleId: mod.id,
           modIndex: i, labelAngle: aF2,
         };
@@ -361,10 +375,10 @@ export function GalaxyGraphViewer({
       .attr('stroke-width', 0.7)
       .attr('opacity', 0);
 
-    // Tree links
+    // Tree links — tinted with the owning module's color
     const linkEls = mainGroup.append('g').selectAll<SVGLineElement, GLink>('line')
       .data(glinks).enter().append('line')
-      .attr('stroke', 'rgba(255,255,255,0.22)')
+      .attr('stroke', (d: GLink) => hexA(colorForIndex(d.src.modIndex), 0.5))
       .attr('stroke-width', 1);
 
     // Node groups
