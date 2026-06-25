@@ -19,7 +19,7 @@ import * as path from 'path';
 import type Database from 'better-sqlite3';
 import { queryGraphLevel, type GraphLevelResult, type AggNode } from './store/graphQueries';
 
-export type GraphExportFormat = 'html' | 'mermaid' | 'svg';
+export type GraphExportFormat = 'html' | 'mermaid' | 'svg' | 'galaxy';
 
 const esc = (s: string) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const nid = (id: string) => id.replace(/[^a-zA-Z0-9]/g, '_');
@@ -171,6 +171,178 @@ ${nodeSvg}
 </svg>`;
 }
 
+// ── Galaxy — visualização constelação espacial (D3 standalone) ───────────────
+
+export function renderGraphGalaxy(level: GraphLevelResult, projectName: string): string {
+  // Expand module children so the galaxy has files to show as constellations
+  const mods = level.nodes.filter(n => n.kind === 'module' || n.kind === 'layer');
+  const files = level.nodes.filter(n => ['file', 'plsql', 'table', 'symbol'].includes(n.kind));
+  // Build parent→children map from edges
+  const childMapRaw: Record<string, string[]> = {};
+  for (const e of level.edges) {
+    if (!childMapRaw[e.from]) childMapRaw[e.from] = [];
+    childMapRaw[e.from].push(e.to);
+  }
+  const fileSet = new Set(files.map(n => n.id));
+  const nodeIndex: Record<string, typeof level.nodes[0]> = {};
+  for (const n of level.nodes) nodeIndex[n.id] = n;
+
+  const galaxyData = {
+    projectName,
+    modules: mods.slice(0, 22).map(m => ({
+      id: m.id, label: m.label, layer: m.layer ?? '',
+      files: (childMapRaw[m.id] ?? [])
+        .filter(id => fileSet.has(id))
+        .slice(0, 18)
+        .map(id => {
+          const n = nodeIndex[id];
+          return { id, label: n?.label ?? id, weight: (n?.inWeight ?? 0) + (n?.outWeight ?? 0) };
+        })
+        .sort((a, b) => b.weight - a.weight),
+    })),
+  };
+  const DATA = JSON.stringify(galaxyData);
+
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>Galaxy — ${esc(projectName)}</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:radial-gradient(circle at center,#101216 0%,#050608 100%);color:#fff;font-family:'Inter',system-ui,sans-serif;overflow:hidden;height:100vh;cursor:grab}
+  body:active{cursor:grabbing}
+  body::before{content:"";position:absolute;width:100%;height:100%;
+    background-image:radial-gradient(white,rgba(255,255,255,.2) 2px,transparent 40px),radial-gradient(white,rgba(255,255,255,.15) 1px,transparent 30px);
+    background-size:550px 550px,350px 350px;background-position:0 0,40px 60px;opacity:.18;pointer-events:none}
+  #app{width:100vw;height:100vh;position:relative}
+  svg{width:100%;height:100%}
+  #header{position:absolute;top:20px;left:50%;transform:translateX(-50%);
+    background:rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.1);
+    padding:10px 22px;border-radius:6px;font-size:13px;text-align:center;
+    pointer-events:none;white-space:nowrap;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  #reset{position:absolute;bottom:36px;left:50%;transform:translateX(-50%);
+    background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.2);color:#fff;
+    padding:8px 22px;border-radius:4px;cursor:pointer;font-size:11px;letter-spacing:1px;
+    text-transform:uppercase;display:none;transition:.2s}
+  #reset:hover{background:rgba(255,255,255,.13)}
+  #watermark{position:absolute;bottom:18%;width:100%;text-align:center;
+    font-size:52px;font-weight:900;color:rgba(255,255,255,.04);letter-spacing:14px;
+    pointer-events:none;display:none}
+  .link{stroke:rgba(255,255,255,.15);stroke-width:1.2px;fill:none}
+</style>
+</head><body>
+<div id="app">
+  <div id="header">${esc(projectName)} — ${mods.length} módulos · grafo constelação (TIC Analyzer)</div>
+  <div id="watermark"></div>
+  <button id="reset">Ver Visão Geral</button>
+  <svg id="svg"></svg>
+</div>
+<script>
+const RAW = ${DATA};
+const LAYER_CLR = {frontend:'#00dbe9',backend:'#e8b84b',database:'#b48ead'};
+const FILE_DIST = 62, FLOAT_DIST = 5, SPEED = 0.0015, ZOOM_SCALE = 2.2;
+function modColor(l){return LAYER_CLR[l]||'#81a1c1';}
+function glowId(l){return 'gg-'+(LAYER_CLR[l]?l:'def');}
+
+const svgEl = document.getElementById('svg');
+const W = window.innerWidth, H = window.innerHeight, cx = W/2, cy = H/2;
+const svg = d3.select(svgEl).attr('width',W).attr('height',H);
+
+const zoom = d3.zoom().scaleExtent([0.3,4]).on('zoom',e=>mainG.attr('transform',e.transform));
+svg.call(zoom);
+
+const defs = svg.append('defs');
+[{id:'gg-frontend',s:6},{id:'gg-backend',s:6},{id:'gg-database',s:6},{id:'gg-def',s:3}].forEach(({id,s})=>{
+  const f=defs.append('filter').attr('id',id).attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
+  f.append('feGaussianBlur').attr('stdDeviation',s).attr('result','b');
+  const m=f.append('feMerge');m.append('feMergeNode').attr('in','b');m.append('feMergeNode').attr('in','SourceGraphic');
+});
+
+const mainG = svg.append('g');
+const orbitR = Math.min(cx,cy)*0.52;
+[orbitR*.38,orbitR*.7,orbitR,orbitR*1.35].forEach(r=>{
+  mainG.append('circle').attr('cx',cx).attr('cy',cy).attr('r',r).attr('fill','none').attr('stroke','rgba(255,255,255,.03)').attr('stroke-width',1);
+});
+
+// Nebula
+const neb = Array.from({length:80},(_,i)=>({
+  x:cx+((i*7919)%100/100-.5)*60, y:cy+((i*6271)%100/100-.5)*60,
+  r:(i*3)%15/10+.5, o:(i*1.37)%(Math.PI*2)
+}));
+const nebEls = mainG.append('g').selectAll('circle').data(neb).enter().append('circle')
+  .attr('cx',d=>d.x).attr('cy',d=>d.y).attr('r',d=>d.r)
+  .attr('fill','#ebcb8b').attr('opacity',(_,i)=>0.2+(i%5)*0.1);
+
+// Build gnodes + glinks
+const gnodes=[], glinks=[];
+const mods = RAW.modules;
+mods.forEach((mod,i)=>{
+  const angle = (i/mods.length)*Math.PI*2 - Math.PI/2;
+  const x=cx+Math.cos(angle)*orbitR, y=cy+Math.sin(angle)*orbitR;
+  const gn={id:mod.id,label:mod.label,x,y,isModule:true,r:14,color:modColor(mod.layer),glow:glowId(mod.layer),angle,floatOffset:0,layer:mod.layer};
+  gnodes.push(gn);
+  const N=mod.files.length;
+  mod.files.forEach((f,j)=>{
+    const spread=Math.min(Math.PI*.9,.18*Math.sqrt(N+1));
+    const a=angle+(j-(N-1)/2)*(spread/Math.max(1,N-1));
+    const dist=FILE_DIST+(j%3)*12;
+    const fx=x+Math.cos(a)*dist, fy=y+Math.sin(a)*dist;
+    const w=f.weight, r=Math.max(3,Math.min(6,2+Math.log1p(w)*.7));
+    const seed=f.id.split('').reduce((s,c)=>s+c.charCodeAt(0),0);
+    const fg={id:f.id,label:f.label,x:fx,y:fy,isModule:false,r,color:'#fff',glow:'none',angle:a,floatOffset:(seed*.37)%(Math.PI*2)};
+    gnodes.push(fg);
+    glinks.push({src:gn,tgt:fg});
+  });
+});
+
+const linkEls = mainG.append('g').selectAll('line').data(glinks).enter().append('line')
+  .attr('class','link').attr('x1',d=>d.src.x).attr('y1',d=>d.src.y).attr('x2',d=>d.tgt.x).attr('y2',d=>d.tgt.y);
+
+const nodeEls = mainG.append('g').selectAll('g').data(gnodes).enter().append('g')
+  .attr('transform',d=>'translate('+d.x+','+d.y+')');
+nodeEls.append('circle').attr('class','core').attr('r',d=>d.r).attr('fill',d=>d.color)
+  .style('filter',d=>d.glow!=='none'?'url(#'+d.glow+')':'none')
+  .style('cursor',d=>d.isModule?'pointer':'default');
+nodeEls.filter(d=>d.isModule).append('circle').attr('r',20).attr('fill','none')
+  .attr('stroke',d=>d.color).attr('stroke-width',1).attr('opacity',.35);
+nodeEls.filter(d=>d.isModule).append('text')
+  .attr('y',d=>Math.sin(d.angle)>=0?38:-30).attr('text-anchor','middle')
+  .attr('fill','rgba(255,255,255,.85)').attr('font-family','Inter,system-ui,sans-serif')
+  .attr('font-size',11).attr('letter-spacing',2).attr('pointer-events','none')
+  .text(d=>d.label.toUpperCase().slice(0,16));
+
+nodeEls.on('mouseover',function(_,d){d3.select(this).select('.core').transition().duration(200).attr('r',d.r+(d.isModule?4:2));})
+       .on('mouseout',function(_,d){d3.select(this).select('.core').transition().duration(200).attr('r',d.r);});
+
+const wm=document.getElementById('watermark'), rst=document.getElementById('reset');
+nodeEls.filter(d=>d.isModule).on('click',(_,d)=>{
+  const tx=W/2-d.x*ZOOM_SCALE, ty=H*.75-d.y*ZOOM_SCALE;
+  svg.transition().duration(1000).ease(d3.easeCubicInOut)
+    .call(zoom.transform,d3.zoomIdentity.translate(tx,ty).scale(ZOOM_SCALE));
+  wm.textContent=d.label.toUpperCase(); wm.style.display='block'; rst.style.display='block';
+});
+rst.onclick=()=>{
+  svg.transition().duration(800).ease(d3.easeCubicInOut).call(zoom.transform,d3.zoomIdentity);
+  wm.style.display='none'; rst.style.display='none';
+};
+
+d3.timer(t=>{
+  nodeEls.attr('transform',d=>{
+    if(d.isModule) return 'translate('+d.x+','+d.y+')';
+    const fx=d.x+Math.sin(t*SPEED+d.floatOffset)*FLOAT_DIST;
+    const fy=d.y+Math.cos(t*SPEED*1.3+d.floatOffset)*FLOAT_DIST;
+    return 'translate('+fx+','+fy+')';
+  });
+  linkEls
+    .attr('x1',d=>d.src.x).attr('y1',d=>d.src.y)
+    .attr('x2',d=>d.tgt.isModule?d.tgt.x:d.tgt.x+Math.sin(t*SPEED+d.tgt.floatOffset)*FLOAT_DIST)
+    .attr('y2',d=>d.tgt.isModule?d.tgt.y:d.tgt.y+Math.cos(t*SPEED*1.3+d.tgt.floatOffset)*FLOAT_DIST);
+  nebEls.attr('cx',d=>d.x+Math.sin(t*.0005+d.o)*15).attr('cy',d=>d.y+Math.cos(t*.0007+d.o)*15);
+});
+</script>
+</body></html>`;
+}
+
 // ── Orquestração ─────────────────────────────────────────────────────────────
 
 export interface ExportGraphOptions {
@@ -181,16 +353,26 @@ export interface ExportGraphOptions {
   out?: string;
 }
 
-const EXT: Record<GraphExportFormat, string> = { html: 'html', mermaid: 'mmd', svg: 'svg' };
+const EXT: Record<GraphExportFormat, string> = { html: 'html', mermaid: 'mmd', svg: 'svg', galaxy: 'html' };
 
 export function exportGraphFiles(db: Database.Database, ticCodeDir: string, opts: ExportGraphOptions): { path: string } {
   const projectName = path.basename(path.dirname(ticCodeDir));
-  const level = queryGraphLevel(db, { expanded: opts.expanded ?? [] });
+
+  // Galaxy: expand all modules so the visualization has file-level constellation nodes
+  const expanded = opts.expanded ?? [];
+  const topLevel = queryGraphLevel(db, { expanded: [] });
+  const modIds = topLevel.nodes.filter(n => n.kind === 'module' || n.kind === 'layer').map(n => n.id).slice(0, 22);
+  const level = opts.format === 'galaxy'
+    ? queryGraphLevel(db, { expanded: modIds })
+    : queryGraphLevel(db, { expanded });
+
   const content =
     opts.format === 'html' ? renderGraphHtml(level, projectName)
     : opts.format === 'mermaid' ? renderGraphMermaid(level, projectName)
+    : opts.format === 'galaxy' ? renderGraphGalaxy(level, projectName)
     : renderGraphSvg(level, projectName);
-  const out = opts.out ?? path.join(ticCodeDir, `graph.${EXT[opts.format]}`);
+  const outName = opts.format === 'galaxy' ? 'galaxy' : 'graph';
+  const out = opts.out ?? path.join(ticCodeDir, `${outName}.${EXT[opts.format]}`);
   fs.writeFileSync(out, content, 'utf8');
   return { path: out };
 }
