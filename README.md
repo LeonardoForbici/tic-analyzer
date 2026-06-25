@@ -199,7 +199,7 @@ Em vez de só responder quando perguntado, o TIC observa, lembra e avisa:
 - **Visão Geral** — números da análise + health score + status do MCP + tokens por tool
 - **Saúde** — gauge do score (6 dimensões), KPIs com delta, tendência histórica
 - **Governança** — 🎯 KPIs (Impact Score, Risk Level, Modules Analyzed, Architecture Drift) · 📊 tendência de impacto dos PRs + distribuição de dívida · 🔍 fila de triagem com transições de estado · 🏗️ compliance por regra de arquitetura · 📈 PRs recentes com blast radius e status de gate · botão de **relatório de arquitetura (HTML)**
-- **Explorador** — drill-down hierárquico estilo CAST Imaging: aplicação → camadas → módulos → arquivos → símbolos; renderiza só o nível visível (74k arquivos ok) e o layout chega já assentado
+- **Explorador** — drill-down hierárquico: aplicação → camadas → módulos → arquivos → símbolos; renderiza só o nível visível (74k arquivos ok) e o layout chega já assentado
 - **Impacto** — cross-tier (qualquer entidade), por arquivo e por git diff
 - **Métricas** — complexidade, dívida, hotspots, violações
 

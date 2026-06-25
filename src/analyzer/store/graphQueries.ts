@@ -1,5 +1,5 @@
 /**
- * Consultas de agregação hierárquica do grafo (estilo CAST Imaging):
+ * Consultas de agregação hierárquica do grafo:
  *
  *   app → layer (frontend/backend/database) → module → file → symbol
  *
