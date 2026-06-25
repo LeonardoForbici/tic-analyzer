@@ -25,15 +25,18 @@ const SUBFILE_DIST_F = 100;
 
 const FOCUS_SCALE = 2.6;
 const SPEED = 0.0015;
-const FLOAT_DIST = 5;
+const FLOAT_DIST = 6;
 
 const FILE_KINDS = new Set(['file', 'plsql', 'table', 'symbol', 'method', 'column']);
 
-const LAYER_CLR: Record<string, string> = {
-  frontend: '#00dbe9',
-  backend:  '#e8b84b',
-  database: '#b48ead',
-};
+// Paleta vibrante (Nord-ish) — cada módulo ganha uma cor distinta, como no vídeo
+const PALETTE = [
+  '#88c0d0', '#ebcb8b', '#d08770', '#bf616a', '#a3be8c', '#b48ead',
+  '#81a1c1', '#8fbcbb', '#d8a657', '#5e81ac', '#e09ec2', '#a3d4cf',
+];
+function colorForIndex(i: number): string {
+  return PALETTE[i % PALETTE.length];
+}
 
 interface GalaxyData {
   modules: AggNode[];
@@ -51,6 +54,7 @@ interface GNode {
   floatOffset: number;
   layer?: string;
   moduleId: string;
+  modIndex: number;   // index of the owning module (for carousel + color)
   labelAngle: number; // for module label placement (overview)
 }
 interface GLink { src: GNode; tgt: GNode; }
@@ -77,14 +81,14 @@ function buildGraph(g: GalaxyData): { gnodes: GNode[]; glinks: GLink[]; deplinks
     const angle = (i / mods.length) * Math.PI * 2 - Math.PI / 2; // module's radial angle
     const mx = Math.cos(angle) * MOD_RADIUS;
     const my = Math.sin(angle) * MOD_RADIUS;
-    const color = LAYER_CLR[mod.layer ?? ''] ?? '#81a1c1';
+    const color = colorForIndex(i);
     const gm: GNode = {
       id: mod.id, label: mod.label,
       ox: mx, oy: my, fx: mx, fy: my,
       isModule: true, depth: 0, r: 11, color,
-      glowId: `gal-glow-${mod.layer ?? 'default'}`,
+      glowId: 'gal-glow-hub',
       floatOffset: 0, layer: mod.layer, moduleId: mod.id,
-      labelAngle: angle,
+      modIndex: i, labelAngle: angle,
     };
     gnodes.push(gm);
     placed.set(mod.id, gm);
@@ -114,7 +118,7 @@ function buildGraph(g: GalaxyData): { gnodes: GNode[]; glinks: GLink[]; deplinks
         isModule: false, depth: 1, r,
         color: '#fdf6e3', glowId: 'none',
         floatOffset: idSeed(f.id), layer: f.layer, moduleId: mod.id,
-        labelAngle: aF,
+        modIndex: i, labelAngle: aF,
       };
       gnodes.push(gf);
       placed.set(f.id, gf);
@@ -142,7 +146,7 @@ function buildGraph(g: GalaxyData): { gnodes: GNode[]; glinks: GLink[]; deplinks
           isModule: false, depth: 2, r: 3,
           color: '#efe8d0', glowId: 'none',
           floatOffset: idSeed(depId), layer: dn.layer, moduleId: mod.id,
-          labelAngle: aF2,
+          modIndex: i, labelAngle: aF2,
         };
         gnodes.push(gs);
         placed.set(depId, gs);
@@ -182,6 +186,8 @@ export function GalaxyGraphViewer({
   const timerRef = useRef<d3.Timer | null>(null);
   const focusModuleRef = useRef<((id: string) => void) | null>(null);
   const resetRef = useRef<(() => void) | null>(null);
+  const onFocusIdxRef = useRef<((i: number) => void) | null>(null);
+  const [curIdx, setCurIdx] = useState(0);
   const [zoomedModule, setZoomedModule] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [galaxy, setGalaxy] = useState<GalaxyData | null>(null);
@@ -203,6 +209,9 @@ export function GalaxyGraphViewer({
     window.addEventListener('keydown', fn);
     return () => window.removeEventListener('keydown', fn);
   }, [onClose]);
+
+  // Keep the carousel index in sync when a hub is clicked directly on the canvas
+  useEffect(() => { onFocusIdxRef.current = setCurIdx; }, []);
 
   useEffect(() => {
     let alive = true;
@@ -282,17 +291,16 @@ export function GalaxyGraphViewer({
 
     const svg = d3.select(svgEl).attr('width', W).attr('height', H);
 
-    // Glow filters
+    // Glow filters — the blur inherits the node's own fill, so one filter tints any color
     const defs = svg.append('defs');
-    (['frontend', 'backend', 'database', 'default'] as const).forEach(layer => {
-      const stdDev = layer === 'default' ? 3 : 6;
-      const f = defs.append('filter').attr('id', `gal-glow-${layer}`)
-        .attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%');
-      f.append('feGaussianBlur').attr('stdDeviation', stdDev).attr('result', 'blur');
+    {
+      const f = defs.append('filter').attr('id', 'gal-glow-hub')
+        .attr('x', '-80%').attr('y', '-80%').attr('width', '260%').attr('height', '260%');
+      f.append('feGaussianBlur').attr('stdDeviation', 6).attr('result', 'blur');
       const m = f.append('feMerge');
       m.append('feMergeNode').attr('in', 'blur');
       m.append('feMergeNode').attr('in', 'SourceGraphic');
-    });
+    }
     // Soft white glow for focused file orbs
     {
       const f = defs.append('filter').attr('id', 'gal-glow-orb')
@@ -374,6 +382,14 @@ export function GalaxyGraphViewer({
     nodeEls.filter(d => d.isModule).append('circle').attr('class', 'mring')
       .attr('r', 18).attr('fill', 'none')
       .attr('stroke', d => d.color).attr('stroke-width', '1px').attr('opacity', 0.45);
+
+    // Inner glyph (cube/diamond) inside each hub — echoes the icon look from the reference
+    nodeEls.filter(d => d.isModule).append('path')
+      .attr('d', 'M0,-5 L5,0 L0,5 L-5,0 Z')
+      .attr('fill', 'rgba(0,0,0,0.30)')
+      .attr('stroke', 'rgba(255,255,255,0.55)')
+      .attr('stroke-width', 0.8)
+      .attr('pointer-events', 'none');
 
     // Module labels (Orbitron) — placed outward in overview
     nodeEls.filter(d => d.isModule).append('text').attr('class', 'mlabel')
@@ -498,6 +514,7 @@ export function GalaxyGraphViewer({
     nodeEls.filter(d => d.isModule).on('click', (_ev, d) => {
       if (focusedId === d.id) return;
       focusModule(d.id);
+      onFocusIdxRef.current?.(d.modIndex);
     });
 
     // Animation timer: ease morph + breathing + draw links
@@ -521,6 +538,19 @@ export function GalaxyGraphViewer({
   function resetZoom() {
     if (resetRef.current) resetRef.current();
   }
+
+  // Bottom carousel: list of modules with their assigned colors
+  const modList = galaxy
+    ? galaxy.modules.slice(0, MAX_MODS).map((m, i) => ({ id: m.id, label: m.label, color: colorForIndex(i) }))
+    : [];
+  function goTo(i: number) {
+    const n = modList.length;
+    if (!n) return;
+    const ni = ((i % n) + n) % n;
+    setCurIdx(ni);
+    focusModuleRef.current?.(modList[ni].id);
+  }
+  const current = modList[curIdx];
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -643,34 +673,34 @@ export function GalaxyGraphViewer({
         </button>
       )}
 
-      {/* Layer legend — only in overview */}
-      {!loading && !errMsg && !zoomedModule && (
+      {/* Bottom carousel — navigate departments (‹ NAME ›) */}
+      {!loading && !errMsg && modList.length > 0 && (
         <div style={{
-          position: 'absolute', left: 20, bottom: 20, zIndex: 10,
-          display: 'flex', gap: 16, alignItems: 'center',
-          fontSize: 10, color: 'rgba(255,255,255,0.38)', fontFamily: "'Inter', sans-serif",
+          position: 'absolute', bottom: zoomedModule ? 78 : 26, left: '50%',
+          transform: 'translateX(-50%)', zIndex: 10,
+          display: 'flex', alignItems: 'center', gap: 18,
+          transition: 'bottom 0.4s',
         }}>
-          {Object.entries(LAYER_CLR).map(([layer, color]) => (
-            <span key={layer} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{
-                width: 8, height: 8, borderRadius: '50%', background: color,
-                display: 'inline-block', boxShadow: `0 0 6px ${color}55`,
-              }} />
-              {layer}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Hint — click to explore */}
-      {!loading && !errMsg && !zoomedModule && (
-        <div style={{
-          position: 'absolute', bottom: 20, right: 20, zIndex: 10,
-          fontSize: 9, color: 'rgba(255,255,255,0.2)',
-          fontFamily: "'Orbitron', 'Inter', sans-serif", letterSpacing: 2,
-          textTransform: 'uppercase',
-        }}>
-          clique em um módulo para explorar
+          <span onClick={() => goTo(curIdx - 1)} style={{
+            cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 22,
+            userSelect: 'none', padding: '0 6px',
+          }}>‹</span>
+          <span style={{
+            display: 'flex', alignItems: 'center', gap: 9,
+            fontFamily: "'Orbitron', 'Inter', sans-serif",
+            fontSize: 13, letterSpacing: 3, textTransform: 'uppercase',
+            color: '#fff', minWidth: 160, justifyContent: 'center',
+          }}>
+            <span style={{
+              width: 9, height: 9, borderRadius: '50%', background: current?.color ?? '#fff',
+              boxShadow: `0 0 8px ${current?.color ?? '#fff'}aa`,
+            }} />
+            {(current?.label ?? '').toUpperCase().slice(0, 18)}
+          </span>
+          <span onClick={() => goTo(curIdx + 1)} style={{
+            cursor: 'pointer', color: 'rgba(255,255,255,0.5)', fontSize: 22,
+            userSelect: 'none', padding: '0 6px',
+          }}>›</span>
         </div>
       )}
     </div>
