@@ -140,7 +140,7 @@ function buildGraph(g: GalaxyData): { gnodes: GNode[]; glinks: GLink[]; deplinks
       spokeKeys.add(`${mod.id}→${f.id}`);
 
       const deps = (g.fwd.get(f.id) ?? [])
-        .filter(id => modOfFile.get(id) === mod.id && !placed.has(id))
+        .filter(id => g.fileById.has(id) && !placed.has(id))
         .slice(0, MAX_SUBFILES);
       const N2 = deps.length;
       deps.forEach((depId, k) => {
@@ -157,7 +157,7 @@ function buildGraph(g: GalaxyData): { gnodes: GNode[]; glinks: GLink[]; deplinks
           oy: gf.oy + Math.sin(aO2) * distO2,
           fx: gf.fx + Math.cos(aF2) * distF2,
           fy: gf.fy + Math.sin(aF2) * distF2,
-          isModule: false, depth: 2, r: 3,
+          isModule: false, depth: 2, r: 5,
           color: lighten(color, 0.35), glowId: 'none',
           floatOffset: idSeed(depId), layer: dn.layer, moduleId: mod.id,
           modIndex: i, labelAngle: aF2,
@@ -359,8 +359,10 @@ export function GalaxyGraphViewer({
 
     // ── Morph + camera state, driven by the animation timer ──
     let focusedId: string | null = null;
+    let selectedFileId: string | null = null;
     let morphTarget = 0;   // 0 = overview, 1 = focus
     let morphValue = 0;
+    const dynItems: { gn: GNode; parent: GNode; nodeEl: SVGGElement; linkEl: SVGLineElement }[] = [];
 
     const tOf = (d: GNode) => (focusedId && d.moduleId === focusedId) ? morphValue : 0;
     const baseX = (d: GNode) => d.ox + (d.fx - d.ox) * tOf(d);
@@ -376,13 +378,15 @@ export function GalaxyGraphViewer({
       .attr('opacity', 0);
 
     // Tree links — tinted with the owning module's color
-    const linkEls = mainGroup.append('g').selectAll<SVGLineElement, GLink>('line')
+    const linkGroup = mainGroup.append('g');
+    const linkEls = linkGroup.selectAll<SVGLineElement, GLink>('line')
       .data(glinks).enter().append('line')
       .attr('stroke', (d: GLink) => hexA(colorForIndex(d.src.modIndex), 0.5))
       .attr('stroke-width', 1);
 
     // Node groups
-    const nodeEls = mainGroup.append('g')
+    const nodeGroup = mainGroup.append('g');
+    const nodeEls = nodeGroup
       .selectAll<SVGGElement, GNode>('.gn')
       .data(gnodes).enter().append('g').attr('class', 'gn');
 
@@ -390,7 +394,7 @@ export function GalaxyGraphViewer({
       .attr('r', d => d.r)
       .attr('fill', d => d.color)
       .style('filter', d => d.glowId !== 'none' ? `url(#${d.glowId})` : 'none')
-      .style('cursor', d => d.isModule ? 'pointer' : 'default');
+      .style('cursor', 'pointer');
 
     // Decorative ring on module nodes
     nodeEls.filter(d => d.isModule).append('circle').attr('class', 'mring')
@@ -425,7 +429,7 @@ export function GalaxyGraphViewer({
         return `${n} arquivo${n === 1 ? '' : 's'}`;
       });
 
-    // File labels — hidden until focused
+    // File labels (L1) — hidden until focused
     nodeEls.filter(d => !d.isModule && d.depth === 1).append('text').attr('class', 'flabel')
       .attr('y', d => d.r + 9)
       .attr('text-anchor', 'middle')
@@ -438,6 +442,22 @@ export function GalaxyGraphViewer({
         const name = d.label.split('/').pop() ?? d.label;
         return name.replace(/\.(ts|tsx|js|jsx|java|py|sql|kt)$/, '').slice(0, 16);
       });
+
+    // File labels (L2) — shown when L1 parent is selected
+    nodeEls.filter(d => !d.isModule && d.depth === 2).append('text').attr('class', 'flabel')
+      .attr('y', d => d.r + 8).attr('text-anchor', 'middle')
+      .attr('fill', 'rgba(255,255,255,0.4)').attr('font-family', "'Inter', sans-serif")
+      .attr('font-size', 5.5).attr('opacity', 0).attr('pointer-events', 'none')
+      .text(d => {
+        const name = d.label.split('/').pop() ?? d.label;
+        return name.replace(/\.(ts|tsx|js|jsx|java|py|sql|kt)$/, '').slice(0, 14);
+      });
+
+    // Selection rings for file nodes (revealed on click)
+    nodeEls.filter(d => !d.isModule).append('circle').attr('class', 'sel-ring')
+      .attr('r', 0).attr('fill', 'none')
+      .attr('stroke', d => colorForIndex(d.modIndex))
+      .attr('stroke-width', 1.5).attr('opacity', 0).attr('pointer-events', 'none');
 
     // Position module labels (overview: outward of the node)
     function layoutModuleLabels() {
@@ -464,6 +484,7 @@ export function GalaxyGraphViewer({
     function focusModule(id: string) {
       const m = gnodes.find(n => n.id === id && n.isModule);
       if (!m) return;
+      if (selectedFileId) deselectFile();
       focusedId = id;
       morphTarget = 1;
 
@@ -501,6 +522,7 @@ export function GalaxyGraphViewer({
     }
 
     function reset() {
+      if (selectedFileId) deselectFile();
       // keep focusedId until the morph eases back out; just flip the target now
       morphTarget = 0;
       mainGroup.transition().duration(900).ease(d3.easeCubicInOut)
@@ -522,6 +544,118 @@ export function GalaxyGraphViewer({
       setZoomedModule(null);
     }
 
+    function getChildIds(nodeId: string): string[] {
+      return glinks.filter(lk => lk.src.id === nodeId).map(lk => lk.tgt.id);
+    }
+
+    function deselectFile() {
+      if (!selectedFileId || !focusedId) return;
+      selectedFileId = null;
+      nodeEls.select('.sel-ring').transition().duration(250).attr('r', 0).attr('opacity', 0);
+      nodeEls.filter(nd => nd.moduleId === focusedId && !nd.isModule)
+        .transition().duration(350).attr('opacity', 1);
+      nodeEls.filter(nd => nd.moduleId === focusedId && !nd.isModule).select('.core')
+        .transition().duration(350).attr('r', (nd: GNode) => nd.r * 1.5)
+        .style('filter', 'url(#gal-glow-orb)');
+      nodeEls.filter(nd => nd.depth >= 2 && nd.moduleId === focusedId).select('.flabel')
+        .transition().duration(200).attr('opacity', 0);
+      // Remove dynamic children
+      dynItems.forEach(({ nodeEl, linkEl }) => {
+        d3.select<SVGGElement, unknown>(nodeEl).transition().duration(300).style('opacity', 0)
+          .on('end', function() { d3.select(this).remove(); });
+        d3.select<SVGLineElement, unknown>(linkEl).transition().duration(300).attr('opacity', 0)
+          .on('end', function() { d3.select(this).remove(); });
+      });
+      dynItems.length = 0;
+    }
+
+    async function selectFile(d: GNode) {
+      selectedFileId = d.id;
+      const childIds = getChildIds(d.id);
+
+      nodeEls.filter(nd => nd.id === d.id).select('.sel-ring')
+        .transition().duration(400).attr('r', d.r * 4.5).attr('opacity', 0.65);
+      nodeEls.filter(nd => nd.id === d.id).select('.core')
+        .transition().duration(350).attr('r', d.r * 2.8)
+        .style('filter', 'url(#gal-glow-orb)');
+      nodeEls.filter(nd => !nd.isModule && nd.moduleId === focusedId && nd.id !== d.id && !childIds.includes(nd.id))
+        .transition().duration(350).attr('opacity', 0.18);
+
+      if (childIds.length > 0) {
+        nodeEls.filter(nd => childIds.includes(nd.id)).select('.core')
+          .transition().duration(350).attr('r', (nd: GNode) => nd.r * 2.2)
+          .style('filter', 'url(#gal-glow-orb)');
+        nodeEls.filter(nd => childIds.includes(nd.id)).transition().duration(350).attr('opacity', 1);
+        nodeEls.filter(nd => childIds.includes(nd.id)).select('.flabel')
+          .transition().delay(250).duration(400).attr('opacity', 0.8);
+      } else {
+        await addChildrenDynamically(d);
+      }
+    }
+
+    async function addChildrenDynamically(parent: GNode) {
+      try {
+        const result = await (window.ticAnalyzer.getGraphLevel(projectPath, [parent.id]) as Promise<LevelData>);
+        if (result.error || !result.nodes?.length) return;
+        if (selectedFileId !== parent.id) return;
+
+        const baseColor = colorForIndex(parent.modIndex);
+        const newNodes = result.nodes
+          .filter((n: AggNode) => FILE_KINDS.has(n.kind) || n.kind === 'method' || n.kind === 'symbol')
+          .sort((a: AggNode, b: AggNode) => (b.inWeight + b.outWeight) - (a.inWeight + a.outWeight))
+          .slice(0, 6);
+        if (!newNodes.length) return;
+
+        const N = newNodes.length;
+        newNodes.forEach((f: AggNode, i: number) => {
+          if (gnodes.find(gn => gn.id === f.id)) return;
+
+          const frac = N > 1 ? (i - (N - 1) / 2) / (N - 1) : 0;
+          const aF = parent.labelAngle + frac * 0.7;
+          const dist = 65 + (i % 2) * 22;
+
+          const gn: GNode = {
+            id: f.id, label: f.label,
+            ox: parent.ox + Math.cos(aF) * dist * 0.5,
+            oy: parent.oy + Math.sin(aF) * dist * 0.5,
+            fx: parent.fx + Math.cos(aF) * dist,
+            fy: parent.fy + Math.sin(aF) * dist,
+            isModule: false, depth: parent.depth + 1, r: 3.5,
+            color: lighten(baseColor, 0.15), glowId: 'none',
+            floatOffset: idSeed(f.id), layer: f.layer, moduleId: parent.moduleId,
+            modIndex: parent.modIndex, labelAngle: aF,
+          };
+          gnodes.push(gn);
+
+          const lnkEl = linkGroup.append<SVGLineElement>('line')
+            .attr('stroke', hexA(baseColor, 0.45))
+            .attr('stroke-width', 0.8).attr('opacity', 0)
+            .attr('x1', parent.fx).attr('y1', parent.fy)
+            .attr('x2', gn.fx).attr('y2', gn.fy)
+            .node()!;
+
+          const gEl = nodeGroup.append<SVGGElement>('g')
+            .attr('transform', `translate(${parent.fx},${parent.fy})`)
+            .style('opacity', 0)
+            .node()!;
+
+          d3.select(gEl).append('circle').attr('class', 'core')
+            .attr('r', 0).attr('fill', gn.color).style('filter', 'url(#gal-glow-orb)');
+          d3.select(gEl).append('text').attr('class', 'flabel')
+            .attr('y', gn.r + 9).attr('text-anchor', 'middle')
+            .attr('fill', 'rgba(255,255,255,0.5)').attr('font-family', "'Inter', sans-serif")
+            .attr('font-size', 5.5).attr('pointer-events', 'none')
+            .text(f.label.split('/').pop()?.replace(/\.(ts|tsx|js|jsx|java|py|sql|kt)$/, '').slice(0, 14) ?? f.label.slice(0, 14));
+
+          d3.select(gEl).transition().duration(500).style('opacity', 1);
+          d3.select(gEl).select('.core').transition().duration(500).attr('r', gn.r);
+          d3.select<SVGLineElement, unknown>(lnkEl).transition().duration(500).attr('opacity', 0.6);
+
+          dynItems.push({ gn, parent, nodeEl: gEl, linkEl: lnkEl });
+        });
+      } catch (_e) {}
+    }
+
     focusModuleRef.current = focusModule;
     resetRef.current = reset;
 
@@ -529,6 +663,13 @@ export function GalaxyGraphViewer({
       if (focusedId === d.id) return;
       focusModule(d.id);
       onFocusIdxRef.current?.(d.modIndex);
+    });
+
+    nodeEls.filter(d => !d.isModule).on('click', function(ev, d) {
+      (ev as MouseEvent).stopPropagation();
+      if (!focusedId || d.moduleId !== focusedId) return;
+      if (selectedFileId === d.id) { deselectFile(); return; }
+      void selectFile(d);
     });
 
     // Animation timer: ease morph + breathing + draw links
@@ -544,6 +685,15 @@ export function GalaxyGraphViewer({
       nebulaEls
         .attr('cx', (d: typeof nebulaData[0]) => d.bx + Math.sin(elapsed * 0.0005 + d.off) * 15)
         .attr('cy', (d: typeof nebulaData[0]) => d.by + Math.cos(elapsed * 0.0007 + d.off) * 15);
+      // Dynamic child nodes: track parent position so they float together
+      dynItems.forEach(({ gn, parent, nodeEl, linkEl }) => {
+        const x = px(gn, elapsed);
+        const y = py(gn, elapsed);
+        d3.select(nodeEl).attr('transform', `translate(${x},${y})`);
+        d3.select(linkEl)
+          .attr('x1', px(parent, elapsed)).attr('y1', py(parent, elapsed))
+          .attr('x2', x).attr('y2', y);
+      });
     });
 
     return () => { if (timerRef.current) { timerRef.current.stop(); timerRef.current = null; } };
