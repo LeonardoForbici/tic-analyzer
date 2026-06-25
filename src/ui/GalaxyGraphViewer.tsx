@@ -11,19 +11,29 @@ interface AggEdge { from: string; to: string; weight: number; resolvedWeight: nu
 interface LevelData { nodes: AggNode[]; edges: AggEdge[]; error?: string; }
 
 const MAX_MODS = 12;
-const MAX_FILES_PER_MOD = 5;
-const MAX_SUBFILES = 3;
-const MOD_RADIUS = 240;
-const FILE_DIST = 65;
-const SUBFILE_DIST = 42;
+const MAX_FILES_PER_MOD = 7;   // nível 1 (arquivos diretos do módulo)
+const POOL_PER_MOD = 24;       // pool guardado p/ achar deps intra-módulo (nível 2)
+const MAX_SUBFILES = 3;        // nível 2 por arquivo
+const MOD_RADIUS = 250;
+const FILE_DIST = 70;
+const SUBFILE_DIST = 44;
 const SPEED = 0.0015;
 const FLOAT_DIST = 6;
+
+const FILE_KINDS = new Set(['file', 'plsql', 'table', 'symbol', 'method', 'column']);
 
 const LAYER_CLR: Record<string, string> = {
   frontend: '#00dbe9',
   backend:  '#e8b84b',
   database: '#b48ead',
 };
+
+interface GalaxyData {
+  modules: AggNode[];
+  filesByMod: Map<string, AggNode[]>;   // moduleId → arquivos (contenção real)
+  fileById: Map<string, AggNode>;
+  fwd: Map<string, string[]>;           // arquivo → arquivos que ele depende (dependentes reais)
+}
 
 interface GNode {
   id: string; label: string;
@@ -36,53 +46,24 @@ interface GNode {
 interface GLink { src: GNode; tgt: GNode; }
 
 function idSeed(id: string): number {
-  return (id.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0) * 0.37 + 100) % (Math.PI * 2);
+  return Math.abs(id.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0) * 0.37) % (Math.PI * 2);
 }
 
 function buildGraph(
-  nodes: AggNode[], edges: AggEdge[], cx: number, cy: number,
-): { gnodes: GNode[]; glinks: GLink[] } {
-  const byId = new Map(nodes.map(n => [n.id, n]));
-  const mods = nodes
-    .filter(n => n.kind === 'module' || n.kind === 'layer')
-    .slice(0, MAX_MODS);
-  const fileKinds = new Set(['file', 'plsql', 'table', 'symbol', 'method', 'column']);
-  const files = nodes.filter(n => fileKinds.has(n.kind));
-  const fileSet = new Set(files.map(n => n.id));
-
-  // forward adjacency (from → to[])
-  const fwd = new Map<string, string[]>();
-  for (const e of edges) {
-    if (!fwd.has(e.from)) fwd.set(e.from, []);
-    fwd.get(e.from)!.push(e.to);
-  }
-
-  function modFiles(mod: AggNode): AggNode[] {
-    // via edge containment
-    const via = (fwd.get(mod.id) ?? [])
-      .filter(id => fileSet.has(id))
-      .map(id => byId.get(id)!)
-      .filter(Boolean)
-      .sort((a, b) => (b.inWeight + b.outWeight) - (a.inWeight + a.outWeight))
-      .slice(0, MAX_FILES_PER_MOD);
-    if (via.length > 0) return via;
-
-    // path-prefix fallback
-    const name = mod.label.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return files
-      .filter(f => {
-        const p = f.id.replace(/^file:/, '').toLowerCase();
-        return name.length >= 3 && (p.includes(name) || name.includes(p.split('/').slice(-1)[0].replace(/\.[^.]+$/, '').replace(/[^a-z0-9]/g, '')));
-      })
-      .sort((a, b) => (b.inWeight + b.outWeight) - (a.inWeight + a.outWeight))
-      .slice(0, MAX_FILES_PER_MOD);
-  }
-
+  g: GalaxyData, cx: number, cy: number,
+): { gnodes: GNode[]; glinks: GLink[]; deplinks: GLink[] } {
   const gnodes: GNode[] = [];
-  const glinks: GLink[] = [];
-  const visited = new Set<string>();
-
+  const glinks: GLink[] = [];   // árvore (módulo→arquivo, arquivo→subarquivo)
+  const deplinks: GLink[] = []; // dependências cruzadas reais
+  const placed = new Map<string, GNode>();
+  const mods = g.modules.slice(0, MAX_MODS);
   const R = MOD_RADIUS;
+
+  // arquivo → módulo (para manter o nível 2 dentro do mesmo departamento)
+  const modOfFile = new Map<string, string>();
+  for (const [mid, files] of g.filesByMod) for (const f of files) modOfFile.set(f.id, mid);
+
+  const spokeKeys = new Set<string>();
 
   mods.forEach((mod, i) => {
     const angle = (i / mods.length) * Math.PI * 2 - Math.PI / 2;
@@ -90,79 +71,80 @@ function buildGraph(
     const my = cy + Math.sin(angle) * R;
     const color = LAYER_CLR[mod.layer ?? ''] ?? '#81a1c1';
     const gm: GNode = {
-      id: mod.id, label: mod.label,
-      x: mx, y: my,
-      isModule: true, depth: 0,
-      r: 14, color, glowId: `gal-glow-${mod.layer ?? 'default'}`,
-      angle, floatOffset: 0,
-      layer: mod.layer,
+      id: mod.id, label: mod.label, x: mx, y: my,
+      isModule: true, depth: 0, r: 14, color,
+      glowId: `gal-glow-${mod.layer ?? 'default'}`,
+      angle, floatOffset: 0, layer: mod.layer,
     };
     gnodes.push(gm);
-    visited.add(mod.id);
+    placed.set(mod.id, gm);
 
-    const level1 = modFiles(mod);
-    // if still empty, synthetic nodes to keep aesthetics
-    const l1nodes: AggNode[] = level1.length > 0 ? level1
-      : Array.from({ length: 4 }, (_, j) => ({
-        id: `${mod.id}::s${j}`, label: `node ${j + 1}`,
-        kind: 'file' as const, childCount: 0, inWeight: 1, outWeight: 1,
-      }));
+    const pool = (g.filesByMod.get(mod.id) ?? []);
+    const level1 = pool.slice(0, MAX_FILES_PER_MOD);
+    const N1 = level1.length;
 
-    const N1 = l1nodes.length;
-    l1nodes.forEach((child, j) => {
-      if (visited.has(child.id)) return;
-      visited.add(child.id);
-
-      const spread = Math.min(Math.PI * 0.72, 0.25 * (N1 + 1));
+    level1.forEach((f, j) => {
+      if (placed.has(f.id)) return;
+      const spread = Math.min(Math.PI * 0.8, 0.3 * (N1 + 1));
       const a1 = angle + (j - (N1 - 1) / 2) * (spread / Math.max(1, N1 - 1));
-      const dist1 = FILE_DIST + (j % 2) * 12;
+      const dist1 = FILE_DIST + (j % 3) * 16;
+      const w = f.inWeight + f.outWeight;
+      const r = Math.max(3.5, Math.min(7, 3 + Math.log1p(w) * 0.8));
       const gf: GNode = {
-        id: child.id, label: child.label,
+        id: f.id, label: f.label,
         x: mx + Math.cos(a1) * dist1,
         y: my + Math.sin(a1) * dist1,
-        isModule: false, depth: 1,
-        r: 5, color: '#ffffff', glowId: 'none',
-        angle: a1, floatOffset: idSeed(child.id),
+        isModule: false, depth: 1, r,
+        color: '#ffffff', glowId: 'none',
+        angle: a1, floatOffset: idSeed(f.id), layer: f.layer,
       };
       gnodes.push(gf);
+      placed.set(f.id, gf);
       glinks.push({ src: gm, tgt: gf });
+      spokeKeys.add(`${mod.id}→${f.id}`);
 
-      // level 2: deps of this file
-      const deps = (fwd.get(child.id) ?? [])
-        .filter(id => fileSet.has(id) && !visited.has(id))
+      // nível 2: dependências reais deste arquivo, dentro do mesmo módulo
+      const deps = (g.fwd.get(f.id) ?? [])
+        .filter(id => modOfFile.get(id) === mod.id && !placed.has(id))
         .slice(0, MAX_SUBFILES);
       const N2 = deps.length;
-
-      const l2nodes = N2 > 0 ? deps
-        : Array.from({ length: 1 + (Math.abs(idSeed(child.id) * 100) | 0) % 2 }, (_, k) => ({
-          id: `${child.id}::sub${k}`, real: false,
-        }));
-
-      l2nodes.forEach((dep, k) => {
-        const depId = typeof dep === 'string' ? dep : (dep as any).id;
-        if (visited.has(depId)) return;
-        visited.add(depId);
-        const depNode = byId.get(depId);
-        const N2eff = Math.max(1, typeof dep === 'string' ? N2 : l2nodes.length);
-        const spread2 = 0.35 / Math.max(1, N2eff - 1);
-        const a2 = a1 + (k - (N2eff - 1) / 2) * spread2;
-        const dist2 = SUBFILE_DIST + (k % 2) * 6;
+      deps.forEach((depId, k) => {
+        const dn = g.fileById.get(depId);
+        if (!dn) return;
+        const a2 = a1 + (k - (N2 - 1) / 2) * (0.42 / Math.max(1, N2 - 1));
+        const dist2 = SUBFILE_DIST + (k % 2) * 8;
         const gs: GNode = {
-          id: depId,
-          label: depNode?.label ?? '',
+          id: depId, label: dn.label,
           x: gf.x + Math.cos(a2) * dist2,
           y: gf.y + Math.sin(a2) * dist2,
-          isModule: false, depth: 2,
-          r: 2.8, color: 'rgba(255,255,255,0.65)', glowId: 'none',
-          angle: a2, floatOffset: idSeed(depId),
+          isModule: false, depth: 2, r: 3,
+          color: 'rgba(255,255,255,0.7)', glowId: 'none',
+          angle: a2, floatOffset: idSeed(depId), layer: dn.layer,
         };
         gnodes.push(gs);
+        placed.set(depId, gs);
         glinks.push({ src: gf, tgt: gs });
+        spokeKeys.add(`${f.id}→${depId}`);
       });
     });
   });
 
-  return { gnodes, glinks };
+  // dependências cruzadas reais entre nós já posicionados (os "dependentes")
+  const seen = new Set<string>();
+  for (const [from, tos] of g.fwd) {
+    const s = placed.get(from);
+    if (!s || s.isModule) continue;
+    for (const to of tos) {
+      const t = placed.get(to);
+      if (!t || t.isModule || s === t) continue;
+      const key = `${from}→${to}`;
+      if (spokeKeys.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      deplinks.push({ src: s, tgt: t });
+    }
+  }
+
+  return { gnodes, glinks, deplinks };
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -179,8 +161,9 @@ export function GalaxyGraphViewer({
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const [zoomedModule, setZoomedModule] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<LevelData | null>(null);
-  const [summary, setSummary] = useState({ mods: 0, files: 0 });
+  const [galaxy, setGalaxy] = useState<GalaxyData | null>(null);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+  const [summary, setSummary] = useState({ mods: 0, files: 0, deps: 0 });
 
   // Inject Orbitron font once
   useEffect(() => {
@@ -200,32 +183,70 @@ export function GalaxyGraphViewer({
     return () => window.removeEventListener('keydown', fn);
   }, [onClose]);
 
-  // Fetch graph data
+  // Fetch graph data: layers → modules → per-module files (+ real dependency edges)
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    setData(null);
+    setGalaxy(null);
+    setErrMsg(null);
 
-    (window.ticAnalyzer.getGraphLevel(projectPath, []) as Promise<LevelData>).then(async (top) => {
+    (async () => {
+      const getLevel = (exp: string[]) =>
+        window.ticAnalyzer.getGraphLevel(projectPath, exp) as Promise<LevelData>;
+
+      const top = await getLevel([]);
       if (!alive) return;
-      const modIds = top.nodes
-        .filter(n => n.kind === 'module' || n.kind === 'layer')
-        .map(n => n.id)
+      if (top.error) { setErrMsg(top.error); setLoading(false); return; }
+
+      // 1. módulos (hubs): expandir as layers
+      const layerIds = top.nodes.filter(n => n.kind === 'layer').map(n => n.id);
+      const modLevel = layerIds.length ? await getLevel(layerIds) : top;
+      if (!alive) return;
+
+      let modules = modLevel.nodes.filter(n => n.kind === 'module');
+      if (modules.length === 0) modules = modLevel.nodes.filter(n => n.kind === 'module' || n.kind === 'layer');
+      modules = modules
+        .sort((a, b) => (b.childCount ?? 0) - (a.childCount ?? 0))
         .slice(0, MAX_MODS);
 
-      setSummary({
-        mods: modIds.length,
-        files: top.nodes.filter(n => n.kind !== 'module' && n.kind !== 'layer').length
-          + top.nodes.filter(n => n.kind === 'module' || n.kind === 'layer')
-              .reduce((s, m) => s + (m.childCount ?? 0), 0),
-      });
+      if (modules.length === 0) {
+        setErrMsg('Nenhum módulo encontrado. Rode a análise primeiro.');
+        setLoading(false);
+        return;
+      }
 
-      if (modIds.length === 0) { setData(top); setLoading(false); return; }
+      // 2. arquivos por módulo (contenção real) + arestas que tocam cada módulo
+      const filesByMod = new Map<string, AggNode[]>();
+      const fileById = new Map<string, AggNode>();
+      const rawEdges: AggEdge[] = [];
 
-      const expanded = await (window.ticAnalyzer.getGraphLevel(projectPath, modIds) as Promise<LevelData>);
-      if (!alive) return;
-      setData(expanded);
+      for (const mod of modules) {
+        const r = await getLevel([mod.id]);
+        if (!alive) return;
+        const files = r.nodes
+          .filter(n => FILE_KINDS.has(n.kind))
+          .sort((a, b) => (b.inWeight + b.outWeight) - (a.inWeight + a.outWeight))
+          .slice(0, POOL_PER_MOD);
+        filesByMod.set(mod.id, files);
+        for (const f of files) fileById.set(f.id, f);
+        rawEdges.push(...r.edges);
+      }
+
+      // 3. fwd map: arquivo → arquivos que depende (só entre arquivos posicionáveis)
+      const fwd = new Map<string, string[]>();
+      let depCount = 0;
+      for (const e of rawEdges) {
+        if (!fileById.has(e.from) || !fileById.has(e.to) || e.from === e.to) continue;
+        if (!fwd.has(e.from)) fwd.set(e.from, []);
+        const arr = fwd.get(e.from)!;
+        if (!arr.includes(e.to)) { arr.push(e.to); depCount++; }
+      }
+
+      setGalaxy({ modules, filesByMod, fileById, fwd });
+      setSummary({ mods: modules.length, files: fileById.size, deps: depCount });
       setLoading(false);
+    })().catch(err => {
+      if (alive) { setErrMsg(String(err?.message ?? err)); setLoading(false); }
     });
 
     return () => { alive = false; };
@@ -233,7 +254,7 @@ export function GalaxyGraphViewer({
 
   // Build & render D3 galaxy
   useEffect(() => {
-    if (!data || !svgRef.current) return;
+    if (!galaxy || !svgRef.current) return;
     const svgEl = svgRef.current;
 
     if (timerRef.current) { timerRef.current.stop(); timerRef.current = null; }
@@ -268,7 +289,7 @@ export function GalaxyGraphViewer({
     const mainGroup = svg.append('g');
 
     // Decorative orbit rings
-    [150, MOD_RADIUS, MOD_RADIUS + 120].forEach(r => {
+    [150, MOD_RADIUS, MOD_RADIUS + 130].forEach(r => {
       mainGroup.append('circle')
         .attr('cx', cx).attr('cy', cy).attr('r', r)
         .attr('fill', 'none')
@@ -290,16 +311,19 @@ export function GalaxyGraphViewer({
       .attr('opacity', (_, i) => 0.18 + (i % 5) * 0.09);
 
     // Graph data → visual nodes/links
-    const { gnodes, glinks } = buildGraph(data.nodes, data.edges, cx, cy);
+    const { gnodes, glinks, deplinks } = buildGraph(galaxy, cx, cy);
 
-    // Links
-    const linkEls = mainGroup.append('g')
-      .selectAll<SVGLineElement, GLink>('line')
+    // Dependency cross-links (faint — os dependentes cruzados)
+    const depEls = mainGroup.append('g').selectAll<SVGLineElement, GLink>('line')
+      .data(deplinks).enter().append('line')
+      .attr('stroke', 'rgba(140,180,255,0.10)')
+      .attr('stroke-width', 0.8);
+
+    // Tree links (módulo → arquivo → subarquivo)
+    const linkEls = mainGroup.append('g').selectAll<SVGLineElement, GLink>('line')
       .data(glinks).enter().append('line')
-      .attr('stroke', 'rgba(255,255,255,0.15)')
-      .attr('stroke-width', 1.2)
-      .attr('x1', d => d.src.x).attr('y1', d => d.src.y)
-      .attr('x2', d => d.tgt.x).attr('y2', d => d.tgt.y);
+      .attr('stroke', 'rgba(255,255,255,0.16)')
+      .attr('stroke-width', 1.1);
 
     // Node groups
     const nodeEls = mainGroup.append('g')
@@ -316,11 +340,8 @@ export function GalaxyGraphViewer({
 
     // Decorative ring on module nodes
     nodeEls.filter(d => d.isModule).append('circle')
-      .attr('r', 21)
-      .attr('fill', 'none')
-      .attr('stroke', d => d.color)
-      .attr('stroke-width', '1px')
-      .attr('opacity', 0.4);
+      .attr('r', 21).attr('fill', 'none')
+      .attr('stroke', d => d.color).attr('stroke-width', '1px').attr('opacity', 0.4);
 
     // Module labels (Orbitron)
     nodeEls.filter(d => d.isModule).append('text')
@@ -332,7 +353,7 @@ export function GalaxyGraphViewer({
       .attr('pointer-events', 'none')
       .text(d => d.label.toUpperCase().slice(0, 18));
 
-    // Sub-label
+    // Sub-label: contagem de arquivos
     nodeEls.filter(d => d.isModule).append('text')
       .attr('y', d => Math.sin(d.angle) >= 0 ? 54 : -22)
       .attr('text-anchor', 'middle')
@@ -340,9 +361,12 @@ export function GalaxyGraphViewer({
       .attr('font-family', "'Inter', sans-serif")
       .attr('font-size', 8)
       .attr('pointer-events', 'none')
-      .text('connected · active');
+      .text(d => {
+        const n = galaxy.filesByMod.get(d.id)?.length ?? 0;
+        return `${n} arquivo${n === 1 ? '' : 's'}`;
+      });
 
-    // Hover effect
+    // Hover
     nodeEls
       .on('mouseover', function(_ev, d) {
         d3.select(this).select('.core').transition().duration(200)
@@ -352,7 +376,7 @@ export function GalaxyGraphViewer({
         d3.select(this).select('.core').transition().duration(200).attr('r', d.r);
       });
 
-    // Click module → zoom camera (identical to reference)
+    // Click module → zoom camera
     nodeEls.filter(d => d.isModule).on('click', (_ev, d) => {
       const scale = 2.2;
       const tx = W / 2 - d.x * scale;
@@ -362,32 +386,25 @@ export function GalaxyGraphViewer({
       setZoomedModule(d.label);
     });
 
-    // Breathing animation timer
+    // Breathing animation
+    const ax = (d: GNode, e: number) => d.isModule ? d.x : d.x + Math.sin(e * SPEED + d.floatOffset) * FLOAT_DIST;
+    const ay = (d: GNode, e: number) => d.isModule ? d.y : d.y + Math.cos(e * SPEED * 1.2 + d.floatOffset) * FLOAT_DIST;
+
     timerRef.current = d3.timer(elapsed => {
-      nodeEls.attr('transform', (d: GNode) => {
-        if (d.isModule) return `translate(${d.x},${d.y})`;
-        const fx = d.x + Math.sin(elapsed * SPEED + d.floatOffset) * FLOAT_DIST;
-        const fy = d.y + Math.cos(elapsed * SPEED * 1.2 + d.floatOffset) * FLOAT_DIST;
-        return `translate(${fx},${fy})`;
-      });
+      nodeEls.attr('transform', (d: GNode) => `translate(${ax(d, elapsed)},${ay(d, elapsed)})`);
       linkEls
-        .attr('x1', (d: GLink) => d.src.x)
-        .attr('y1', (d: GLink) => d.src.y)
-        .attr('x2', (d: GLink) => {
-          if (d.tgt.isModule) return d.tgt.x;
-          return d.tgt.x + Math.sin(elapsed * SPEED + d.tgt.floatOffset) * FLOAT_DIST;
-        })
-        .attr('y2', (d: GLink) => {
-          if (d.tgt.isModule) return d.tgt.y;
-          return d.tgt.y + Math.cos(elapsed * SPEED * 1.2 + d.tgt.floatOffset) * FLOAT_DIST;
-        });
+        .attr('x1', (d: GLink) => ax(d.src, elapsed)).attr('y1', (d: GLink) => ay(d.src, elapsed))
+        .attr('x2', (d: GLink) => ax(d.tgt, elapsed)).attr('y2', (d: GLink) => ay(d.tgt, elapsed));
+      depEls
+        .attr('x1', (d: GLink) => ax(d.src, elapsed)).attr('y1', (d: GLink) => ay(d.src, elapsed))
+        .attr('x2', (d: GLink) => ax(d.tgt, elapsed)).attr('y2', (d: GLink) => ay(d.tgt, elapsed));
       nebulaEls
         .attr('cx', (d: typeof nebulaData[0]) => d.bx + Math.sin(elapsed * 0.0005 + d.off) * 15)
         .attr('cy', (d: typeof nebulaData[0]) => d.by + Math.cos(elapsed * 0.0007 + d.off) * 15);
     });
 
     return () => { if (timerRef.current) { timerRef.current.stop(); timerRef.current = null; } };
-  }, [data]);
+  }, [galaxy]);
 
   function resetZoom() {
     if (svgRef.current && zoomRef.current) {
@@ -416,7 +433,7 @@ export function GalaxyGraphViewer({
         opacity: 0.18,
       }} />
 
-      {/* Top navigation (like reference) */}
+      {/* Top navigation */}
       <div style={{
         position: 'absolute', top: 22, left: '50%', transform: 'translateX(-50%)',
         display: 'flex', alignItems: 'center', gap: 4, zIndex: 10,
@@ -431,29 +448,23 @@ export function GalaxyGraphViewer({
             fontSize: 10, letterSpacing: '1.5px', textTransform: 'uppercase',
             color: item.active ? '#000' : 'rgba(255,255,255,0.45)',
             background: item.active ? '#ffffff' : 'transparent',
-            borderRadius: 14,
-            fontWeight: item.active ? 700 : 400,
+            borderRadius: 14, fontWeight: item.active ? 700 : 400,
           }}>
             {item.label}
           </span>
         ))}
-        <span
-          onClick={onClose}
-          title="Fechar (ESC)"
-          style={{
-            marginLeft: 6, padding: '5px 12px',
-            fontFamily: "'Orbitron', 'Inter', sans-serif",
-            fontSize: 10, letterSpacing: '1px', textTransform: 'uppercase',
-            color: 'rgba(255,255,255,0.4)', cursor: 'pointer', borderRadius: 14,
-            userSelect: 'none',
-          }}
-        >
+        <span onClick={onClose} title="Fechar (ESC)" style={{
+          marginLeft: 6, padding: '5px 12px',
+          fontFamily: "'Orbitron', 'Inter', sans-serif",
+          fontSize: 10, letterSpacing: '1px', textTransform: 'uppercase',
+          color: 'rgba(255,255,255,0.4)', cursor: 'pointer', borderRadius: 14, userSelect: 'none',
+        }}>
           ✕ esc
         </span>
       </div>
 
-      {/* POV header (like reference) */}
-      {!loading && (
+      {/* POV header */}
+      {!loading && !errMsg && (
         <div style={{
           position: 'absolute', top: 88, left: '50%', transform: 'translateX(-50%)',
           background: 'rgba(0,0,0,0.75)',
@@ -461,21 +472,16 @@ export function GalaxyGraphViewer({
           padding: '12px 28px', borderRadius: 6,
           fontSize: 14, letterSpacing: '0.5px',
           textAlign: 'center', color: '#ffffff',
-          maxWidth: 520, zIndex: 10, pointerEvents: 'none',
-          boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
-          whiteSpace: 'nowrap',
-          opacity: zoomedModule ? 0.15 : 1,
-          transition: 'opacity 0.4s',
+          maxWidth: 640, zIndex: 10, pointerEvents: 'none',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.5)', whiteSpace: 'nowrap',
+          opacity: zoomedModule ? 0.15 : 1, transition: 'opacity 0.4s',
         }}>
-          {summary.mods} módulos · {summary.files > 0 ? `${summary.files} arquivos` : 'enterprise'} · second brain
+          {summary.mods} módulos · {summary.files} arquivos · {summary.deps} dependências
         </div>
       )}
 
       {/* D3 SVG — full viewport */}
-      <svg ref={svgRef} style={{
-        position: 'absolute', inset: 0,
-        width: '100%', height: '100%',
-      }} />
+      <svg ref={svgRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
 
       {/* Loading state */}
       {loading && (
@@ -486,7 +492,19 @@ export function GalaxyGraphViewer({
           fontFamily: "'Orbitron', 'Inter', sans-serif",
           letterSpacing: 3, pointerEvents: 'none',
         }}>
-          CARREGANDO GALÁXIA…
+          MAPEANDO DEPENDÊNCIAS…
+        </div>
+      )}
+
+      {/* Error state */}
+      {errMsg && !loading && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'rgba(255,180,180,0.7)', fontSize: 13,
+          fontFamily: "'Inter', sans-serif", textAlign: 'center', padding: 40,
+        }}>
+          {errMsg}
         </div>
       )}
 
@@ -496,9 +514,7 @@ export function GalaxyGraphViewer({
           position: 'absolute', bottom: '18%', left: 0, right: 0,
           textAlign: 'center',
           fontSize: Math.max(44, Math.min(96, window.innerWidth / 11)),
-          fontWeight: 900,
-          color: 'rgba(255,255,255,0.05)',
-          letterSpacing: 18,
+          fontWeight: 900, color: 'rgba(255,255,255,0.05)', letterSpacing: 18,
           pointerEvents: 'none', userSelect: 'none',
           fontFamily: "'Orbitron', 'Inter', sans-serif",
         }}>
@@ -508,40 +524,37 @@ export function GalaxyGraphViewer({
 
       {/* Reset zoom button */}
       {zoomedModule && (
-        <button
-          onClick={resetZoom}
-          style={{
-            position: 'absolute', bottom: 36, left: '50%', transform: 'translateX(-50%)',
-            background: 'rgba(255,255,255,0.05)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            color: '#fff', padding: '8px 22px', borderRadius: 4,
-            cursor: 'pointer', fontSize: 11, letterSpacing: '1px',
-            fontFamily: "'Inter', sans-serif", textTransform: 'uppercase',
-            zIndex: 10,
-          }}
-        >
+        <button onClick={resetZoom} style={{
+          position: 'absolute', bottom: 36, left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.2)',
+          color: '#fff', padding: '8px 22px', borderRadius: 4,
+          cursor: 'pointer', fontSize: 11, letterSpacing: '1px',
+          fontFamily: "'Inter', sans-serif", textTransform: 'uppercase', zIndex: 10,
+        }}>
           Ver Visão Geral
         </button>
       )}
 
       {/* Layer legend */}
-      {!loading && !zoomedModule && (
+      {!loading && !errMsg && !zoomedModule && (
         <div style={{
           position: 'absolute', left: 20, bottom: 20, zIndex: 10,
           display: 'flex', gap: 16, alignItems: 'center',
-          fontSize: 10, color: 'rgba(255,255,255,0.38)',
-          fontFamily: "'Inter', sans-serif",
+          fontSize: 10, color: 'rgba(255,255,255,0.38)', fontFamily: "'Inter', sans-serif",
         }}>
           {Object.entries(LAYER_CLR).map(([layer, color]) => (
             <span key={layer} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
               <span style={{
-                width: 8, height: 8, borderRadius: '50%',
-                background: color, display: 'inline-block',
-                boxShadow: `0 0 6px ${color}55`,
+                width: 8, height: 8, borderRadius: '50%', background: color,
+                display: 'inline-block', boxShadow: `0 0 6px ${color}55`,
               }} />
               {layer}
             </span>
           ))}
+          <span style={{ marginLeft: 8, opacity: 0.7 }}>
+            <span style={{ display: 'inline-block', width: 14, height: 1, background: 'rgba(140,180,255,0.4)', verticalAlign: 'middle', marginRight: 5 }} />
+            dependência
+          </span>
         </div>
       )}
     </div>
