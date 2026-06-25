@@ -9,6 +9,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import cytoscape from 'cytoscape';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import dagre from 'cytoscape-dagre';
+import { GalaxyGraphViewer } from './GalaxyGraphViewer';
 
 cytoscape.use(dagre);
 
@@ -332,6 +333,7 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
   const [graphWidth, setGraphWidth] = useState(GRAPH_WIDTH_FALLBACK);
 
   const [graphMode, setGraphMode] = useState<'hierarchy' | 'unified'>('hierarchy');
+  const [viewMode, setViewMode] = useState<'hier' | 'galaxy'>('hier');
   const [expanded, setExpanded] = useState<string[]>([]);
   const [data, setData] = useState<LevelData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -572,8 +574,17 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
           <option value="grid">Grid</option>
         </select>
 
+        {/* Galaxy / Hier toggle */}
+        <button
+          onClick={() => setViewMode(m => m === 'galaxy' ? 'hier' : 'galaxy')}
+          style={viewMode === 'galaxy' ? btnActive : btnBase}
+          title="Alternar entre visualização hierárquica e galáxia">
+          <Icon name="scatter_plot" size={13} color={viewMode === 'galaxy' ? C.accentDim : C.textMuted} />
+          {viewMode === 'galaxy' ? 'Hier View' : 'Galaxy'}
+        </button>
+
         {/* Focus mode */}
-        <button onClick={() => setFocusMode((f) => !f)} style={focusMode ? btnActive : btnBase}>
+        <button onClick={() => setFocusMode((f) => !f)} style={viewMode === 'galaxy' ? { ...btnBase, opacity: 0.4, pointerEvents: 'none' } : focusMode ? btnActive : btnBase}>
           <Icon name="center_focus_strong" size={13} color={focusMode ? C.accentDim : C.textMuted} />
           Foco: {focusMode ? 'ON' : 'OFF'}
         </button>
@@ -600,6 +611,7 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
             borderRadius: 6, color: C.textMuted, fontFamily: F.code, fontSize: 11, cursor: 'pointer',
           }}>
           <option value="">Exportar…</option>
+          <option value="galaxy">Galaxy HTML ✦</option>
           <option value="html">HTML interativo</option>
           <option value="mermaid">Mermaid (.mmd)</option>
           <option value="svg">SVG</option>
@@ -619,6 +631,9 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
       )}
 
       {/* ── Grafo ──────────────────────────────────────────────────────────── */}
+      {viewMode === 'galaxy' ? (
+        <GalaxyGraphViewer projectPath={projectPath} />
+      ) : (
       <div ref={wrapperRef} style={{ position: 'relative', opacity: loading ? 0.5 : 1, transition: 'opacity 0.2s' }}>
         {/* Canvas de partículas (fundo) */}
         <canvas
@@ -745,6 +760,7 @@ export function HierGraphViewer({ projectPath }: { projectPath: string }) {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
