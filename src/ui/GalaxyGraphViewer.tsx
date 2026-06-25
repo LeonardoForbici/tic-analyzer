@@ -11,12 +11,19 @@ interface AggEdge { from: string; to: string; weight: number; resolvedWeight: nu
 interface LevelData { nodes: AggNode[]; edges: AggEdge[]; error?: string; }
 
 const MAX_MODS = 12;
-const MAX_FILES_PER_MOD = 14;
+const MAX_FILES_PER_MOD = 12;
 const POOL_PER_MOD = 36;
-const MAX_SUBFILES = 4;
-const MOD_RADIUS = 250;
-const FILE_DIST = 120;
-const SUBFILE_DIST = 85;
+const MAX_SUBFILES = 3;
+
+// Overview (radial outward) layout distances
+const MOD_RADIUS = 230;
+const FILE_DIST = 92;
+const SUBFILE_DIST = 56;
+// Focus (upward fan) layout distances — wider/longer so it fills the screen when zoomed
+const FILE_DIST_F = 150;
+const SUBFILE_DIST_F = 100;
+
+const FOCUS_SCALE = 2.6;
 const SPEED = 0.0015;
 const FLOAT_DIST = 5;
 
@@ -37,12 +44,14 @@ interface GalaxyData {
 
 interface GNode {
   id: string; label: string;
-  x: number; y: number;
+  ox: number; oy: number;  // overview position (radial outward)
+  fx: number; fy: number;  // focus position (upward fan, anchored at module)
   isModule: boolean; depth: number;
   r: number; color: string; glowId: string;
-  angle: number; floatOffset: number;
+  floatOffset: number;
   layer?: string;
-  moduleId: string; // which module this node belongs to (self-ref for modules)
+  moduleId: string;
+  labelAngle: number; // for module label placement (overview)
 }
 interface GLink { src: GNode; tgt: GNode; }
 
@@ -50,9 +59,8 @@ function idSeed(id: string): number {
   return Math.abs(id.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0) * 0.37) % (Math.PI * 2);
 }
 
-function buildGraph(
-  g: GalaxyData, cx: number, cy: number,
-): { gnodes: GNode[]; glinks: GLink[]; deplinks: GLink[] } {
+// World center is (0,0). Modules sit on a circle of MOD_RADIUS.
+function buildGraph(g: GalaxyData): { gnodes: GNode[]; glinks: GLink[]; deplinks: GLink[] } {
   const gnodes: GNode[] = [];
   const glinks: GLink[] = [];
   const deplinks: GLink[] = [];
@@ -63,42 +71,50 @@ function buildGraph(
   for (const [mid, files] of g.filesByMod) for (const f of files) modOfFile.set(f.id, mid);
 
   const spokeKeys = new Set<string>();
+  const UP = -Math.PI / 2; // upward on screen
 
   mods.forEach((mod, i) => {
-    const angle = (i / mods.length) * Math.PI * 2 - Math.PI / 2;
-    const mx = cx + Math.cos(angle) * MOD_RADIUS;
-    const my = cy + Math.sin(angle) * MOD_RADIUS;
+    const angle = (i / mods.length) * Math.PI * 2 - Math.PI / 2; // module's radial angle
+    const mx = Math.cos(angle) * MOD_RADIUS;
+    const my = Math.sin(angle) * MOD_RADIUS;
     const color = LAYER_CLR[mod.layer ?? ''] ?? '#81a1c1';
     const gm: GNode = {
-      id: mod.id, label: mod.label, x: mx, y: my,
-      isModule: true, depth: 0, r: 14, color,
+      id: mod.id, label: mod.label,
+      ox: mx, oy: my, fx: mx, fy: my,
+      isModule: true, depth: 0, r: 11, color,
       glowId: `gal-glow-${mod.layer ?? 'default'}`,
-      angle, floatOffset: 0, layer: mod.layer,
-      moduleId: mod.id,
+      floatOffset: 0, layer: mod.layer, moduleId: mod.id,
+      labelAngle: angle,
     };
     gnodes.push(gm);
     placed.set(mod.id, gm);
 
     const level1 = (g.filesByMod.get(mod.id) ?? []).slice(0, MAX_FILES_PER_MOD);
     const N1 = level1.length;
-    // L1 grows toward center (angle + PI), wide arc
-    const baseAngle = angle + Math.PI;
 
     level1.forEach((f, j) => {
       if (placed.has(f.id)) return;
-      const spread = Math.min(Math.PI * 1.3, 0.45 * (N1 + 2));
-      const a1 = baseAngle + (j - (N1 - 1) / 2) * (spread / Math.max(1, N1 - 1));
-      const dist1 = FILE_DIST + (j % 3) * 22;
+      // fan offset shared by both layouts
+      const spreadO = Math.min(Math.PI * 0.95, 0.32 * (N1 + 1));
+      const spreadF = Math.min(Math.PI * 0.95, 0.30 * (N1 + 1));
+      const frac = N1 > 1 ? (j - (N1 - 1) / 2) / (N1 - 1) : 0;
+      const aO = angle + frac * spreadO;          // overview: fan around outward angle
+      const aF = UP + frac * spreadF;             // focus: fan around up
+      const distO = FILE_DIST + (j % 3) * 18;
+      const distF = FILE_DIST_F + (j % 3) * 26;
+
       const w = f.inWeight + f.outWeight;
-      const r = Math.max(5, Math.min(9, 5 + Math.log1p(w * 0.3)));
+      const r = Math.max(4.5, Math.min(8, 4 + Math.log1p(w * 0.3)));
       const gf: GNode = {
         id: f.id, label: f.label,
-        x: mx + Math.cos(a1) * dist1,
-        y: my + Math.sin(a1) * dist1,
+        ox: mx + Math.cos(aO) * distO,
+        oy: my + Math.sin(aO) * distO,
+        fx: mx + Math.cos(aF) * distF,
+        fy: my + Math.sin(aF) * distF,
         isModule: false, depth: 1, r,
-        color: '#ffffff', glowId: 'none',
-        angle: a1, floatOffset: idSeed(f.id), layer: f.layer,
-        moduleId: mod.id,
+        color: '#fdf6e3', glowId: 'none',
+        floatOffset: idSeed(f.id), layer: f.layer, moduleId: mod.id,
+        labelAngle: aF,
       };
       gnodes.push(gf);
       placed.set(f.id, gf);
@@ -112,16 +128,21 @@ function buildGraph(
       deps.forEach((depId, k) => {
         const dn = g.fileById.get(depId);
         if (!dn) return;
-        const a2 = a1 + (k - (N2 - 1) / 2) * (0.55 / Math.max(1, N2 - 1));
-        const dist2 = SUBFILE_DIST + (k % 2) * 15;
+        const frac2 = N2 > 1 ? (k - (N2 - 1) / 2) / (N2 - 1) : 0;
+        const aO2 = aO + frac2 * 0.5;
+        const aF2 = aF + frac2 * 0.5;
+        const distO2 = SUBFILE_DIST + (k % 2) * 12;
+        const distF2 = SUBFILE_DIST_F + (k % 2) * 18;
         const gs: GNode = {
           id: depId, label: dn.label,
-          x: gf.x + Math.cos(a2) * dist2,
-          y: gf.y + Math.sin(a2) * dist2,
-          isModule: false, depth: 2, r: 3.5,
-          color: 'rgba(255,255,255,0.75)', glowId: 'none',
-          angle: a2, floatOffset: idSeed(depId), layer: dn.layer,
-          moduleId: mod.id,
+          ox: gf.ox + Math.cos(aO2) * distO2,
+          oy: gf.oy + Math.sin(aO2) * distO2,
+          fx: gf.fx + Math.cos(aF2) * distF2,
+          fy: gf.fy + Math.sin(aF2) * distF2,
+          isModule: false, depth: 2, r: 3,
+          color: '#efe8d0', glowId: 'none',
+          floatOffset: idSeed(depId), layer: dn.layer, moduleId: mod.id,
+          labelAngle: aF2,
         };
         gnodes.push(gs);
         placed.set(depId, gs);
@@ -159,8 +180,8 @@ export function GalaxyGraphViewer({
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const timerRef = useRef<d3.Timer | null>(null);
-  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
-  const resetFnRef = useRef<(() => void) | null>(null);
+  const focusModuleRef = useRef<((id: string) => void) | null>(null);
+  const resetRef = useRef<(() => void) | null>(null);
   const [zoomedModule, setZoomedModule] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [galaxy, setGalaxy] = useState<GalaxyData | null>(null);
@@ -258,17 +279,10 @@ export function GalaxyGraphViewer({
 
     const W = window.innerWidth;
     const H = window.innerHeight;
-    const cx = W / 2;
-    const cy = H / 2;
 
     const svg = d3.select(svgEl).attr('width', W).attr('height', H);
 
-    const zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.25, 6])
-      .on('zoom', ev => mainGroup.attr('transform', ev.transform));
-    svg.call(zoomBehavior);
-    zoomRef.current = zoomBehavior;
-
+    // Glow filters
     const defs = svg.append('defs');
     (['frontend', 'backend', 'database', 'default'] as const).forEach(layer => {
       const stdDev = layer === 'default' ? 3 : 6;
@@ -279,21 +293,38 @@ export function GalaxyGraphViewer({
       m.append('feMergeNode').attr('in', 'blur');
       m.append('feMergeNode').attr('in', 'SourceGraphic');
     });
+    // Soft white glow for focused file orbs
+    {
+      const f = defs.append('filter').attr('id', 'gal-glow-orb')
+        .attr('x', '-120%').attr('y', '-120%').attr('width', '340%').attr('height', '340%');
+      f.append('feGaussianBlur').attr('stdDeviation', 5).attr('result', 'blur');
+      const m = f.append('feMerge');
+      m.append('feMergeNode').attr('in', 'blur');
+      m.append('feMergeNode').attr('in', 'SourceGraphic');
+    }
 
     const mainGroup = svg.append('g');
 
-    [150, MOD_RADIUS, MOD_RADIUS + 130].forEach(r => {
+    // Overview camera fits the whole radial galaxy
+    const fitR = MOD_RADIUS + FILE_DIST + SUBFILE_DIST + 80;
+    const s0 = Math.min(W, H) / (2 * fitR);
+    const overviewT = d3.zoomIdentity.translate(W / 2, H / 2).scale(s0);
+    mainGroup.attr('transform', overviewT.toString());
+
+    // Decorative orbit rings (world coords, centered at 0,0)
+    [120, MOD_RADIUS, MOD_RADIUS + 120].forEach(r => {
       mainGroup.append('circle')
-        .attr('cx', cx).attr('cy', cy).attr('r', r)
+        .attr('cx', 0).attr('cy', 0).attr('r', r)
         .attr('fill', 'none')
-        .attr('stroke', 'rgba(255,255,255,0.03)')
+        .attr('stroke', 'rgba(255,255,255,0.035)')
         .attr('stroke-width', 1);
     });
 
-    const nebulaData = Array.from({ length: 80 }, (_, i) => ({
-      bx: cx + (((i * 7919) % 100) / 100 - 0.5) * 60,
-      by: cy + (((i * 6271) % 100) / 100 - 0.5) * 60,
-      r:  ((i * 3) % 15) / 10 + 0.5,
+    // Central golden nebula
+    const nebulaData = Array.from({ length: 90 }, (_, i) => ({
+      bx: (((i * 7919) % 100) / 100 - 0.5) * 70,
+      by: (((i * 6271) % 100) / 100 - 0.5) * 70,
+      r:  ((i * 3) % 15) / 10 + 0.4,
       off: (i * 1.37) % (Math.PI * 2),
     }));
     const nebulaEls = mainGroup.append('g').selectAll('circle')
@@ -302,29 +333,37 @@ export function GalaxyGraphViewer({
       .attr('fill', '#ebcb8b')
       .attr('opacity', (_, i) => 0.18 + (i % 5) * 0.09);
 
-    const { gnodes, glinks, deplinks } = buildGraph(galaxy, cx, cy);
+    const { gnodes, glinks, deplinks } = buildGraph(galaxy);
 
-    // Cross-module dep links — hidden in overview, shown when zoomed
+    // ── Morph + camera state, driven by the animation timer ──
+    let focusedId: string | null = null;
+    let morphTarget = 0;   // 0 = overview, 1 = focus
+    let morphValue = 0;
+
+    const tOf = (d: GNode) => (focusedId && d.moduleId === focusedId) ? morphValue : 0;
+    const baseX = (d: GNode) => d.ox + (d.fx - d.ox) * tOf(d);
+    const baseY = (d: GNode) => d.oy + (d.fy - d.oy) * tOf(d);
+    const px = (d: GNode, e: number) => d.isModule ? baseX(d) : baseX(d) + Math.sin(e * SPEED + d.floatOffset) * FLOAT_DIST;
+    const py = (d: GNode, e: number) => d.isModule ? baseY(d) : baseY(d) + Math.cos(e * SPEED * 1.2 + d.floatOffset) * FLOAT_DIST;
+
+    // Cross-module dependency links — subtle, only shown when focused
     const depEls = mainGroup.append('g').selectAll<SVGLineElement, GLink>('line')
       .data(deplinks).enter().append('line')
-      .attr('stroke', 'rgba(140,180,255,0.12)')
-      .attr('stroke-width', 0.8)
+      .attr('stroke', 'rgba(140,180,255,0.16)')
+      .attr('stroke-width', 0.7)
       .attr('opacity', 0);
 
-    // Tree links — hidden in overview
+    // Tree links
     const linkEls = mainGroup.append('g').selectAll<SVGLineElement, GLink>('line')
       .data(glinks).enter().append('line')
-      .attr('stroke', 'rgba(255,255,255,0.18)')
-      .attr('stroke-width', 1.2)
-      .attr('opacity', 0);
+      .attr('stroke', 'rgba(255,255,255,0.22)')
+      .attr('stroke-width', 1);
 
     // Node groups
     const nodeEls = mainGroup.append('g')
       .selectAll<SVGGElement, GNode>('.gn')
-      .data(gnodes).enter().append('g').attr('class', 'gn')
-      .attr('transform', d => `translate(${d.x},${d.y})`);
+      .data(gnodes).enter().append('g').attr('class', 'gn');
 
-    // Core circles
     nodeEls.append('circle').attr('class', 'core')
       .attr('r', d => d.r)
       .attr('fill', d => d.color)
@@ -332,51 +371,58 @@ export function GalaxyGraphViewer({
       .style('cursor', d => d.isModule ? 'pointer' : 'default');
 
     // Decorative ring on module nodes
-    nodeEls.filter(d => d.isModule).append('circle')
-      .attr('r', 21).attr('fill', 'none')
-      .attr('stroke', d => d.color).attr('stroke-width', '1px').attr('opacity', 0.4);
+    nodeEls.filter(d => d.isModule).append('circle').attr('class', 'mring')
+      .attr('r', 18).attr('fill', 'none')
+      .attr('stroke', d => d.color).attr('stroke-width', '1px').attr('opacity', 0.45);
 
-    // Module labels (Orbitron)
-    nodeEls.filter(d => d.isModule).append('text')
-      .attr('y', d => Math.sin(d.angle) >= 0 ? 42 : -32)
+    // Module labels (Orbitron) — placed outward in overview
+    nodeEls.filter(d => d.isModule).append('text').attr('class', 'mlabel')
       .attr('text-anchor', 'middle')
-      .attr('fill', '#ffffff').attr('opacity', 0.82)
+      .attr('fill', '#ffffff').attr('opacity', 0.85)
       .attr('font-family', "'Orbitron', 'Inter', sans-serif")
       .attr('font-size', 11).attr('letter-spacing', 3).attr('font-weight', 500)
       .attr('pointer-events', 'none')
       .text(d => d.label.toUpperCase().slice(0, 18));
 
-    nodeEls.filter(d => d.isModule).append('text')
-      .attr('y', d => Math.sin(d.angle) >= 0 ? 54 : -22)
+    nodeEls.filter(d => d.isModule).append('text').attr('class', 'msub')
       .attr('text-anchor', 'middle')
       .attr('fill', 'rgba(255,255,255,0.35)')
       .attr('font-family', "'Inter', sans-serif")
-      .attr('font-size', 8)
+      .attr('font-size', 7)
       .attr('pointer-events', 'none')
       .text(d => {
         const n = galaxy.filesByMod.get(d.id)?.length ?? 0;
         return `${n} arquivo${n === 1 ? '' : 's'}`;
       });
 
-    // File labels (only visible when zoomed — small font scales up)
-    nodeEls.filter(d => !d.isModule && d.depth === 1).append('text')
-      .attr('y', d => d.r + 11)
+    // File labels — hidden until focused
+    nodeEls.filter(d => !d.isModule && d.depth === 1).append('text').attr('class', 'flabel')
+      .attr('y', d => d.r + 9)
       .attr('text-anchor', 'middle')
-      .attr('fill', 'rgba(255,255,255,0.5)')
+      .attr('fill', 'rgba(255,255,255,0.55)')
       .attr('font-family', "'Inter', sans-serif")
-      .attr('font-size', 7)
+      .attr('font-size', 6)
+      .attr('opacity', 0)
       .attr('pointer-events', 'none')
       .text(d => {
         const name = d.label.split('/').pop() ?? d.label;
         return name.replace(/\.(ts|tsx|js|jsx|java|py|sql|kt)$/, '').slice(0, 16);
       });
 
-    // Initially: hide all file nodes and links — only modules visible
-    nodeEls.filter(d => !d.isModule).attr('opacity', 0);
+    // Position module labels (overview: outward of the node)
+    function layoutModuleLabels() {
+      nodeEls.filter(d => d.isModule).select('.mlabel')
+        .attr('x', 0)
+        .attr('y', d => Math.sin(d.labelAngle) >= 0 ? 36 : -26);
+      nodeEls.filter(d => d.isModule).select('.msub')
+        .attr('x', 0)
+        .attr('y', d => Math.sin(d.labelAngle) >= 0 ? 47 : -16);
+    }
+    layoutModuleLabels();
 
     nodeEls
       .on('mouseover', function(_ev, d) {
-        if (!d.isModule) return;
+        if (!d.isModule || focusedId) return;
         d3.select(this).select('.core').transition().duration(200).attr('r', d.r + 4);
       })
       .on('mouseout', function(_ev, d) {
@@ -384,60 +430,86 @@ export function GalaxyGraphViewer({
         d3.select(this).select('.core').transition().duration(200).attr('r', d.r);
       });
 
-    // Click module → zoom in + reveal that module's full tree
+    // ── Focus a module: pan camera so module sits at bottom-center, morph its tree up
+    function focusModule(id: string) {
+      const m = gnodes.find(n => n.id === id && n.isModule);
+      if (!m) return;
+      focusedId = id;
+      morphTarget = 1;
+
+      // camera: place module world (m.ox,m.oy) near screen bottom-center
+      const sf = FOCUS_SCALE;
+      const tx = W / 2 - m.ox * sf;
+      const ty = H * 0.84 - m.oy * sf;
+      const focusT = d3.zoomIdentity.translate(tx, ty).scale(sf);
+      mainGroup.transition().duration(1000).ease(d3.easeCubicInOut)
+        .attr('transform', focusT.toString());
+
+      // fades
+      nodeEls.filter(d => d.isModule && d.id !== id)
+        .transition().duration(550).attr('opacity', 0.06);
+      nodeEls.filter(d => !d.isModule && d.moduleId !== id)
+        .transition().duration(550).attr('opacity', 0.04);
+      nodeEls.filter(d => d.moduleId === id)
+        .transition().duration(550).attr('opacity', 1);
+
+      // focused tree: brighter links, glow orbs, show file labels
+      linkEls.transition().duration(550)
+        .attr('opacity', (lk: GLink) => lk.src.moduleId === id ? 0.85 : 0.03);
+      depEls.transition().delay(300).duration(500)
+        .attr('opacity', (lk: GLink) => lk.src.moduleId === id ? 1 : 0);
+
+      const focusNodes = nodeEls.filter(d => d.moduleId === id && !d.isModule);
+      focusNodes.select('.core')
+        .transition().duration(550)
+        .attr('r', (d: GNode) => d.r * 1.5)
+        .style('filter', 'url(#gal-glow-orb)');
+      focusNodes.filter(d => d.depth === 1).select('.flabel')
+        .transition().delay(400).duration(500).attr('opacity', 1);
+
+      setZoomedModule(m.label);
+    }
+
+    function reset() {
+      // keep focusedId until the morph eases back out; just flip the target now
+      morphTarget = 0;
+      mainGroup.transition().duration(900).ease(d3.easeCubicInOut)
+        .attr('transform', overviewT.toString());
+
+      nodeEls.transition().duration(500).attr('opacity', 1);
+      linkEls.transition().duration(500).attr('opacity', 1);
+      depEls.transition().duration(400).attr('opacity', 0);
+
+      nodeEls.filter(d => !d.isModule).select('.core')
+        .transition().duration(500)
+        .attr('r', (d: GNode) => d.r)
+        .style('filter', 'none');
+      nodeEls.filter(d => !d.isModule && d.depth === 1).select('.flabel')
+        .transition().duration(300).attr('opacity', 0);
+
+      // clear focus once the morph has settled back
+      window.setTimeout(() => { if (morphTarget === 0) focusedId = null; }, 950);
+      setZoomedModule(null);
+    }
+
+    focusModuleRef.current = focusModule;
+    resetRef.current = reset;
+
     nodeEls.filter(d => d.isModule).on('click', (_ev, d) => {
-      const scale = 3.5;
-      const tx = W / 2 - d.x * scale;
-      const ty = H * 0.84 - d.y * scale;
-
-      svg.transition().duration(1000).ease(d3.easeCubicInOut)
-        .call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
-
-      // Dim other modules
-      nodeEls.filter(nd => nd.isModule && nd.id !== d.id)
-        .transition().duration(500).attr('opacity', 0.07);
-
-      // Reveal files of clicked module
-      nodeEls.filter(nd => !nd.isModule && nd.moduleId === d.id)
-        .transition().delay(250).duration(700).attr('opacity', 1);
-
-      // Reveal tree links of clicked module
-      linkEls.filter(lk => lk.src.moduleId === d.id || lk.tgt.moduleId === d.id)
-        .transition().delay(250).duration(700).attr('opacity', 1);
-
-      // Reveal cross-module dep links touching this module's files
-      depEls.filter(lk => lk.src.moduleId === d.id || lk.tgt.moduleId === d.id)
-        .transition().delay(350).duration(600).attr('opacity', 1);
-
-      setZoomedModule(d.label);
+      if (focusedId === d.id) return;
+      focusModule(d.id);
     });
 
-    // Reset function stored in ref so resetZoom() can call it
-    resetFnRef.current = () => {
-      svg.transition().duration(800).ease(d3.easeCubicInOut)
-        .call(zoomBehavior.transform, d3.zoomIdentity);
-      // Restore all module nodes to full opacity
-      nodeEls.filter(d => d.isModule)
-        .transition().duration(500).attr('opacity', 1);
-      // Hide all file nodes and links
-      nodeEls.filter(d => !d.isModule)
-        .transition().duration(400).attr('opacity', 0);
-      linkEls.transition().duration(400).attr('opacity', 0);
-      depEls.transition().duration(400).attr('opacity', 0);
-    };
-
-    // Breathing animation
-    const ax = (d: GNode, e: number) => d.isModule ? d.x : d.x + Math.sin(e * SPEED + d.floatOffset) * FLOAT_DIST;
-    const ay = (d: GNode, e: number) => d.isModule ? d.y : d.y + Math.cos(e * SPEED * 1.2 + d.floatOffset) * FLOAT_DIST;
-
+    // Animation timer: ease morph + breathing + draw links
     timerRef.current = d3.timer(elapsed => {
-      nodeEls.attr('transform', (d: GNode) => `translate(${ax(d, elapsed)},${ay(d, elapsed)})`);
+      morphValue += (morphTarget - morphValue) * 0.08;
+      nodeEls.attr('transform', (d: GNode) => `translate(${px(d, elapsed)},${py(d, elapsed)})`);
       linkEls
-        .attr('x1', (d: GLink) => ax(d.src, elapsed)).attr('y1', (d: GLink) => ay(d.src, elapsed))
-        .attr('x2', (d: GLink) => ax(d.tgt, elapsed)).attr('y2', (d: GLink) => ay(d.tgt, elapsed));
+        .attr('x1', (d: GLink) => px(d.src, elapsed)).attr('y1', (d: GLink) => py(d.src, elapsed))
+        .attr('x2', (d: GLink) => px(d.tgt, elapsed)).attr('y2', (d: GLink) => py(d.tgt, elapsed));
       depEls
-        .attr('x1', (d: GLink) => ax(d.src, elapsed)).attr('y1', (d: GLink) => ay(d.src, elapsed))
-        .attr('x2', (d: GLink) => ax(d.tgt, elapsed)).attr('y2', (d: GLink) => ay(d.tgt, elapsed));
+        .attr('x1', (d: GLink) => px(d.src, elapsed)).attr('y1', (d: GLink) => py(d.src, elapsed))
+        .attr('x2', (d: GLink) => px(d.tgt, elapsed)).attr('y2', (d: GLink) => py(d.tgt, elapsed));
       nebulaEls
         .attr('cx', (d: typeof nebulaData[0]) => d.bx + Math.sin(elapsed * 0.0005 + d.off) * 15)
         .attr('cy', (d: typeof nebulaData[0]) => d.by + Math.cos(elapsed * 0.0007 + d.off) * 15);
@@ -447,8 +519,7 @@ export function GalaxyGraphViewer({
   }, [galaxy]);
 
   function resetZoom() {
-    if (resetFnRef.current) resetFnRef.current();
-    setZoomedModule(null);
+    if (resetRef.current) resetRef.current();
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -456,7 +527,7 @@ export function GalaxyGraphViewer({
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9999,
       background: 'radial-gradient(circle at center, #101216 0%, #050608 100%)',
-      overflow: 'hidden', cursor: 'grab',
+      overflow: 'hidden', cursor: 'default',
     }}>
       {/* Simulated star field */}
       <div style={{
@@ -467,7 +538,7 @@ export function GalaxyGraphViewer({
         `,
         backgroundSize: '550px 550px, 350px 350px',
         backgroundPosition: '0 0, 40px 60px',
-        opacity: 0.18,
+        opacity: 0.16,
       }} />
 
       {/* Top navigation */}
@@ -548,9 +619,9 @@ export function GalaxyGraphViewer({
       {/* Watermark when zoomed */}
       {zoomedModule && (
         <div style={{
-          position: 'absolute', bottom: '18%', left: 0, right: 0,
+          position: 'absolute', top: '42%', left: 0, right: 0,
           textAlign: 'center',
-          fontSize: Math.max(44, Math.min(96, window.innerWidth / 11)),
+          fontSize: Math.max(44, Math.min(110, window.innerWidth / 10)),
           fontWeight: 900, color: 'rgba(255,255,255,0.05)', letterSpacing: 18,
           pointerEvents: 'none', userSelect: 'none',
           fontFamily: "'Orbitron', 'Inter', sans-serif",
