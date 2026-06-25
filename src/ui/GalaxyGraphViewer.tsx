@@ -11,14 +11,14 @@ interface AggEdge { from: string; to: string; weight: number; resolvedWeight: nu
 interface LevelData { nodes: AggNode[]; edges: AggEdge[]; error?: string; }
 
 const MAX_MODS = 12;
-const MAX_FILES_PER_MOD = 7;   // nível 1 (arquivos diretos do módulo)
-const POOL_PER_MOD = 24;       // pool guardado p/ achar deps intra-módulo (nível 2)
-const MAX_SUBFILES = 3;        // nível 2 por arquivo
+const MAX_FILES_PER_MOD = 14;  // nível 1 (arquivos diretos do módulo)
+const POOL_PER_MOD = 36;       // pool guardado p/ achar deps intra-módulo (nível 2)
+const MAX_SUBFILES = 4;        // nível 2 por arquivo
 const MOD_RADIUS = 250;
-const FILE_DIST = 70;
-const SUBFILE_DIST = 44;
+const FILE_DIST = 120;         // distância L1 do módulo
+const SUBFILE_DIST = 85;       // distância L2 do L1
 const SPEED = 0.0015;
-const FLOAT_DIST = 6;
+const FLOAT_DIST = 5;
 
 const FILE_KINDS = new Set(['file', 'plsql', 'table', 'symbol', 'method', 'column']);
 
@@ -83,13 +83,15 @@ function buildGraph(
     const level1 = pool.slice(0, MAX_FILES_PER_MOD);
     const N1 = level1.length;
 
+    // L1 cresce em direção ao centro (angle + PI), espalhado em arco largo
+    const baseAngle = angle + Math.PI;
     level1.forEach((f, j) => {
       if (placed.has(f.id)) return;
-      const spread = Math.min(Math.PI * 0.8, 0.3 * (N1 + 1));
-      const a1 = angle + (j - (N1 - 1) / 2) * (spread / Math.max(1, N1 - 1));
-      const dist1 = FILE_DIST + (j % 3) * 16;
+      const spread = Math.min(Math.PI * 1.3, 0.45 * (N1 + 2));
+      const a1 = baseAngle + (j - (N1 - 1) / 2) * (spread / Math.max(1, N1 - 1));
+      const dist1 = FILE_DIST + (j % 3) * 22;
       const w = f.inWeight + f.outWeight;
-      const r = Math.max(3.5, Math.min(7, 3 + Math.log1p(w) * 0.8));
+      const r = Math.max(10, Math.min(16, 9 + Math.log1p(w * 0.5)));
       const gf: GNode = {
         id: f.id, label: f.label,
         x: mx + Math.cos(a1) * dist1,
@@ -111,14 +113,14 @@ function buildGraph(
       deps.forEach((depId, k) => {
         const dn = g.fileById.get(depId);
         if (!dn) return;
-        const a2 = a1 + (k - (N2 - 1) / 2) * (0.42 / Math.max(1, N2 - 1));
-        const dist2 = SUBFILE_DIST + (k % 2) * 8;
+        const a2 = a1 + (k - (N2 - 1) / 2) * (0.55 / Math.max(1, N2 - 1));
+        const dist2 = SUBFILE_DIST + (k % 2) * 15;
         const gs: GNode = {
           id: depId, label: dn.label,
           x: gf.x + Math.cos(a2) * dist2,
           y: gf.y + Math.sin(a2) * dist2,
-          isModule: false, depth: 2, r: 3,
-          color: 'rgba(255,255,255,0.7)', glowId: 'none',
+          isModule: false, depth: 2, r: 5,
+          color: 'rgba(255,255,255,0.75)', glowId: 'none',
           angle: a2, floatOffset: idSeed(depId), layer: dn.layer,
         };
         gnodes.push(gs);
@@ -366,6 +368,19 @@ export function GalaxyGraphViewer({
         return `${n} arquivo${n === 1 ? '' : 's'}`;
       });
 
+    // Labels nos arquivos L1 (visíveis ao dar zoom)
+    nodeEls.filter(d => !d.isModule && d.depth === 1).append('text')
+      .attr('y', d => d.r + 12)
+      .attr('text-anchor', 'middle')
+      .attr('fill', 'rgba(255,255,255,0.45)')
+      .attr('font-family', "'Inter', sans-serif")
+      .attr('font-size', 7)
+      .attr('pointer-events', 'none')
+      .text(d => {
+        const name = d.label.split('/').pop() ?? d.label;
+        return name.replace(/\.(ts|tsx|js|jsx|java|py|sql|kt)$/, '').slice(0, 16);
+      });
+
     // Hover
     nodeEls
       .on('mouseover', function(_ev, d) {
@@ -376,11 +391,11 @@ export function GalaxyGraphViewer({
         d3.select(this).select('.core').transition().duration(200).attr('r', d.r);
       });
 
-    // Click module → zoom camera
+    // Click module → zoom camera (módulo na base, árvore sobe)
     nodeEls.filter(d => d.isModule).on('click', (_ev, d) => {
-      const scale = 2.2;
+      const scale = 3.5;
       const tx = W / 2 - d.x * scale;
-      const ty = H * 0.75 - d.y * scale;
+      const ty = H * 0.85 - d.y * scale;
       svg.transition().duration(1000).ease(d3.easeCubicInOut)
         .call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
       setZoomedModule(d.label);
