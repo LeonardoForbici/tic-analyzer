@@ -1,7 +1,7 @@
 /**
  * Verificação da complexidade real por função sobre a AST (P0 #2), em
  * test/fixtures/complexity. Roda contra o código compilado em dist/ — execute
- * `npm run build:electron` antes (ou `npm run verify`).
+ * `npm run build:server` antes (ou `npm run verify`).
  *
  * Asserta:
  *   (a) gramáticas disponíveis
@@ -22,7 +22,7 @@ const distScan = join(root, 'dist', 'src', 'analyzer', 'scanFiles.js');
 const distTs = join(root, 'dist', 'src', 'analyzer', 'semantic', 'treeSitter.js');
 
 if (!existsSync(distAst) || !existsSync(distScan)) {
-  console.error('✗ dist não encontrado. Rode `npm run build:electron` primeiro.');
+  console.error('✗ dist não encontrado. Rode `npm run build:server` primeiro.');
   process.exit(1);
 }
 

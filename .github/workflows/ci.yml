@@ -1,8 +1,4 @@
 # CI do TIC Analyzer: build + suíte de verificação completa + smoke test da CLI.
-#
-# IMPORTANTE: nunca rodar `npm run rebuild:electron` aqui — ele recompila o
-# better-sqlite3 para a ABI do Electron e quebra a execução em Node puro.
-# O `npm ci` usa os prebuilds Node (linux-x64) que funcionam direto.
 name: CI
 
 on:

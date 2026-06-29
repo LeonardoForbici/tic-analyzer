@@ -1,7 +1,7 @@
 /**
  * Verificação da camada semântica (Fase 1) sobre o fixture em
  * test/fixtures/semantic. Roda contra o código compilado em dist/ — execute
- * `npm run build:electron` antes (ou `npm run verify` que assume dist pronto).
+ * `npm run build:server` antes (ou `npm run verify` que assume dist pronto).
  *
  * Asserta:
  *   (a) chamada Java controller→impl resolvida via interface (DI)
@@ -21,7 +21,7 @@ const distSemantic = join(root, 'dist', 'src', 'analyzer', 'semantic', 'buildSem
 const distScan = join(root, 'dist', 'src', 'analyzer', 'scanFiles.js');
 
 if (!existsSync(distSemantic) || !existsSync(distScan)) {
-  console.error('✗ dist não encontrado. Rode `npm run build:electron` primeiro.');
+  console.error('✗ dist não encontrado. Rode `npm run build:server` primeiro.');
   process.exit(1);
 }
 

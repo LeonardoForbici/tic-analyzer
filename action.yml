@@ -52,12 +52,12 @@ runs:
       shell: bash
       run: rm -f "${{ github.workspace }}/.tic-action-lock.json"
 
-    - name: Build analyzer (sem electron-builder — better-sqlite3 usa prebuild Node)
+    - name: Build analyzer
       shell: bash
       working-directory: ${{ github.action_path }}
       run: |
         npm ci --no-audit --no-fund
-        npm run build:electron
+        npm run build:server
 
     - name: Resolve merge-base
       id: mb

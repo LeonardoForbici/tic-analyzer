@@ -1,7 +1,7 @@
 /**
  * Verificação da análise temporal via git (hotspots comportamentais, change
  * coupling, bus factor). Roda contra o próprio repositório TIC, que sempre tem
- * histórico git. Usa o código compilado em dist/ — rode `npm run build:electron`
+ * histórico git. Usa o código compilado em dist/ — rode `npm run build:server`
  * antes (ou `npm run verify`, que assume dist pronto).
  *
  * Asserta:
@@ -27,7 +27,7 @@ const distModules = join(root, 'dist', 'src', 'analyzer', 'detectModules.js');
 
 for (const p of [distGit, distReport, distScan, distMetrics, distGraph, distModules]) {
   if (!existsSync(p)) {
-    console.error(`✗ dist não encontrado (${p}). Rode \`npm run build:electron\` primeiro.`);
+    console.error(`✗ dist não encontrado (${p}). Rode \`npm run build:server\` primeiro.`);
     process.exit(1);
   }
 }

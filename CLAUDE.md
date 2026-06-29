@@ -10,18 +10,17 @@ código (74k arquivos) → engine local → resumo compacto → IA (mínimo)
 
 ## Stack
 
-- **Electron** — janela nativa, distribui como .exe
-- **React + Vite** — UI do renderer
+- **Express** — servidor web local (porta 3000), serve a UI e expõe a API REST
+- **React + Vite** — UI web (SPA)
 - **TypeScript** — tudo tipado
 - **MCP SDK** — servidor para Claude Code
 
 ## Estrutura
 
 ```
-electron/
-  main.ts             ← processo principal (janela, IPC, MCP lifecycle)
-  preload.ts          ← bridge segura renderer ↔ main
 src/
+  server/
+    index.ts          ← servidor Express (porta 3000): rotas REST + SSE + serve UI
   analyzer/           ← engine de análise (puro Node.js, zero tokens)
     scanFiles.ts
     detectStack.ts
@@ -61,6 +60,7 @@ src/
     App.tsx             ← interface React (abas: Visão Geral, Saúde, Explorador, Impacto...)
     HierGraphViewer.tsx ← drill-down hierárquico (app → camadas → módulos → arquivos → símbolos)
     HealthDashboard.tsx ← gauge + breakdown + tendência (snapshots)
+    webBridge.ts        ← implementa window.ticAnalyzer via fetch + SSE (substitui preload Electron)
     main.tsx
 ```
 
@@ -69,9 +69,6 @@ src/
 ```bash
 npm run verify   # build + 18 suítes (semantic, store, crosstier, orm, impacto, graph-insights, export, communities, health, pr-review, serve, governança, vivo, valor, portfólio, incremental, ux, embeddings)
 ```
-
-NUNCA rodar `rebuild:electron` em CI — recompila o better-sqlite3 para a ABI
-do Electron e quebra a execução em Node puro.
 
 ## GitHub Action (PR review)
 
@@ -99,7 +96,7 @@ obrigatório (`Authorization: Bearer` ou `?token=` no `/events`).
 
 Regras de arquitetura ficam em `.tic-rules.json` na **raiz do projeto analisado**
 (não neste repo). Criar pela aba Governança (botão "Criar .tic-rules.json", via
-IPC `create-tic-rules` → `rulesTemplate()` em `checkArchRules.ts`) ou copiar
+API `POST /api/create-tic-rules` → `rulesTemplate()` em `checkArchRules.ts`) ou copiar
 `.tic-code/tic-rules.example.json`. O botão e o IPC **não sobrescrevem** um
 arquivo existente. Schema: `rules[].forbid` com `fromLayer/toLayer`,
 `fromModule/toModule` ou `fromPath/toPath` (glob); `severity` `error|warn`;
@@ -114,12 +111,11 @@ npm install
 npm run dev
 ```
 
-## Build
+## Build e execução
 
 ```bash
-npm run dist:win    # → release/TIC Analyzer Setup.exe
-npm run dist:mac    # → release/TIC Analyzer.dmg
-npm run dist:linux  # → release/TIC Analyzer.AppImage
+npm run build   # compila servidor + UI
+npm start       # inicia o servidor em http://localhost:3000
 ```
 
 ## MCP Server (Claude Code)
@@ -139,7 +135,7 @@ conexões surpreendentes), `get_communities` (clusters Louvain por topologia),
 `trace_flow`, `search_code` (FTS5 + vetorial fundidos via RRF), `list_modules`,
 `get_module`, `get_quick_context`. Export do grafo (standalone, fora do app):
 CLI `tic-analyzer export <path> --format html|mermaid|svg` ou botão "Exportar"
-no HierGraphViewer (HTML/Mermaid/SVG/PNG).
+no HierGraphViewer (HTML/Mermaid/SVG).
 Governança/skills (mattpocock/skills): `get_arch_rules`, `get_arch_suggestions`,
 `get_risk_prediction`, `get_agent_brief`, `get_diagnosis`, `get_zoom_out`,
 `get_out_of_scope`, `list_triage`, `update_triage`. Memória persistente:

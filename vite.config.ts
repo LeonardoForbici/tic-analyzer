@@ -9,5 +9,11 @@ export default defineConfig({
     outDir: 'dist/renderer',
     rollupOptions: { input: 'index.html' }
   },
-  server: { port: 5173 }
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': { target: 'http://localhost:3000', changeOrigin: true },
+      '/events': { target: 'http://localhost:3000', changeOrigin: true }
+    }
+  }
 });
