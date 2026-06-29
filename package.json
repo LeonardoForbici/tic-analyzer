@@ -2,23 +2,16 @@
   "name": "tic-analyzer",
   "version": "1.0.0",
   "description": "TIC Analyzer — Motor local de análise para projetos grandes",
-  "main": "dist/electron/main.js",
   "scripts": {
-    "dev": "npx concurrently \"npm run dev:renderer\" \"npm run dev:electron\"",
+    "dev": "npx concurrently \"npm run dev:renderer\" \"npm run dev:server\"",
     "dev:renderer": "vite",
-    "dev:electron": "tsc -p tsconfig.electron.json && npm run copy:grammars && electron dist/electron/main.js",
-    "build": "npm run build:renderer && npm run build:electron",
+    "dev:server": "tsc -p tsconfig.server.json && npm run copy:grammars && node dist/src/server/index.js",
+    "build": "npm run build:renderer && npm run build:server",
     "build:renderer": "vite build",
-    "build:electron": "tsc -p tsconfig.electron.json && npm run copy:grammars",
+    "build:server": "tsc -p tsconfig.server.json && npm run copy:grammars",
     "copy:grammars": "node scripts/copy-grammars.mjs",
-    "rebuild:electron": "electron-builder install-app-deps",
-    "verify": "npm run build:electron && node scripts/verify-semantic.mjs && node scripts/verify-store.mjs && node scripts/verify-crosstier.mjs && node scripts/verify-orm.mjs && node scripts/verify-impact.mjs && node scripts/verify-graph-insights.mjs && node scripts/verify-export.mjs && node scripts/verify-communities.mjs && node scripts/verify-health.mjs && node scripts/verify-pr-review.mjs && node scripts/verify-serve.mjs && node scripts/verify-governance.mjs && node scripts/verify-living.mjs && node scripts/verify-value.mjs && node scripts/verify-portfolio.mjs && node scripts/verify-incremental.mjs && node scripts/verify-ux.mjs && node scripts/verify-embeddings.mjs && node scripts/verify-git-history.mjs && node scripts/verify-ast-metrics.mjs",
-    "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:win:portable": "npm run build && electron-builder --win zip",
-    "dist:win:dir": "npm run build && electron-builder --win dir",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:linux": "npm run build && electron-builder --linux",
+    "start": "node dist/src/server/index.js",
+    "verify": "npm run build:server && node scripts/verify-semantic.mjs && node scripts/verify-store.mjs && node scripts/verify-crosstier.mjs && node scripts/verify-orm.mjs && node scripts/verify-impact.mjs && node scripts/verify-graph-insights.mjs && node scripts/verify-export.mjs && node scripts/verify-communities.mjs && node scripts/verify-health.mjs && node scripts/verify-pr-review.mjs && node scripts/verify-serve.mjs && node scripts/verify-governance.mjs && node scripts/verify-living.mjs && node scripts/verify-value.mjs && node scripts/verify-portfolio.mjs && node scripts/verify-incremental.mjs && node scripts/verify-ux.mjs && node scripts/verify-embeddings.mjs && node scripts/verify-git-history.mjs && node scripts/verify-ast-metrics.mjs",
     "cli": "node dist/src/cli/index.js"
   },
   "dependencies": {
@@ -44,37 +37,11 @@
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.2.0",
     "concurrently": "^8.2.2",
-    "electron": "^28.0.0",
-    "electron-builder": "^24.9.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tree-sitter-wasms": "^0.1.13",
     "typescript": "^5.3.2",
     "vite": "^5.0.0"
-  },
-  "build": {
-    "appId": "com.tic.analyzer",
-    "productName": "TIC Analyzer",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "node_modules/**/*"
-    ],
-    "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico",
-      "sign": false
-    },
-    "mac": {
-      "target": "dmg",
-      "icon": "assets/icon.icns"
-    },
-    "linux": {
-      "target": "AppImage",
-      "icon": "assets/icon.png"
-    }
   },
   "bin": {
     "tic-analyzer": "dist/src/cli/index.js"
