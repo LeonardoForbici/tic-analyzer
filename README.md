@@ -29,8 +29,8 @@ A ideia central: o trabalho pesado (AST, grafos, impacto, métricas, regras) é 
 
 | Camada | Tecnologia |
 |--------|-----------|
-| Desktop | Electron (.exe / .dmg / .AppImage) |
-| UI | React + Vite (canvas próprio, sem libs de grafo) |
+| Web | Express (servidor local, porta 3000) |
+| UI | React + Vite (SPA, canvas próprio, sem libs de grafo) |
 | Engine | Node.js puro + tree-sitter (WASM, offline) |
 | Índice | SQLite (better-sqlite3) + FTS5 |
 | Protocolo IA | MCP (Model Context Protocol) HTTP/SSE |
@@ -40,9 +40,9 @@ A ideia central: o trabalho pesado (AST, grafos, impacto, métricas, regras) é 
 
 ## Os 3 modos de uso
 
-### 1. App desktop (dev individual)
+### 1. App web (dev individual)
 
-1. Abrir o TIC Analyzer → selecionar a pasta raiz do projeto → **Analisar**
+1. Rodar `npm start` (ou `npm run dev` em desenvolvimento) → abrir `http://localhost:3000` → informar a pasta raiz do projeto → **Analisar**
 2. Explorar as abas: **Visão Geral · Saúde · Valor · Governança · Atividade · Explorador · Impacto · Métricas · Arquivos · Portfólio**
 3. (Opcional) **Iniciar MCP** e configurar no `.claude/settings.json` do projeto analisado:
 
@@ -156,7 +156,7 @@ Traduz a análise técnica em **tempo e dinheiro** para a liderança (aba **Valo
 - **Custo da dívida**: débito técnico → horas → dev-days → moeda (`debtScore × hoursPerDebtPoint × hourlyRate`). A aba **Valor** explica de onde vem cada ponto de dívida (complexidade, tamanho, acoplamento) e mostra **drill-down por arquivo** ("comece por estes N que concentram X% da dívida"). A **taxa-hora e moeda** (default **R$ 90/h**) podem ser ajustadas **direto no app** — os números recalculam na hora.
 - **Horas economizadas**: cada entidade cross-tier que um PR impactou e que não precisou ser rastreada à mão (estimativa conservadora) → horas/custo poupados.
 - **Ownership & bus-factor** (autoria git): quem domina cada módulo, **conhecimento em risco** (arquivo crítico com 1 só autor — se a pessoa sair, dói), dificuldade de **onboarding** por módulo e **roteamento de revisor** de PR.
-- **Relatório Executivo**: um clique gera um **PDF** (ou HTML) para a diretoria — saúde, tendência, custo da dívida, riscos e risco de conhecimento, em vocabulário de negócio.
+- **Relatório Executivo**: um clique gera um **HTML** para a diretoria — saúde, tendência, custo da dívida, riscos e risco de conhecimento, em vocabulário de negócio.
 
 ```json
 "roi": { "hourlyRate": 90, "currency": "R$", "hoursPerDebtPoint": 0.5 }
@@ -290,7 +290,7 @@ dashboard ──► saúde, drift, triagem e PRs ao longo do tempo
 
 ```bash
 npm install
-npm run dev          # Vite (5173) + Electron
+npm run dev          # Vite (:5173) + servidor Express (:3000) em paralelo
 
 npm run verify       # build + 18 suítes: semantic, store, crosstier, orm,
                      # impacto, graph-insights, export, communities,
@@ -299,14 +299,11 @@ npm run verify       # build + 18 suítes: semantic, store, crosstier, orm,
                      # ast-metrics
 ```
 
-> ⚠️ **Nunca rode `rebuild:electron` em CI** — recompila o better-sqlite3 para a ABI do Electron e quebra a execução em Node puro.
-
-## Build de distribuição
+## Build e execução
 
 ```bash
-npm run dist:win     # → release/TIC Analyzer Setup.exe
-npm run dist:mac     # → release/TIC Analyzer.dmg
-npm run dist:linux   # → release/TIC Analyzer.AppImage
+npm run build   # compila servidor + UI
+npm start       # http://localhost:3000
 ```
 
 ---
@@ -314,8 +311,8 @@ npm run dist:linux   # → release/TIC Analyzer.AppImage
 ## Arquitetura
 
 ```
-electron/            processo principal (janela, IPC, lifecycle do MCP)
 src/
+  server/            servidor Express (porta 3000): rotas REST + SSE + serve a SPA
   analyzer/          engine puro Node (zero IA): pipeline de 45 fases
     buildDependencyGraph   AST tree-sitter + resolução de símbolos
     buildImpactGraph       grafo de impacto unificado cross-tier
@@ -334,7 +331,8 @@ src/
       triageStore          fila de triagem (máquina de estados da skill)
   cli/               headless: analyze / health / pr-review / serve / export
   mcp/               MCP Server HTTP/SSE (57 tools, auth Bearer, push SSE /events, agent briefs)
-  ui/                React: Health, Governança, Explorador, Impacto
+  ui/                React SPA: Health, Governança, Explorador, Impacto
+    webBridge.ts     implementa window.ticAnalyzer via fetch + SSE
 action.yml           GitHub Action (PR review, cache incremental, issues de triagem)
 ```
 

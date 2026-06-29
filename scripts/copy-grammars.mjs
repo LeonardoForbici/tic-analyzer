@@ -5,7 +5,7 @@
  *
  * Fonte = node_modules (versões fixadas no package.json). Assim não commitamos
  * binários no git, mantendo o build 100% offline (depende só do npm install).
- * Cross-platform (Windows/mac/linux) — usado no build do Electron.
+ * Cross-platform (Windows/mac/linux).
  */
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';

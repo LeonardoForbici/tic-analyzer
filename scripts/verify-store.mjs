@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 
 const require = createRequire(import.meta.url);
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const need = (p) => { if (!existsSync(p)) { console.error(`✗ dist ausente: ${p}. Rode \`npm run build:electron\`.`); process.exit(1); } return p; };
+const need = (p) => { if (!existsSync(p)) { console.error(`✗ dist ausente: ${p}. Rode \`npm run build:server\`.`); process.exit(1); } return p; };
 
 const { writeIndexDb, openIndexDb } = require(need(join(root, 'dist/src/analyzer/store/indexDb.js')));
 const { queryImpact, queryFindPath, querySearch } = require(need(join(root, 'dist/src/mcp/queries.js')));
