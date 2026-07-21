@@ -711,7 +711,7 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
     report('graph-report', 94, 'Identificando hubs e conexões atípicas do grafo de impacto...');
     const fileToModule = new Map<string, string>();
     for (const m of modules) for (const f of m.files) fileToModule.set(f.relativePath, m.name);
-    const graphReport = generateGraphReport(ticCodeDir, projectName, impactEdges, fileToModule);
+    const graphReport = generateGraphReport(ticCodeDir, projectName, impactEdges, fileToModule, communityResult.byNode, churn ?? new Map());
     markDone('graph-report');
     report('graph-report', 100, `${graphReport.godNodes.length} god nodes, ${graphReport.surprising.length} conexões surpreendentes`);
 

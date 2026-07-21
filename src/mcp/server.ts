@@ -189,6 +189,14 @@ export class TicAnalyzerMcpServer {
           inputSchema: { type: 'object', properties: {} }
         },
         {
+          name: 'get_criticality',
+          description: 'Ranking de criticidade cross-tier: combina dependentes diretos (blast radius) + churn do git + quão "ponte" o nó é entre comunidades (Louvain) — os nós mais perigosos do grafo inteiro, não só os mais conectados. Complementa get_graph_report (god nodes é só grau de conexão).',
+          inputSchema: {
+            type: 'object',
+            properties: { limit: { type: 'number', description: 'Default 20.' } }
+          }
+        },
+        {
           name: 'get_permissions',
           description: 'Retorna a matriz de permissões: rotas × roles.',
           inputSchema: { type: 'object', properties: {} }
@@ -765,6 +773,22 @@ export class TicAnalyzerMcpServer {
         case 'get_openapi': return respond({ content: [{ type: 'text', text: this.readFile('openapi.yaml') }] });
         case 'get_gaps': return respond({ content: [{ type: 'text', text: this.readFile('gaps.md') }] });
         case 'get_graph_report': return respond(textResult(summarizeDoc(this.readFile('graph-report.md'), 'get_graph_report')));
+
+        case 'get_criticality': {
+          const { limit } = args as { limit?: number };
+          const data = this.readJson('criticality.json') as Array<{ id: string; kind: string; blastRadius: number; churn: number; bridgeScore: number; criticality: number; reasons: string[] }> | null;
+          if (!data || data.length === 0) return respond(textResult('Sem ranking de criticidade (execute a análise novamente ou o projeto ainda não tem histórico git/comunidades suficientes).'));
+          const rows = data.slice(0, limit ?? 20);
+          const lines = [
+            '## Ranking de criticidade cross-tier',
+            '*dependentes diretos + churn + ponte entre comunidades — combinado num único score 0-100*',
+            '',
+            '| Entidade | Tipo | Criticidade | Motivos |',
+            '| --- | --- | --- | --- |',
+            ...rows.map((n) => `| \`${shortId(n.id)}\` | ${n.kind} | ${n.criticality} | ${n.reasons.join(', ') || '—'} |`)
+          ];
+          return respond(textResult(lines.join('\n')));
+        }
         case 'get_permissions': return respond({ content: [{ type: 'text', text: this.readFile('permissions.md') }] });
         case 'get_inheritance': return respond({ content: [{ type: 'text', text: this.readFile('inheritance.md') }] });
 
