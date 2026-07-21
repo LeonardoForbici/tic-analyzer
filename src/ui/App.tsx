@@ -10,6 +10,7 @@ import { MemoryViewer } from './MemoryViewer';
 import { MeetingsViewer } from './MeetingsViewer';
 import { SearchCodeViewer } from './SearchCodeViewer';
 import { HttpFlowsViewer } from './HttpFlowsViewer';
+import { Icon } from './Icon';
 
 declare global {
   interface Window {
@@ -127,7 +128,7 @@ const C = {
 };
 
 const F = {
-  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  headline: "'Geist Sans', 'Inter', system-ui, sans-serif",
   body: "'Inter', system-ui, sans-serif",
   code: "'JetBrains Mono', monospace",
 };
@@ -142,25 +143,6 @@ function buildImpactText(file: string, entry: ImpactEntry | undefined): string {
     ...entry.direct.slice(0, 6).map((f) => `     • ${f}`),
     entry.directCount > 6 ? `     ... +${entry.directCount - 6} diretos` : '',
   ].filter(Boolean).join('\n') + '\n';
-}
-
-// ── Icon helper ───────────────────────────────────────────────────────────────
-function Icon({ name, size = 20, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
-  return (
-    <span
-      className="material-symbols-outlined"
-      style={{
-        fontSize: `${size}px`,
-        color: color,
-        fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
-        lineHeight: 1,
-        display: 'inline-flex',
-        alignItems: 'center',
-      }}
-    >
-      {name}
-    </span>
-  );
 }
 
 // ── TokenMonitor ─────────────────────────────────────────────────────────────
@@ -923,6 +905,8 @@ function DocsTab() {
 }
 
 // ── SideNav ───────────────────────────────────────────────────────────────────
+const SIDENAV_WIDTH = '256px';
+
 const NAV_ITEMS: Array<{ id: Tab; label: string; icon: string; requiresDone?: boolean }> = [
   { id: 'overview',    label: 'Visão Geral',  icon: 'dashboard' },
   { id: 'health',      label: 'Saúde',        icon: 'health_metrics',    requiresDone: true },
@@ -952,7 +936,7 @@ function SideNav({ activeTab, onTabChange, isDone }: {
       position: 'fixed',
       left: 0,
       top: 0,
-      width: '256px',
+      width: SIDENAV_WIDTH,
       height: '100vh',
       background: C.surfaceContainerLow,
       boxShadow: '2px 0 24px rgba(30, 41, 59, 0.06)',
@@ -963,14 +947,14 @@ function SideNav({ activeTab, onTabChange, isDone }: {
       overflowY: 'auto',
     }}>
       {/* Logo */}
-      <div style={{ padding: '8px 24px 24px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: C.surfaceContainerHigh, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${C.outlineVariant}` }}>
-            <Icon name="architecture" size={18} color={C.primaryFixedDim} fill={1} />
-          </div>
-          <span style={{ fontFamily: F.headline, fontSize: '18px', fontWeight: 700, color: C.primary }}>TIC Analyzer</span>
+      <div style={{ padding: '8px 24px 24px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: C.surfaceContainerHigh, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${C.outlineVariant}`, flexShrink: 0 }}>
+          <Icon name="architecture" size={18} color={C.primaryFixedDim} fill={1} />
         </div>
-        <span style={{ fontFamily: F.code, fontSize: '11px', color: C.onSurfaceVariant, paddingLeft: '42px' }}>V2.4.0-Stable</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+          <span style={{ fontFamily: F.headline, fontSize: '18px', fontWeight: 700, color: C.primary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>TIC Analyzer</span>
+          <span style={{ fontFamily: F.code, fontSize: '11px', color: C.onSurfaceVariant }}>V2.4.0-Stable</span>
+        </div>
       </div>
 
       {/* Nav Items */}
@@ -998,9 +982,13 @@ function SideNav({ activeTab, onTabChange, isDone }: {
                 fontSize: '14px',
                 fontWeight: isActive ? 600 : 500,
                 textAlign: 'left',
-                transition: 'all 0.15s',
+                transition: 'background 0.15s, box-shadow 0.15s, color 0.15s, transform 0.1s',
                 opacity: isDisabled ? 0.4 : 1,
+                overflow: 'hidden',
+                width: '100%',
               }}
+              onMouseEnter={(e) => { if (!isActive && !isDisabled) e.currentTarget.style.background = C.surfaceContainerHigh; }}
+              onMouseLeave={(e) => { if (!isActive && !isDisabled) e.currentTarget.style.background = 'transparent'; }}
             >
               <Icon
                 name={item.icon}
@@ -1008,7 +996,7 @@ function SideNav({ activeTab, onTabChange, isDone }: {
                 color={isActive ? '#ffffff' : isDisabled ? C.outlineVariant : C.onSurfaceVariant}
                 fill={isActive ? 1 : 0}
               />
-              {item.label}
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
             </button>
           );
         })}
@@ -1045,7 +1033,7 @@ function TopBar({ projectPath, mcpRunning, liveMode, liveStatus, onToggleLive, o
       position: 'fixed',
       top: 0,
       right: 0,
-      left: '256px',
+      left: SIDENAV_WIDTH,
       height: '64px',
       background: `${C.bg}cc`,
       backdropFilter: 'blur(12px)',
@@ -1568,7 +1556,7 @@ export function App() {
       />
 
       {/* Main content */}
-      <main style={{ marginLeft: '256px', paddingTop: '64px', minHeight: '100vh' }}>
+      <main style={{ marginLeft: SIDENAV_WIDTH, paddingTop: '64px', minHeight: '100vh' }}>
         <div style={{ padding: '24px', maxWidth: '1400px' }}>
 
           {/* Project picker — always visible */}
@@ -1672,37 +1660,37 @@ export function App() {
               )}
 
               {activeTab === 'health' && (
-                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
+                <div className="tic-fade-in" style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <HealthDashboard ticCodeDir={result!.outputPath} />
                 </div>
               )}
 
               {activeTab === 'value' && (
-                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
+                <div className="tic-fade-in" style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <ValueDashboard ticCodeDir={result!.outputPath} projectPath={projectPath} />
                 </div>
               )}
 
               {activeTab === 'governance' && (
-                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
+                <div className="tic-fade-in" style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <GovernanceDashboard ticCodeDir={result!.outputPath} projectPath={projectPath} />
                 </div>
               )}
 
               {activeTab === 'skills' && (
-                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
+                <div className="tic-fade-in" style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <SkillsConsole projectPath={projectPath} />
                 </div>
               )}
 
               {activeTab === 'activity' && (
-                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
+                <div className="tic-fade-in" style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <ActivityFeed ticCodeDir={result!.outputPath} projectPath={projectPath} />
                 </div>
               )}
 
               {activeTab === 'explorer' && (
-                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
+                <div className="tic-fade-in" style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <div style={{ marginBottom: '16px' }}>
                     <div style={{ fontFamily: F.headline, fontWeight: 600, fontSize: '20px', marginBottom: '4px', color: C.onSurface }}>Explorador Hierárquico</div>
                     <div style={{ fontSize: '13px', color: C.onSurfaceVariant }}>Aplicação → Camadas → Módulos → Arquivos → Símbolos · peso da aresta = nº de dependências agregadas</div>
@@ -1712,19 +1700,19 @@ export function App() {
               )}
 
               {activeTab === 'search' && (
-                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
+                <div className="tic-fade-in" style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <SearchCodeViewer projectPath={projectPath} />
                 </div>
               )}
 
               {activeTab === 'memory' && (
-                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
+                <div className="tic-fade-in" style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <MemoryViewer ticCodeDir={result!.outputPath} />
                 </div>
               )}
 
               {activeTab === 'meetings' && (
-                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
+                <div className="tic-fade-in" style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <MeetingsViewer projectPath={projectPath} />
                 </div>
               )}
@@ -1734,19 +1722,19 @@ export function App() {
               )}
 
               {activeTab === 'impact' && (
-                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
+                <div className="tic-fade-in" style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <ImpactTab ticCodeDir={result!.outputPath} projectPath={projectPath} />
                 </div>
               )}
 
               {activeTab === 'metrics' && (
-                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
+                <div className="tic-fade-in" style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <MetricsTab ticCodeDir={result!.outputPath} />
                 </div>
               )}
 
               {activeTab === 'files' && (
-                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
+                <div className="tic-fade-in" style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <div style={{ marginBottom: '16px' }}>
                     <div style={{ fontFamily: F.headline, fontWeight: 600, fontSize: '20px', color: C.onSurface }}>Artefatos Gerados</div>
                     <div style={{ fontSize: '13px', color: C.onSurfaceVariant, marginTop: '4px' }}>Pasta <code style={{ fontFamily: F.code, color: C.primaryFixedDim }}>.tic-code/</code> com todos os arquivos gerados pela análise</div>

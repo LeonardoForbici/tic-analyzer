@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { SkillsOverview } from './App';
+import { Icon } from './Icon';
 
 /**
  * Console de Skills de Engenharia (github.com/mattpocock/skills).
@@ -22,18 +23,9 @@ const C = {
   purple: '#7c3aed',
 };
 const F = {
-  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  headline: "'Geist Sans', 'Inter', system-ui, sans-serif",
   body: "'Inter', system-ui, sans-serif", code: "'JetBrains Mono', monospace",
 };
-
-function Icon({ name, size = 18, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
-  return (
-    <span className="material-symbols-outlined" style={{
-      fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center',
-      fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
-    }}>{name}</span>
-  );
-}
 
 // ── Mini-renderer de markdown (dependency-free) ──────────────────────────────────
 // Cobre o subconjunto que as skills emitem: headings, **bold**, `code`, listas,
@@ -189,8 +181,10 @@ function GenPanel({ projectPath, skill }: { projectPath: string; skill: SkillId 
             style={{ flex: 1, minWidth: 220, padding: '9px 12px', background: C.surfaceContainerHigh, border: `1px solid ${C.outlineVariant}`, borderRadius: 8, color: C.onSurface, fontFamily: F.code, fontSize: 12.5, outline: 'none' }} />
         )}
         <button onClick={run} disabled={loading || (skill !== 'zoom-out' && !entity.trim())}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 16px', background: C.primaryFixedDim, border: 'none', borderRadius: 8, color: '#00363a', fontWeight: 700, fontSize: 13, fontFamily: F.body, cursor: loading || (skill !== 'zoom-out' && !entity.trim()) ? 'not-allowed' : 'pointer', opacity: loading || (skill !== 'zoom-out' && !entity.trim()) ? 0.5 : 1 }}>
-          <Icon name={loading ? 'progress_activity' : 'bolt'} size={16} color="#00363a" />
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 16px', background: C.primaryFixedDim, border: 'none', borderRadius: 8, color: '#ffffff', fontWeight: 700, fontSize: 13, fontFamily: F.body, cursor: loading || (skill !== 'zoom-out' && !entity.trim()) ? 'not-allowed' : 'pointer', opacity: loading || (skill !== 'zoom-out' && !entity.trim()) ? 0.5 : 1 }}>
+          {loading
+            ? <span style={{ animation: 'spin 1s linear infinite', display: 'inline-flex' }}><Icon name="progress_activity" size={16} color="#ffffff" /></span>
+            : <Icon name="bolt" size={16} color="#ffffff" />}
           {loading ? 'gerando…' : 'gerar'}
         </button>
       </div>

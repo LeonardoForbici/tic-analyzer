@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { SvgLineChart } from './charts/SvgLineChart';
+import { Icon } from './Icon';
 
 interface Breakdown { penalty: number; raw: number; max: number; }
 interface Snapshot {
@@ -28,19 +29,10 @@ const C = {
   outline: '#94a3b8', outlineVariant: '#e2e8f0',
 };
 const F = {
-  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  headline: "'Geist Sans', 'Inter', system-ui, sans-serif",
   body: "'Inter', system-ui, sans-serif",
   code: "'JetBrains Mono', monospace",
 };
-
-function Icon({ name, size = 20, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
-  return (
-    <span className="material-symbols-outlined" style={{
-      fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center',
-      fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
-    }}>{name}</span>
-  );
-}
 
 const DIM_META: Record<string, {
   label: string; icon: string; color: string;

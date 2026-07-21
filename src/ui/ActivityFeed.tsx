@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Icon } from './Icon';
 
 export interface ActivityEvent {
   ts: string;
@@ -21,7 +22,7 @@ const C = {
   outline: '#94a3b8', outlineVariant: '#e2e8f0',
 };
 const F = {
-  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  headline: "'Geist Sans', 'Inter', system-ui, sans-serif",
   body: "'Inter', system-ui, sans-serif",
   code: "'JetBrains Mono', monospace",
 };
@@ -45,15 +46,6 @@ const TYPE_META: Record<string, { icon: string; color: string }> = {
   'alert-sent': { icon: 'notifications', color: C.primaryFixedDim },
   'memory-contradiction': { icon: 'psychology_alt', color: C.error },
 };
-
-function Icon({ name, size = 20, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
-  return (
-    <span className="material-symbols-outlined" style={{
-      fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center',
-      fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
-    }}>{name}</span>
-  );
-}
 
 function relativeTime(ts: string): string {
   const diff = Date.now() - new Date(ts).getTime();

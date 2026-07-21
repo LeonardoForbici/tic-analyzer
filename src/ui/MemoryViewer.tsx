@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Icon } from './Icon';
 
 /** Espelha GithubLink de src/analyzer/store/memoryStore.ts */
 interface GithubLink {
@@ -39,7 +40,7 @@ const C = {
   purple: '#7c3aed',
 };
 const F = {
-  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  headline: "'Geist Sans', 'Inter', system-ui, sans-serif",
   body: "'Inter', system-ui, sans-serif", code: "'JetBrains Mono', monospace",
 };
 
@@ -55,15 +56,6 @@ const RESULT_META: Record<string, { color: string; label: string }> = {
   failed:  { color: C.error, label: 'falhou' },
   unknown: { color: C.outline, label: '—' },
 };
-
-function Icon({ name, size = 18, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
-  return (
-    <span className="material-symbols-outlined" style={{
-      fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center',
-      fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
-    }}>{name}</span>
-  );
-}
 
 function relativeTime(ts: string): string {
   const diff = Date.now() - new Date(ts).getTime();
@@ -124,7 +116,7 @@ export function MemoryViewer({ ticCodeDir }: { ticCodeDir: string }) {
     padding: '4px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: F.code,
     background: active ? C.primaryFixedDim : C.surfaceContainerHigh,
     border: `1px solid ${active ? C.primaryFixedDim : C.outlineVariant}`,
-    color: active ? '#00363a' : C.onSurfaceVariant, fontWeight: active ? 700 : 400,
+    color: active ? '#ffffff' : C.onSurfaceVariant, fontWeight: active ? 700 : 400,
   });
 
   return (

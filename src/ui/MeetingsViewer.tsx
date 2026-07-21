@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Icon } from './Icon';
 
 type DecisionType = 'decision' | 'action-item' | 'risk-flagged' | 'out-of-scope';
 
@@ -25,7 +26,7 @@ const C = {
   purple: '#7c3aed',
 };
 const F = {
-  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  headline: "'Geist Sans', 'Inter', system-ui, sans-serif",
   body: "'Inter', system-ui, sans-serif", code: "'JetBrains Mono', monospace",
 };
 
@@ -35,12 +36,6 @@ const TYPE_META: Record<DecisionType, { label: string; color: string }> = {
   'risk-flagged': { label: 'risco', color: C.error },
   'out-of-scope': { label: 'fora de escopo', color: C.purple },
 };
-
-function Icon({ name, size = 18, color }: { name: string; size?: number; color?: string }) {
-  return (
-    <span className="material-symbols-outlined" style={{ fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center' }}>{name}</span>
-  );
-}
 
 const inputStyle: React.CSSProperties = {
   padding: '6px 10px', background: C.surfaceContainerHigh, border: `1px solid ${C.outlineVariant}`,
@@ -157,7 +152,7 @@ export function MeetingsViewer({ projectPath }: { projectPath: string }) {
             onClick={submit}
             disabled={submitting}
             style={{ padding: '8px 20px', background: C.primaryFixedDim, border: 'none', borderRadius: 6,
-              color: '#00363a', fontWeight: 700, fontSize: 13, cursor: submitting ? 'wait' : 'pointer', opacity: submitting ? 0.6 : 1 }}
+              color: '#ffffff', fontWeight: 700, fontSize: 13, cursor: submitting ? 'wait' : 'pointer', opacity: submitting ? 0.6 : 1 }}
           >
             {submitting ? 'Registrando…' : 'Registrar reunião'}
           </button>

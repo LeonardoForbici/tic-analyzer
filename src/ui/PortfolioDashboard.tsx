@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { SvgBarChart } from './charts/SvgBarChart';
+import { Icon } from './Icon';
 
 const C = {
   bg: '#e9edf5', surfaceContainer: '#ffffff', surfaceContainerLow: '#ffffff',
@@ -11,7 +12,7 @@ const C = {
   outline: '#94a3b8', outlineVariant: '#e2e8f0',
 };
 const F = {
-  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  headline: "'Geist Sans', 'Inter', system-ui, sans-serif",
   body: "'Inter', system-ui, sans-serif",
   code: "'JetBrains Mono', monospace",
 };
@@ -22,15 +23,6 @@ interface ProjectSummary {
   totalFiles: number; totalLines: number;
   risks: { total: number; critical: number; high: number };
   archErrors: number; debtCost: number | null; currency: string; hoursSaved: number | null;
-}
-
-function Icon({ name, size = 20, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
-  return (
-    <span className="material-symbols-outlined" style={{
-      fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center',
-      fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
-    }}>{name}</span>
-  );
 }
 
 const scoreColor = (s: number | null) =>
@@ -107,9 +99,11 @@ export function PortfolioDashboard() {
         <button onClick={addProject} disabled={busy}
           style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
             background: C.primaryFixedDim, border: 'none', borderRadius: 8,
-            color: '#00363a', cursor: busy ? 'wait' : 'pointer', fontFamily: F.code, fontSize: 12, fontWeight: 700,
+            color: '#ffffff', cursor: busy ? 'wait' : 'pointer', fontFamily: F.code, fontSize: 12, fontWeight: 700,
             opacity: busy ? 0.7 : 1 }}>
-          <Icon name={busy ? 'progress_activity' : 'add'} size={15} color="#00363a" />
+          {busy
+            ? <span style={{ animation: 'spin 1s linear infinite', display: 'inline-flex' }}><Icon name="progress_activity" size={15} color="#ffffff" /></span>
+            : <Icon name="add" size={15} color="#ffffff" />}
           {busy ? 'Analisando…' : 'Adicionar projeto'}
         </button>
       </div>

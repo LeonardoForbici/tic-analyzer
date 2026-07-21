@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { SearchCodeResponse, SearchHitUI } from './App';
+import { Icon } from './Icon';
 
 const C = {
   surfaceContainerLow: '#ffffff', surfaceContainer: '#ffffff', surfaceContainerHigh: '#f2f5fb',
@@ -8,7 +9,7 @@ const C = {
   purple: '#7c3aed',
 };
 const F = {
-  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  headline: "'Geist Sans', 'Inter', system-ui, sans-serif",
   body: "'Inter', system-ui, sans-serif", code: "'JetBrains Mono', monospace",
 };
 
@@ -23,15 +24,6 @@ const MODE_LABEL: Record<string, string> = {
   fts: 'FTS5/BM25 (embeddings off)',
   empty: '', short: '',
 };
-
-function Icon({ name, size = 18, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
-  return (
-    <span className="material-symbols-outlined" style={{
-      fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center',
-      fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
-    }}>{name}</span>
-  );
-}
 
 export function SearchCodeViewer({ projectPath }: { projectPath: string }) {
   const [query, setQuery] = useState('');
@@ -81,7 +73,7 @@ export function SearchCodeViewer({ projectPath }: { projectPath: string }) {
         </div>
         <button onClick={run} disabled={loading || !query.trim()}
           style={{ padding: '0 20px', background: C.primaryFixedDim, border: 'none', borderRadius: 8,
-            color: '#00363a', cursor: loading || !query.trim() ? 'default' : 'pointer',
+            color: '#ffffff', cursor: loading || !query.trim() ? 'default' : 'pointer',
             fontWeight: 700, fontFamily: F.code, fontSize: 13, opacity: loading || !query.trim() ? 0.5 : 1 }}>
           {loading ? '…' : 'Buscar'}
         </button>
