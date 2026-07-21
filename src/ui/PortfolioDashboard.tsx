@@ -2,13 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { SvgBarChart } from './charts/SvgBarChart';
 
 const C = {
-  bg: '#0b1326', surfaceContainer: '#171f33', surfaceContainerLow: '#131b2e',
-  surfaceContainerHigh: '#222a3d', surfaceContainerHighest: '#2d3449',
-  primary: '#dbfcff', primaryFixedDim: '#00dbe9', primaryFixed: '#7df4ff',
-  secondary: '#4edea3', error: '#ffb4ab',
-  tertiaryFixedDim: '#ffb95f',
-  onSurface: '#dae2fd', onSurfaceVariant: '#b9cacb',
-  outline: '#849495', outlineVariant: '#3b494b',
+  bg: '#e9edf5', surfaceContainer: '#ffffff', surfaceContainerLow: '#ffffff',
+  surfaceContainerHigh: '#f2f5fb', surfaceContainerHighest: '#e6ebf3',
+  primary: '#111827', primaryFixedDim: '#2563eb', primaryFixed: '#93c5fd',
+  secondary: '#16a34a', error: '#dc2626',
+  tertiaryFixedDim: '#d97706',
+  onSurface: '#1e293b', onSurfaceVariant: '#64748b',
+  outline: '#94a3b8', outlineVariant: '#e2e8f0',
 };
 const F = {
   headline: "'Geist', 'Inter', system-ui, sans-serif",

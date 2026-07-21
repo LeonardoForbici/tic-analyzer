@@ -12,13 +12,13 @@ export interface ActivityEvent {
 interface Accuracy { confirmed: number; total: number; hitRate: number; }
 
 const C = {
-  bg: '#0b1326', surfaceContainer: '#171f33', surfaceContainerLow: '#131b2e',
-  surfaceContainerHigh: '#222a3d', surfaceContainerHighest: '#2d3449',
-  primary: '#dbfcff', primaryFixedDim: '#00dbe9', primaryFixed: '#7df4ff',
-  secondary: '#4edea3', error: '#ffb4ab',
-  tertiaryFixedDim: '#ffb95f',
-  onSurface: '#dae2fd', onSurfaceVariant: '#b9cacb',
-  outline: '#849495', outlineVariant: '#3b494b',
+  bg: '#e9edf5', surfaceContainer: '#ffffff', surfaceContainerLow: '#ffffff',
+  surfaceContainerHigh: '#f2f5fb', surfaceContainerHighest: '#e6ebf3',
+  primary: '#111827', primaryFixedDim: '#2563eb', primaryFixed: '#93c5fd',
+  secondary: '#16a34a', error: '#dc2626',
+  tertiaryFixedDim: '#d97706',
+  onSurface: '#1e293b', onSurfaceVariant: '#64748b',
+  outline: '#94a3b8', outlineVariant: '#e2e8f0',
 };
 const F = {
   headline: "'Geist', 'Inter', system-ui, sans-serif",
@@ -38,7 +38,7 @@ const TYPE_META: Record<string, { icon: string; color: string }> = {
   'health-down': { icon: 'trending_down', color: C.error },
   'risk-new': { icon: 'warning', color: C.tertiaryFixedDim },
   'rule-violation': { icon: 'gavel', color: C.tertiaryFixedDim },
-  'triage-new': { icon: 'inbox', color: '#9d8cff' },
+  'triage-new': { icon: 'inbox', color: '#7c3aed' },
   'module-added': { icon: 'add_circle', color: C.secondary },
   'module-removed': { icon: 'remove_circle', color: C.error },
   'prediction-confirmed': { icon: 'target', color: C.secondary },

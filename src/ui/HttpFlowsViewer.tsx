@@ -8,10 +8,10 @@ interface HttpFlow {
 }
 
 const C = {
-  bg: '#0b1326', surfaceContainerLow: '#131b2e', surfaceContainer: '#171f33',
-  surfaceContainerHigh: '#222a3d', primary: '#dbfcff', primaryFixedDim: '#00dbe9',
-  secondary: '#4edea3', error: '#ffb4ab', tertiaryFixedDim: '#ffb95f',
-  onSurface: '#dae2fd', onSurfaceVariant: '#b9cacb', outline: '#849495', outlineVariant: '#3b494b',
+  bg: '#e9edf5', surfaceContainerLow: '#ffffff', surfaceContainer: '#ffffff',
+  surfaceContainerHigh: '#f2f5fb', primary: '#111827', primaryFixedDim: '#2563eb',
+  secondary: '#16a34a', error: '#dc2626', tertiaryFixedDim: '#d97706',
+  onSurface: '#1e293b', onSurfaceVariant: '#64748b', outline: '#94a3b8', outlineVariant: '#e2e8f0',
 };
 const F = {
   headline: "'Geist', 'Inter', system-ui, sans-serif",

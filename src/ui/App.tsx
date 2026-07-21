@@ -95,35 +95,35 @@ export interface SearchCodeResponse { hits?: SearchHitUI[]; mode?: string; error
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
 type Tab = 'overview' | 'health' | 'value' | 'governance' | 'skills' | 'activity' | 'explorer' | 'search' | 'memory' | 'meetings' | 'impact' | 'metrics' | 'files' | 'portfolio' | 'docs' | 'http';
 
-// ── Design System ─────────────────────────────────────────────────────────────
+// ── Design System — neumórfico claro, cards macios, acento azul ──────────────
 const C = {
-  bg: '#0b1326',
-  surface: '#0b1326',
-  surfaceContainer: '#171f33',
-  surfaceContainerLow: '#131b2e',
-  surfaceContainerHigh: '#222a3d',
-  surfaceContainerHighest: '#2d3449',
-  surfaceVariant: '#2d3449',
-  surfaceBright: '#31394d',
-  surfaceDim: '#0b1326',
-  surfaceContainerLowest: '#060e20',
-  primary: '#dbfcff',
-  primaryFixedDim: '#00dbe9',
-  primaryFixed: '#7df4ff',
-  secondary: '#4edea3',
-  secondaryFixedDim: '#4edea3',
-  error: '#ffb4ab',
-  errorContainer: '#93000a',
-  tertiary: '#fff3ea',
-  tertiaryFixedDim: '#ffb95f',
-  tertiaryFixed: '#ffddb8',
-  onSurface: '#dae2fd',
-  onSurfaceVariant: '#b9cacb',
-  outline: '#849495',
-  outlineVariant: '#3b494b',
-  onPrimary: '#00363a',
-  onSecondary: '#003824',
-  onError: '#690005',
+  bg: '#e9edf5',
+  surface: '#e9edf5',
+  surfaceContainer: '#ffffff',
+  surfaceContainerLow: '#ffffff',
+  surfaceContainerHigh: '#f2f5fb',
+  surfaceContainerHighest: '#e6ebf3',
+  surfaceVariant: '#e6ebf3',
+  surfaceBright: '#ffffff',
+  surfaceDim: '#dbe2ec',
+  surfaceContainerLowest: '#dbe2ec',
+  primary: '#111827',
+  primaryFixedDim: '#2563eb',
+  primaryFixed: '#93c5fd',
+  secondary: '#16a34a',
+  secondaryFixedDim: '#16a34a',
+  error: '#dc2626',
+  errorContainer: '#fee2e2',
+  tertiary: '#fef3e2',
+  tertiaryFixedDim: '#d97706',
+  tertiaryFixed: '#fed7aa',
+  onSurface: '#1e293b',
+  onSurfaceVariant: '#64748b',
+  outline: '#94a3b8',
+  outlineVariant: '#e2e8f0',
+  onPrimary: '#ffffff',
+  onSecondary: '#ffffff',
+  onError: '#ffffff',
 };
 
 const F = {
@@ -434,7 +434,7 @@ function ImpactTab({ ticCodeDir, projectPath }: { ticCodeDir: string; projectPat
 }
 
 // ── CrossTierImpactView ────────────────────────────────────────────────────────
-const KIND_COLORS: Record<string, string> = { file: C.primaryFixedDim, method: '#9d8cff', plsql: C.tertiaryFixedDim, table: C.secondary, column: '#4ecdc4' };
+const KIND_COLORS: Record<string, string> = { file: C.primaryFixedDim, method: '#7c3aed', plsql: C.tertiaryFixedDim, table: C.secondary, column: '#4ecdc4' };
 const KIND_LABELS: Record<string, string> = { file: 'arquivo', method: 'método', plsql: 'PL/SQL', table: 'tabela', column: 'coluna' };
 
 function shortImpactId(id: string): string {
@@ -954,8 +954,8 @@ function SideNav({ activeTab, onTabChange, isDone }: {
       top: 0,
       width: '256px',
       height: '100vh',
-      background: C.bg,
-      borderRight: `1px solid ${C.outlineVariant}`,
+      background: C.surfaceContainerLow,
+      boxShadow: '2px 0 24px rgba(30, 41, 59, 0.06)',
       display: 'flex',
       flexDirection: 'column',
       padding: '16px 0',
@@ -988,15 +988,15 @@ function SideNav({ activeTab, onTabChange, isDone }: {
                 alignItems: 'center',
                 gap: '12px',
                 padding: '10px 16px',
-                borderRadius: '6px',
-                background: isActive ? `${C.primaryFixedDim}18` : 'transparent',
-                border: isActive ? `1px solid ${C.primaryFixedDim}40` : '1px solid transparent',
-                borderRight: isActive ? `2px solid ${C.primaryFixedDim}` : '2px solid transparent',
-                color: isActive ? C.primaryFixedDim : isDisabled ? C.outlineVariant : C.onSurfaceVariant,
+                borderRadius: '10px',
+                background: isActive ? `linear-gradient(135deg, ${C.primaryFixedDim}, #1d4ed8)` : 'transparent',
+                border: '1px solid transparent',
+                boxShadow: isActive ? '0 4px 14px rgba(37, 99, 235, 0.28)' : 'none',
+                color: isActive ? '#ffffff' : isDisabled ? C.outlineVariant : C.onSurfaceVariant,
                 cursor: isDisabled ? 'not-allowed' : 'pointer',
                 fontFamily: F.body,
                 fontSize: '14px',
-                fontWeight: isActive ? 600 : 400,
+                fontWeight: isActive ? 600 : 500,
                 textAlign: 'left',
                 transition: 'all 0.15s',
                 opacity: isDisabled ? 0.4 : 1,
@@ -1005,7 +1005,7 @@ function SideNav({ activeTab, onTabChange, isDone }: {
               <Icon
                 name={item.icon}
                 size={20}
-                color={isActive ? C.primaryFixedDim : isDisabled ? C.outlineVariant : C.onSurfaceVariant}
+                color={isActive ? '#ffffff' : isDisabled ? C.outlineVariant : C.onSurfaceVariant}
                 fill={isActive ? 1 : 0}
               />
               {item.label}
@@ -1268,7 +1268,7 @@ function OverviewTab({ result, mcpRunning, mcpPort, tokenStats, onToggleMcp, onO
           padding: 24, position: 'relative', overflow: 'hidden', display: 'flex', gap: 24, alignItems: 'center' }}>
           {/* Hex-grid ambient bg */}
           <div style={{ position: 'absolute', inset: 0, opacity: 0.03, backgroundImage:
-            'repeating-linear-gradient(60deg, transparent, transparent 20px, #dae2fd 20px, #dae2fd 21px)',
+            `repeating-linear-gradient(60deg, transparent, transparent 20px, ${C.onSurface} 20px, ${C.onSurface} 21px)`,
             pointerEvents: 'none' }} />
           <div style={{ flex: 1, zIndex: 1 }}>
             <span style={{ fontFamily: F.code, fontSize: 10, color: C.outline, letterSpacing: '0.1em',
@@ -1672,37 +1672,37 @@ export function App() {
               )}
 
               {activeTab === 'health' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <HealthDashboard ticCodeDir={result!.outputPath} />
                 </div>
               )}
 
               {activeTab === 'value' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <ValueDashboard ticCodeDir={result!.outputPath} projectPath={projectPath} />
                 </div>
               )}
 
               {activeTab === 'governance' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <GovernanceDashboard ticCodeDir={result!.outputPath} projectPath={projectPath} />
                 </div>
               )}
 
               {activeTab === 'skills' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <SkillsConsole projectPath={projectPath} />
                 </div>
               )}
 
               {activeTab === 'activity' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <ActivityFeed ticCodeDir={result!.outputPath} projectPath={projectPath} />
                 </div>
               )}
 
               {activeTab === 'explorer' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <div style={{ marginBottom: '16px' }}>
                     <div style={{ fontFamily: F.headline, fontWeight: 600, fontSize: '20px', marginBottom: '4px', color: C.onSurface }}>Explorador Hierárquico</div>
                     <div style={{ fontSize: '13px', color: C.onSurfaceVariant }}>Aplicação → Camadas → Módulos → Arquivos → Símbolos · peso da aresta = nº de dependências agregadas</div>
@@ -1712,19 +1712,19 @@ export function App() {
               )}
 
               {activeTab === 'search' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <SearchCodeViewer projectPath={projectPath} />
                 </div>
               )}
 
               {activeTab === 'memory' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <MemoryViewer ticCodeDir={result!.outputPath} />
                 </div>
               )}
 
               {activeTab === 'meetings' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <MeetingsViewer projectPath={projectPath} />
                 </div>
               )}
@@ -1734,19 +1734,19 @@ export function App() {
               )}
 
               {activeTab === 'impact' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <ImpactTab ticCodeDir={result!.outputPath} projectPath={projectPath} />
                 </div>
               )}
 
               {activeTab === 'metrics' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <MetricsTab ticCodeDir={result!.outputPath} />
                 </div>
               )}
 
               {activeTab === 'files' && (
-                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                <div style={{ background: C.surfaceContainerLow, borderRadius: '20px', padding: '24px', boxShadow: '0 8px 30px rgba(30, 41, 59, 0.06)' }}>
                   <div style={{ marginBottom: '16px' }}>
                     <div style={{ fontFamily: F.headline, fontWeight: 600, fontSize: '20px', color: C.onSurface }}>Artefatos Gerados</div>
                     <div style={{ fontSize: '13px', color: C.onSurfaceVariant, marginTop: '4px' }}>Pasta <code style={{ fontFamily: F.code, color: C.primaryFixedDim }}>.tic-code/</code> com todos os arquivos gerados pela análise</div>
