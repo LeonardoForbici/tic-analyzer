@@ -171,6 +171,46 @@ app.post('/api/select-folder', (req: Request, res: Response) => {
   res.json(clean.endsWith('.tic-code') ? path.dirname(clean) : clean);
 });
 
+// fs-list: navegador de pastas de verdade — o browser não consegue abrir o
+// Explorer nem devolver caminho absoluto de um <input type="file"> por
+// segurança; como o servidor já roda na MESMA máquina que o disco a
+// navegar, ele lista os diretórios e a UI desenha uma árvore clicável no
+// lugar do prompt() de texto.
+app.get('/api/fs-list', (req: Request, res: Response) => {
+  const requested = (req.query.path as string) || '';
+  try {
+    if (!requested) {
+      if (process.platform === 'win32') {
+        const drives: string[] = [];
+        for (let i = 65; i <= 90; i++) {
+          const drivePath = `${String.fromCharCode(i)}:\\`;
+          if (fs.existsSync(drivePath)) drives.push(drivePath);
+        }
+        return res.json({ path: '', parent: null, entries: drives.map((d) => ({ name: d, path: d })) });
+      }
+      return res.json({ path: '/', parent: null, entries: listDirEntries('/') });
+    }
+    const clean = requested.replace(/[\\/]+$/, '') || (process.platform === 'win32' ? requested : '/');
+    if (!fs.existsSync(clean) || !fs.statSync(clean).isDirectory()) {
+      return res.status(400).json({ error: 'Pasta não encontrada.' });
+    }
+    const parentDir = path.dirname(clean);
+    const atRoot = parentDir === clean || (process.platform === 'win32' && /^[A-Za-z]:\\?$/.test(clean));
+    res.json({ path: clean, parent: atRoot ? '' : parentDir, entries: listDirEntries(clean) });
+  } catch (err) {
+    res.status(400).json({ error: String(err) });
+  }
+});
+
+function listDirEntries(dir: string): Array<{ name: string; path: string }> {
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((d) => {
+      try { return d.isDirectory() && !d.name.startsWith('.'); } catch { return false; }
+    })
+    .map((d) => ({ name: d.name, path: path.join(dir, d.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 app.post('/api/run-analysis', async (req: Request, res: Response) => {
   const { projectPath } = req.body as { projectPath: string };
   res.json({ started: true });

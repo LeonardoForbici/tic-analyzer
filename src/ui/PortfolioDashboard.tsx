@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { SvgBarChart } from './charts/SvgBarChart';
 import { Icon } from './Icon';
+import { FolderBrowserModal } from './FolderBrowserModal';
 
 const C = {
   bg: '#e9edf5', surfaceContainer: '#ffffff', surfaceContainerLow: '#ffffff',
@@ -56,9 +57,10 @@ export function PortfolioDashboard() {
   }, []);
   useEffect(load, [load]);
 
-  const addProject = useCallback(async () => {
-    const folder = await window.ticAnalyzer.selectFolder();
-    if (!folder) return;
+  const [showFolderBrowser, setShowFolderBrowser] = useState(false);
+
+  const addProject = useCallback(async (folder: string) => {
+    setShowFolderBrowser(false);
     setBusy(true);
     await window.ticAnalyzer.analyzePortfolioProject(folder);
     setBusy(false);
@@ -96,7 +98,7 @@ export function PortfolioDashboard() {
             Visão executiva cross-repositório — onde focar tempo e dinheiro primeiro.
           </p>
         </div>
-        <button onClick={addProject} disabled={busy}
+        <button onClick={() => setShowFolderBrowser(true)} disabled={busy}
           style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
             background: C.primaryFixedDim, border: 'none', borderRadius: 8,
             color: '#ffffff', cursor: busy ? 'wait' : 'pointer', fontFamily: F.code, fontSize: 12, fontWeight: 700,
@@ -229,6 +231,9 @@ export function PortfolioDashboard() {
             </div>
           </div>
         </>
+      )}
+      {showFolderBrowser && (
+        <FolderBrowserModal onSelect={addProject} onClose={() => setShowFolderBrowser(false)} />
       )}
     </div>
   );

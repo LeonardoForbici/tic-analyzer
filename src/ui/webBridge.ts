@@ -65,6 +65,12 @@ const ticAnalyzer = {
     return post<string | null>('/api/select-folder', { projectPath: input.trim() });
   },
 
+  confirmFolder: async (projectPath: string): Promise<string | null> =>
+    post<string | null>('/api/select-folder', { projectPath }),
+
+  listDir: (dirPath?: string) =>
+    get<{ path: string; parent: string | null; entries: Array<{ name: string; path: string }>; error?: string }>('/api/fs-list', dirPath ? { path: dirPath } : undefined),
+
   runAnalysis: async (projectPath: string): Promise<void> => {
     await post('/api/run-analysis', { projectPath });
   },
