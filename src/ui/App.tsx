@@ -11,11 +11,14 @@ import { MeetingsViewer } from './MeetingsViewer';
 import { SearchCodeViewer } from './SearchCodeViewer';
 import { HttpFlowsViewer } from './HttpFlowsViewer';
 import { Icon } from './Icon';
+import { FolderBrowserModal } from './FolderBrowserModal';
 
 declare global {
   interface Window {
     ticAnalyzer: {
       selectFolder: () => Promise<string | null>;
+      confirmFolder: (projectPath: string) => Promise<string | null>;
+      listDir: (dirPath?: string) => Promise<{ path: string; parent: string | null; entries: Array<{ name: string; path: string }>; error?: string }>;
       runAnalysis: (path: string) => Promise<void>;
       startMcp: (path: string, port: number) => Promise<void>;
       stopMcp: () => Promise<void>;
@@ -1483,10 +1486,13 @@ export function App() {
     error: `Não foi possível ${action} (${err instanceof Error ? err.message : String(err)}). Confirme que o servidor local está rodando em localhost:3000 — em dev, use \`npm run dev\` (não só o Vite sozinho).`
   });
 
-  const handleSelectFolder = useCallback(async () => {
+  const [showFolderBrowser, setShowFolderBrowser] = useState(false);
+
+  const handleFolderSelected = useCallback(async (folder: string) => {
+    setShowFolderBrowser(false);
     try {
-      const folder = await window.ticAnalyzer.selectFolder();
-      if (folder) setProjectPath(folder);
+      const clean = await window.ticAnalyzer.confirmFolder(folder);
+      if (clean) setProjectPath(clean);
     } catch (err) {
       setState('error');
       setResult(connectionErrorResult('selecionar a pasta', err));
@@ -1594,7 +1600,7 @@ export function App() {
               />
               <button
                 style={{ padding: '10px 18px', background: 'transparent', border: `1px solid ${C.outlineVariant}`, borderRadius: '6px', color: C.onSurface, cursor: 'pointer', fontFamily: F.code, fontSize: '13px', whiteSpace: 'nowrap' as const }}
-                onClick={handleSelectFolder}
+                onClick={() => setShowFolderBrowser(true)}
                 disabled={state === 'analyzing'}
               >
                 Selecionar
@@ -1806,6 +1812,13 @@ export function App() {
           )}
         </div>
       </main>
+
+      {showFolderBrowser && (
+        <FolderBrowserModal
+          onSelect={handleFolderSelected}
+          onClose={() => setShowFolderBrowser(false)}
+        />
+      )}
     </div>
   );
 }
