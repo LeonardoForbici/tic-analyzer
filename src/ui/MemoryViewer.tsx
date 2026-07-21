@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+/** Espelha GithubLink de src/analyzer/store/memoryStore.ts */
+interface GithubLink {
+  kind: 'pr' | 'commit' | 'issue';
+  repo: string;
+  number?: number;
+  sha?: string;
+  url: string;
+  title?: string;
+  state?: string;
+  verifiedAt?: string;
+}
+
 /** Espelha MemoryEntry de src/analyzer/store/memoryStore.ts */
 interface MemoryEntry {
   id: string;
@@ -11,6 +23,13 @@ interface MemoryEntry {
   result?: 'worked' | 'failed' | 'unknown';
   source?: string;
   refs?: string[];
+  githubLinks?: GithubLink[];
+}
+
+function githubLinkLabel(l: GithubLink): string {
+  if (l.kind === 'pr') return `PR #${l.number}`;
+  if (l.kind === 'issue') return `issue #${l.number}`;
+  return `commit ${(l.sha ?? '').slice(0, 7)}`;
 }
 
 const C = {
@@ -182,6 +201,16 @@ export function MemoryViewer({ ticCodeDir }: { ticCodeDir: string }) {
                   </span>
                   {e.source && <span style={{ fontSize: 10, fontFamily: F.code, color: C.outline }}>· {e.source}</span>}
                   {e.refs?.length ? <span style={{ fontSize: 10, fontFamily: F.code, color: C.outline }}>· refs: {e.refs.join(', ')}</span> : null}
+                  {e.githubLinks?.map((l, i) => (
+                    <a key={i} href={l.url} target="_blank" rel="noreferrer"
+                      title={l.verifiedAt ? `confirmado em ${new Date(l.verifiedAt).toLocaleDateString('pt-BR')}` : 'ainda não confirmado contra a API do GitHub'}
+                      style={{ fontSize: 10, fontFamily: F.code, fontWeight: 700, padding: '1px 8px', borderRadius: 4,
+                        background: `${C.purple}22`, color: C.purple, textDecoration: 'none',
+                        opacity: l.verifiedAt ? 1 : 0.6, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <Icon name="link" size={11} color={C.purple} />
+                      {githubLinkLabel(l)}{l.state ? ` · ${l.state}` : ''}
+                    </a>
+                  ))}
                 </div>
               </div>
             );

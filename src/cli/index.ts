@@ -25,6 +25,8 @@ import { dispatchAlerts } from '../analyzer/notify';
 import { renderExecutiveHtml, buildExecReportData } from '../analyzer/generateExecutiveReport';
 import { exportGraphFiles, type GraphExportFormat } from '../analyzer/exportGraph';
 import { upsertProject, loadPortfolio } from '../analyzer/store/portfolioStore';
+import { createRestGhClient } from '../analyzer/github/restGhClient';
+import { verifyGithubLinks } from '../analyzer/store/githubLinkVerifier';
 
 interface Args {
   positional: string[];
@@ -63,7 +65,9 @@ function usage(): never {
   tic-analyzer report <path> [--out report.html]          Relatório executivo (HTML) para liderança
   tic-analyzer export <path> [--format html|mermaid|svg]  Exporta o grafo (standalone, fora do app)
                [--expanded id1,id2] [--out arquivo]       --expanded drilla layers/módulos antes de exportar
-  tic-analyzer portfolio [--json]                          Lista o portfólio (todos os projetos analisados)`);
+  tic-analyzer portfolio [--json]                          Lista o portfólio (todos os projetos analisados)
+  tic-analyzer verify-links <path> [--repo owner/name]      Confirma githubLinks pendentes contra a API real do GitHub
+               Precisa de GITHUB_TOKEN ou TIC_GITHUB_TOKEN no ambiente.`);
   process.exit(2);
 }
 
@@ -324,6 +328,21 @@ function cmdExport(args: Args): number {
   } finally { db.close(); }
 }
 
+async function cmdVerifyLinks(args: Args): Promise<number> {
+  const target = args.positional[0];
+  if (!target) usage();
+  const ticCodeDir = path.join(path.resolve(target), '.tic-code');
+  try {
+    const client = createRestGhClient({});
+    const result = await verifyGithubLinks(ticCodeDir, client);
+    console.error(`Links verificados: ${result.verified}/${result.checked} confirmados (${result.failed} não encontrados/expirados).`);
+    return 0;
+  } catch (err) {
+    console.error('Erro ao verificar links:', (err as Error).message);
+    return 2;
+  }
+}
+
 (async () => {
   const [command, ...rest] = process.argv.slice(2);
   const args = parseArgs(rest);
@@ -335,6 +354,7 @@ function cmdExport(args: Args): number {
     case 'report': process.exit(cmdReport(args));
     case 'export': process.exit(cmdExport(args));
     case 'portfolio': process.exit(cmdPortfolio(args));
+    case 'verify-links': process.exit(await cmdVerifyLinks(args));
     default: usage();
   }
 })().catch((err) => {

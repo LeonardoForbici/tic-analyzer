@@ -18,7 +18,18 @@ import { queryGraphLevel, queryCommunities } from '../analyzer/store/graphQuerie
 import { buildAgentBrief, buildDiagnosis } from './agentBrief';
 import { loadTriage, transitionTriageItem, type TriageState, type TriageCategory, type TriagePriority } from '../analyzer/store/triageStore';
 import { loadActivity } from '../analyzer/store/activityLog';
-import { appendMemory, queryMemory, type MemoryKind, type MemoryResult } from '../analyzer/store/memoryStore';
+import {
+  appendMemory,
+  queryMemory,
+  queryArchivedMemory,
+  updateMemoryEntry,
+  findMemoryByGithub,
+  loadMemory,
+  type MemoryKind,
+  type MemoryResult,
+  type GithubLink,
+  type MemoryEntry
+} from '../analyzer/store/memoryStore';
 import { suggestReviewers } from '../analyzer/computeOwnership';
 import { loadPortfolio } from '../analyzer/store/portfolioStore';
 import { getEmbedder } from '../analyzer/semantic/embeddings';
@@ -356,7 +367,12 @@ export class TicAnalyzerMcpServer {
               summary: { type: 'string', description: 'Resumo em 1-2 frases.' },
               detail: { type: 'string', description: 'Detalhe opcional.' },
               result: { type: 'string', description: 'worked | failed | unknown (opcional, para fix-attempt/outcome).' },
-              refs: { type: 'array', items: { type: 'string' }, description: 'Arquivos ou URLs de referência (opcional).' }
+              refs: { type: 'array', items: { type: 'string' }, description: 'Arquivos ou URLs de referência (opcional).' },
+              githubLinks: {
+                type: 'array',
+                description: 'PRs/commits/issues reais já resolvidos por você (o agente) via mcp__github__* que embasam esta decisão (opcional). Cada item: {kind: pr|commit|issue, repo: "owner/repo", number?, sha?, url, title?, state?}.',
+                items: { type: 'object' }
+              }
             },
             required: ['entity', 'kind', 'summary']
           }
@@ -370,6 +386,49 @@ export class TicAnalyzerMcpServer {
               entity: { type: 'string', description: 'Entidade a consultar (arquivo, módulo, procedure, tabela ou termo).' }
             },
             required: ['entity']
+          }
+        },
+        {
+          name: 'recall_deep',
+          description: 'Como `recall`, mas também varre a memória arquivada (.tic-code/memory-archive/, histórico antigo que saiu do cap de 1000 entradas quentes). Use quando `recall` não encontrar nada e a entidade for antiga o suficiente para ter sido arquivada.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              entity: { type: 'string', description: 'Entidade a consultar.' },
+              limit: { type: 'number', description: 'Limite de entradas por conjunto (hot/archived), default 20.' }
+            },
+            required: ['entity']
+          }
+        },
+        {
+          name: 'link_memory_github',
+          description: 'Anexa referências reais do GitHub (PR/commit/issue) a uma entrada de memória já existente — use quando o PR/commit só é criado DEPOIS da decisão já ter sido registrada com `remember`.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              memoryId: { type: 'string', description: 'id retornado por `remember` (ex: "mem::abc123::xy9z").' },
+              githubLinks: {
+                type: 'array',
+                description: 'Referências a anexar: {kind: pr|commit|issue, repo, number?, sha?, url, title?, state?}.',
+                items: { type: 'object' }
+              }
+            },
+            required: ['memoryId', 'githubLinks']
+          }
+        },
+        {
+          name: 'find_memory_by_github',
+          description: 'Busca reversa: "o que o tic-analyzer sabe sobre esta PR/commit/issue?" — encontra decisões/tentativas/outcomes vinculados a uma referência real do GitHub.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              repo: { type: 'string', description: 'owner/repo (opcional, filtra por repositório).' },
+              pr: { type: 'number', description: 'Número da PR.' },
+              commit: { type: 'string', description: 'SHA do commit.' },
+              issue: { type: 'number', description: 'Número da issue.' },
+              includeArchived: { type: 'boolean', description: 'Também varre a memória arquivada (default false).' }
+            },
+            required: []
           }
         },
         {
@@ -960,6 +1019,15 @@ export class TicAnalyzerMcpServer {
             const memories = queryMemory(this.ticCodePath, target);
             if (memories.length === 0) return respond(textResult(brief));
             const memLines = [`\n## Tentativas Anteriores`, `*${memories.length} entrada(s) na memória persistente*`, ''];
+            const lastVerifiedLink = memories
+              .flatMap((m) => m.githubLinks ?? [])
+              .filter((l) => l.verifiedAt)
+              .sort((a, b) => (b.verifiedAt ?? '').localeCompare(a.verifiedAt ?? ''))[0];
+            if (lastVerifiedLink) {
+              const label = lastVerifiedLink.kind === 'pr' ? `PR #${lastVerifiedLink.number}` : lastVerifiedLink.kind === 'issue' ? `issue #${lastVerifiedLink.number}` : `commit ${(lastVerifiedLink.sha ?? '').slice(0, 7)}`;
+              const stateTag = lastVerifiedLink.state ? ` (${lastVerifiedLink.state})` : '';
+              memLines.push(`**Última mudança real confirmada:** [${label}${stateTag}](${lastVerifiedLink.url})`, '');
+            }
             for (const m of memories.slice(0, 5)) {
               const tag = m.result ? ` → **${m.result}**` : '';
               memLines.push(`- **[${m.kind}]** ${m.summary}${tag} *(${m.ts.slice(0, 10)})*`);
@@ -1050,11 +1118,11 @@ export class TicAnalyzerMcpServer {
         }
 
         case 'remember': {
-          const { entity, kind, summary, detail, result, refs } = args as {
+          const { entity, kind, summary, detail, result, refs, githubLinks } = args as {
             entity: string; kind: MemoryKind; summary: string;
-            detail?: string; result?: MemoryResult; refs?: string[];
+            detail?: string; result?: MemoryResult; refs?: string[]; githubLinks?: GithubLink[];
           };
-          const entry = appendMemory(this.ticCodePath, { entity, kind, summary, detail, result, refs });
+          const entry = appendMemory(this.ticCodePath, { entity, kind, summary, detail, result, refs, githubLinks });
           return respond(textResult(`Registrado (${entry.id}): [${kind}] ${summary}`));
         }
 
@@ -1062,16 +1130,39 @@ export class TicAnalyzerMcpServer {
           const { entity } = args as { entity: string };
           const entries = queryMemory(this.ticCodePath, entity);
           if (entries.length === 0) return respond(textResult(`Nenhuma memória registrada para "${entity}".`));
-          const lines = [`## Memória: ${entity}`, `*${entries.length} entrada(s) — mais recentes primeiro*`, ''];
-          for (const e of entries) {
-            const resultTag = e.result ? ` → **${e.result}**` : '';
-            lines.push(`### [${e.kind}] ${e.summary}${resultTag}`);
-            lines.push(`*${e.ts.slice(0, 10)} · source: ${e.source ?? 'agent'}*`);
-            if (e.detail) lines.push(`> ${e.detail}`);
-            if (e.refs?.length) lines.push(`refs: ${e.refs.join(', ')}`);
-            lines.push('');
-          }
+          return respond(textResult(formatMemoryEntries(`Memória: ${entity}`, entries)));
+        }
+
+        case 'recall_deep': {
+          const { entity, limit } = args as { entity: string; limit?: number };
+          const hot = queryMemory(this.ticCodePath, entity, limit ?? 20);
+          const archived = queryArchivedMemory(this.ticCodePath, entity, limit ?? 20);
+          if (hot.length === 0 && archived.length === 0) return respond(textResult(`Nenhuma memória (quente ou arquivada) registrada para "${entity}".`));
+          const lines = [
+            formatMemoryEntries(`Memória (quente): ${entity}`, hot, 'Nenhuma entrada quente.'),
+            '',
+            formatMemoryEntries(`Memória arquivada: ${entity}`, archived, 'Nenhuma entrada arquivada.')
+          ];
           return respond(textResult(lines.join('\n')));
+        }
+
+        case 'link_memory_github': {
+          const { memoryId, githubLinks } = args as { memoryId: string; githubLinks: GithubLink[] };
+          const existing = loadMemory(this.ticCodePath).find((e) => e.id === memoryId);
+          if (!existing) return respond(textResult(`Entrada de memória "${memoryId}" não encontrada.`));
+          const merged = [...(existing.githubLinks ?? []), ...githubLinks];
+          updateMemoryEntry(this.ticCodePath, memoryId, { githubLinks: merged });
+          return respond(textResult(`Anexado(s) ${githubLinks.length} link(s) do GitHub à memória ${memoryId}.`));
+        }
+
+        case 'find_memory_by_github': {
+          const { repo, pr, commit, issue, includeArchived } = args as {
+            repo?: string; pr?: number; commit?: string; issue?: number; includeArchived?: boolean;
+          };
+          const entries = findMemoryByGithub(this.ticCodePath, { repo, pr, commit, issue }, includeArchived ?? false);
+          if (entries.length === 0) return respond(textResult('Nenhuma memória vinculada a essa referência do GitHub.'));
+          const label = pr !== undefined ? `PR #${pr}` : commit !== undefined ? `commit ${commit}` : issue !== undefined ? `issue #${issue}` : (repo ?? 'referência');
+          return respond(textResult(formatMemoryEntries(`Memória vinculada a ${label}`, entries)));
         }
 
         case 'list_http_flows': {
@@ -2621,6 +2712,29 @@ function textResult(text: string): { content: Array<{ type: string; text: string
 
 function noIndexDb(): { content: Array<{ type: string; text: string }> } {
   return textResult('index.db não encontrado. Execute a análise novamente (a versão atual gera o grafo de impacto unificado).');
+}
+
+/** Formata uma lista de MemoryEntry como markdown, incluindo badges de githubLinks quando presentes. */
+function formatMemoryEntries(title: string, entries: MemoryEntry[], emptyLabel = 'Nenhuma entrada.'): string {
+  if (entries.length === 0) return `## ${title}\n\n*${emptyLabel}*`;
+  const lines = [`## ${title}`, `*${entries.length} entrada(s) — mais recentes primeiro*`, ''];
+  for (const e of entries) {
+    const resultTag = e.result ? ` → **${e.result}**` : '';
+    lines.push(`### [${e.kind}] ${e.summary}${resultTag}`);
+    lines.push(`*${e.ts.slice(0, 10)} · source: ${e.source ?? 'agent'}*`);
+    if (e.detail) lines.push(`> ${e.detail}`);
+    if (e.refs?.length) lines.push(`refs: ${e.refs.join(', ')}`);
+    if (e.githubLinks?.length) {
+      const badges = e.githubLinks.map((l) => {
+        const label = l.kind === 'pr' ? `PR #${l.number}` : l.kind === 'issue' ? `issue #${l.number}` : `commit ${(l.sha ?? '').slice(0, 7)}`;
+        const stateTag = l.state ? ` · ${l.state}` : '';
+        return `[${label}${stateTag}](${l.url})`;
+      });
+      lines.push(`github: ${badges.join(', ')}`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
 }
 
 const KIND_LABEL: Record<string, string> = {

@@ -50,6 +50,7 @@ import { collectAuthorship, computeOwnership } from './computeOwnership';
 import { computeRoi } from './computeRoi';
 import { appendEvents, makeEvent } from './store/activityLog';
 import { computeSelfDelta, computePredictionFeedback, type PredictionAccuracy } from './computeDelta';
+import { inferRepoSlug } from './github/repoSlug';
 import { syncTriageItems, type TriageCandidate } from './store/triageStore';
 import { generateZoomOut } from './generateZoomOut';
 import { generateGraphReport } from './generateGraphReport';
@@ -727,7 +728,8 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
       : null;
     const deltaEvents = computeSelfDelta(prevDelta, curDelta);
     const newRiskFiles = new Set(deltaEvents.filter((e) => e.type === 'risk-new' && e.entity).map((e) => e.entity!.replace(/^file:/, '')));
-    const { events: predEvents, accuracy } = computePredictionFeedback(previousPrediction, churn, newRiskFiles, previousAccuracy as PredictionAccuracy | null, ticCodeDir);
+    const repoSlug = inferRepoSlug(projectPath);
+    const { events: predEvents, accuracy } = computePredictionFeedback(previousPrediction, churn, newRiskFiles, previousAccuracy as PredictionAccuracy | null, ticCodeDir, repoSlug);
     fs.writeFileSync(path.join(ticCodeDir, 'prediction-accuracy.json'), JSON.stringify(accuracy), 'utf8');
     const summary = makeEvent('analysis', 'info',
       `Análise concluída — health ${health.score}/100 (${health.grade})`,

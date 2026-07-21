@@ -93,7 +93,8 @@ export function computePredictionFeedback(
   curChurn: Map<string, FileChurn> | null,
   newRiskFiles: Set<string>,
   prevAccuracy: PredictionAccuracy | null,
-  ticCodeDir?: string
+  ticCodeDir?: string,
+  repoSlug?: string | null
 ): { events: ActivityEvent[]; accuracy: PredictionAccuracy } {
   const acc: PredictionAccuracy = prevAccuracy
     ? { ...prevAccuracy, history: [...prevAccuracy.history] }
@@ -115,15 +116,22 @@ export function computePredictionFeedback(
       const detail = `score era ${p.score} (${p.reasons.join(', ')}) — ${gainedFix ? 'recebeu fix' : 'virou risco'}`;
       events.push(makeEvent('prediction-confirmed', 'info',
         `Predição confirmada: ${p.file.split('/').pop()}`, detail, `file:${p.file}`));
-      // Grava outcome automático na memória persistente.
+      // Grava outcome automático na memória persistente. O SHA do commit de
+      // correção já foi extraído 100% localmente por collectChurn (git log)
+      // — anexa como githubLink não-verificado; a confirmação contra a API
+      // real (verifiedAt) é opcional e feita depois por githubLinkVerifier.ts.
       if (ticCodeDir) {
+        const githubLinks = churn?.lastFixSha && repoSlug
+          ? [{ kind: 'commit' as const, repo: repoSlug, sha: churn.lastFixSha, url: `https://github.com/${repoSlug}/commit/${churn.lastFixSha}`, title: churn.lastFixMessage }]
+          : undefined;
         appendMemory(ticCodeDir, {
           entity: `file:${p.file}`,
           kind: 'outcome',
           summary: `Predição de risco confirmada (score ${p.score})`,
           detail,
           result: 'worked',
-          source: 'pipeline-auto'
+          source: 'pipeline-auto',
+          githubLinks
         });
       }
     }
