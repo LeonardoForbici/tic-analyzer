@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as http from 'http';
 import { execSync } from 'child_process';
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import { runPipeline, type PipelineProgress, type PipelineResult } from '../analyzer/pipeline';
 import { TicAnalyzerMcpServer } from '../mcp/server';
 import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
@@ -136,6 +136,19 @@ jobs:
 // ── Express app ──────────────────────────────────────────────────────────────
 
 const app = express();
+
+// CORS global: em `npm run dev`, a UI roda no Vite (localhost:5173) mas o
+// webBridge fala direto com este servidor (localhost:3000) — cross-origin
+// de verdade, não passa pelo proxy do Vite. Sem isso, o navegador bloqueia
+// o preflight (OPTIONS) de qualquer POST (ex. /api/run-analysis) e a UI
+// fica travada em "Analisando..." para sempre, sem nenhum erro visível.
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
+  next();
+});
 app.use(express.json({ limit: '10mb' }));
 
 // SSE endpoint for push events
@@ -143,7 +156,6 @@ app.get('/events', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
   res.flushHeaders();
   res.write(': connected\n\n');
   sseClients.add(res);
