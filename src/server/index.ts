@@ -22,6 +22,8 @@ import { exportGraphFiles, type GraphExportFormat } from '../analyzer/exportGrap
 import { loadPortfolio, upsertProject, removeProject } from '../analyzer/store/portfolioStore';
 import { rescaleRoi } from '../analyzer/computeRoi';
 import { eventBus, type BusEvent } from '../analyzer/eventBus';
+import { createRestGhClient } from '../analyzer/github/restGhClient';
+import { matchesFromEvents, runAgentDispatch } from '../analyzer/agents/runAgentDispatch';
 
 // ── SSE broadcast ────────────────────────────────────────────────────────────
 //
@@ -78,10 +80,20 @@ async function runAndBroadcast(projectPath: string): Promise<PipelineResult> {
   if (result.success) {
     const fresh = loadActivity(dir).slice(before);
     for (const e of fresh) broadcast('activity-event', e);
+    const cfg = loadArchRules(projectPath);
     try {
-      const cfg = loadArchRules(projectPath);
       if (cfg?.alerts) await dispatchAlerts(fresh, cfg.alerts, path.basename(projectPath));
     } catch { /* best-effort */ }
+    try {
+      if (cfg?.agents?.enabled) {
+        const matches = matchesFromEvents(fresh, cfg.agents.on);
+        if (matches.length > 0) {
+          const client = createRestGhClient({});
+          const { records } = await runAgentDispatch(projectPath, dir, matches, cfg.agents, client);
+          for (const r of records) broadcast('agent-dispatched', r);
+        }
+      }
+    } catch { /* best-effort — falha de token/rede não derruba a análise */ }
   }
   return result;
 }

@@ -23,7 +23,9 @@ export type ActivityType =
   | 'module-removed'
   | 'prediction-confirmed'
   | 'memory-contradiction'
-  | 'alert-sent';
+  | 'alert-sent'
+  | 'ci-failure'
+  | 'build-failure';
 
 export type ActivitySeverity = 'info' | 'warn' | 'critical';
 

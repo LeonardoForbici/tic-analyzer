@@ -51,6 +51,8 @@ import { computeRoi } from './computeRoi';
 import { appendEvents, makeEvent } from './store/activityLog';
 import { computeSelfDelta, computePredictionFeedback, type PredictionAccuracy } from './computeDelta';
 import { inferRepoSlug } from './github/repoSlug';
+import { evaluateTriggers } from './triggers/evaluateTriggers';
+import { eventBus } from './eventBus';
 import { syncTriageItems, type TriageCandidate } from './store/triageStore';
 import { generateZoomOut } from './generateZoomOut';
 import { generateGraphReport } from './generateGraphReport';
@@ -738,6 +740,15 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
     appendEvents(ticCodeDir, allEvents);
     markDone('activity');
     report('activity', 100, `${deltaEvents.length} mudança(s), ${predEvents.length} predição(ões) confirmada(s)`);
+
+    // Publica gatilhos de agente elegíveis no barramento — a pipeline NUNCA
+    // fala com o GitHub diretamente; quem decide/despacha de fato (guardrails
+    // de rate-limit/circuit breaker) é server/index.ts ou o CLI self-heal,
+    // que têm acesso à memória (Frente B) e ao GhClient (Fase 0.2).
+    if (rulesConfig?.agents?.enabled) {
+      const triggerMatches = evaluateTriggers(allEvents, rulesConfig.agents.on);
+      if (triggerMatches.length > 0) eventBus.publish({ source: 'pipeline', type: 'trigger-fired', payload: triggerMatches });
+    }
 
     // ── 24b. SEARCH INDEX ─────────────────────────────────────────────────────────
     report('search-index', 95, 'Indexando termos de código para busca semântica...');
