@@ -640,7 +640,7 @@ app.get('/api/skills-overview', (req: Request, res: Response) => {
 });
 
 // Serve Vite-built frontend in production
-const distRenderer = path.join(__dirname, '..', '..', 'dist', 'renderer');
+const distRenderer = path.join(__dirname, '..', '..', 'renderer');
 if (fs.existsSync(distRenderer)) {
   app.use(express.static(distRenderer));
   app.get('*', (_req: Request, res: Response) => {
