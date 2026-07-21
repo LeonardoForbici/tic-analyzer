@@ -17,6 +17,7 @@ import type { ImpactEdge, ImpactNodeKind } from './buildImpactGraph';
 
 const TOP_GOD_NODES = 15;
 const TOP_SURPRISING = 15;
+const TOP_CRITICAL = 20;
 
 export interface GodNode {
   id: string;
@@ -37,6 +38,91 @@ export interface SurprisingLink {
 export interface GraphReportResult {
   godNodes: GodNode[];
   surprising: SurprisingLink[];
+  critical: CriticalNode[];
+}
+
+export interface CriticalNode {
+  id: string;
+  kind: ImpactNodeKind;
+  /** Proxy de blast radius: dependentes diretos (in-degree) — zero-custo, sem BFS (essa passada já é in-memory). */
+  blastRadius: number;
+  churn: number;
+  /** Nº de comunidades (Louvain) distintas ligadas a este nó além da própria — quão "ponte" ele é. */
+  bridgeScore: number;
+  /** 0-100, combinação normalizada dos três sinais acima. */
+  criticality: number;
+  reasons: string[];
+}
+
+export interface ChurnLookup {
+  commits: number;
+  fixes: number;
+}
+
+/**
+ * Ranking de criticidade cross-tier: combina blast radius (proxy de
+ * dependentes diretos), churn do git e "bridge score" (quantas comunidades
+ * Louvain distintas um nó conecta — nó cuja remoção fragmentaria clusters).
+ * Reaproveita dados já computados por outras fases (communities, churn) sem
+ * novo algoritmo de grafo pesado.
+ */
+export function computeCriticalityRanking(
+  impactEdges: ImpactEdge[],
+  communityByNode: Map<string, number>,
+  churnByFile: Map<string, ChurnLookup>,
+  topN = TOP_CRITICAL
+): CriticalNode[] {
+  const inDeg = new Map<string, number>();
+  const kindOf = new Map<string, ImpactNodeKind>();
+  const foreignCommunities = new Map<string, Set<number>>();
+
+  for (const e of impactEdges) {
+    inDeg.set(e.to, (inDeg.get(e.to) ?? 0) + 1);
+    kindOf.set(e.from, e.fromKind);
+    kindOf.set(e.to, e.toKind);
+
+    const cFrom = communityByNode.get(e.from);
+    const cTo = communityByNode.get(e.to);
+    if (cFrom !== undefined && cTo !== undefined && cFrom !== cTo) {
+      if (!foreignCommunities.has(e.from)) foreignCommunities.set(e.from, new Set());
+      foreignCommunities.get(e.from)!.add(cTo);
+      if (!foreignCommunities.has(e.to)) foreignCommunities.set(e.to, new Set());
+      foreignCommunities.get(e.to)!.add(cFrom);
+    }
+  }
+
+  const churnOf = (id: string): ChurnLookup | undefined => {
+    const f = fileOf(id);
+    return f ? churnByFile.get(f) : undefined;
+  };
+
+  const raw = [...kindOf.keys()].map((id) => {
+    const blastRadius = inDeg.get(id) ?? 0;
+    const churn = churnOf(id)?.commits ?? 0;
+    const bridgeScore = foreignCommunities.get(id)?.size ?? 0;
+    return { id, kind: kindOf.get(id)!, blastRadius, churn, bridgeScore };
+  });
+
+  const maxBlast = Math.max(1, ...raw.map((r) => r.blastRadius));
+  const maxChurn = Math.max(1, ...raw.map((r) => r.churn));
+  const maxBridge = Math.max(1, ...raw.map((r) => r.bridgeScore));
+
+  const ranked: CriticalNode[] = raw
+    .map((r) => {
+      const criticality = Math.round(
+        ((r.blastRadius / maxBlast) * 0.4 + (r.churn / maxChurn) * 0.3 + (r.bridgeScore / maxBridge) * 0.3) * 100
+      );
+      const reasons: string[] = [];
+      if (r.blastRadius > 0) reasons.push(`${r.blastRadius} dependente(s) direto(s)`);
+      if (r.churn > 0) reasons.push(`mudou ${r.churn}× em 90 dias`);
+      if (r.bridgeScore > 0) reasons.push(`ponte entre ${r.bridgeScore} comunidade(s)`);
+      return { ...r, criticality, reasons };
+    })
+    .filter((r) => r.criticality > 0)
+    .sort((a, b) => b.criticality - a.criticality)
+    .slice(0, topN);
+
+  return ranked;
 }
 
 // Distância entre tiers na cadeia canônica frontend→…→banco. Saltos > 1 são
@@ -59,7 +145,9 @@ export function generateGraphReport(
   ticCodeDir: string,
   projectName: string,
   impactEdges: ImpactEdge[],
-  fileToModule: Map<string, string>
+  fileToModule: Map<string, string>,
+  communityByNode: Map<string, number> = new Map(),
+  churnByFile: Map<string, ChurnLookup> = new Map()
 ): GraphReportResult {
   // ── Degree por nó (uma passada) ──────────────────────────────────────────
   const inDeg = new Map<string, number>();
@@ -119,6 +207,9 @@ export function generateGraphReport(
   surprising.sort((a, b) => (a.reason === b.reason ? 0 : a.reason === 'cross-tier' ? -1 : 1));
   const topSurprising = surprising.slice(0, TOP_SURPRISING);
 
+  // ── Ranking de criticidade cross-tier ────────────────────────────────────
+  const critical = computeCriticalityRanking(impactEdges, communityByNode, churnByFile);
+
   // ── Markdown ─────────────────────────────────────────────────────────────
   const md: string[] = [
     `# Insights do Grafo — ${projectName}`,
@@ -162,6 +253,20 @@ export function generateGraphReport(
     }
   }
 
+  md.push('', '## Ranking de criticidade cross-tier', '');
+  if (critical.length === 0) {
+    md.push('_Sem sinal suficiente (churn/pontes entre comunidades) para ranquear — rode `tic-analyzer analyze` com histórico de git disponível._');
+  } else {
+    md.push(
+      'Combina dependentes diretos + churn do git + quão "ponte" o nó é entre comunidades (Louvain) — os nós mais perigosos do grafo inteiro, não só os mais conectados.',
+      '',
+      '| Entidade | Tipo | Criticidade | Motivos |',
+      '| --- | --- | --- | --- |',
+      ...critical.map((n) => `| \`${shortId(n.id)}\` | ${n.kind} | ${n.criticality} | ${n.reasons.join(', ') || '—'} |`)
+    );
+  }
+
   fs.writeFileSync(path.join(ticCodeDir, 'graph-report.md'), md.join('\n'), 'utf8');
-  return { godNodes, surprising: topSurprising };
+  fs.writeFileSync(path.join(ticCodeDir, 'criticality.json'), JSON.stringify(critical, null, 2), 'utf8');
+  return { godNodes, surprising: topSurprising, critical };
 }

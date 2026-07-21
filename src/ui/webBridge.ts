@@ -170,6 +170,13 @@ const ticAnalyzer = {
 
   listHttpFlows: (projectPath: string) => get<unknown>('/api/list-http-flows', { projectPath }),
 
+  ingestMeeting: (projectPath: string, body: { title: string; transcript?: string; participants?: string[]; decisions?: unknown[] }) =>
+    post<{ ok: boolean; meetingId?: string; memoryEntriesCreated?: number; pending?: boolean; error?: string }>('/api/ingest-meeting', { projectPath, ...body }),
+
+  listMeetings: (projectPath: string) => get<Array<{ id: string; ts: string; title: string; decisionCount: number }>>('/api/meetings', { projectPath }),
+
+  getMeeting: (projectPath: string, id: string) => get<unknown>(`/api/meetings/${id}`, { projectPath }),
+
   getAgentBrief: (projectPath: string, entity: string) =>
     get<{ markdown?: string; entity?: string; error?: string }>('/api/agent-brief', { projectPath, entity }),
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { SvgLineChart } from './charts/SvgLineChart';
+import { Icon } from './Icon';
 
 interface Breakdown { penalty: number; raw: number; max: number; }
 interface Snapshot {
@@ -19,28 +20,19 @@ interface Snapshot {
 }
 
 const C = {
-  bg: '#0b1326', surfaceContainer: '#171f33', surfaceContainerLow: '#131b2e',
-  surfaceContainerHigh: '#222a3d', surfaceContainerHighest: '#2d3449',
-  primary: '#dbfcff', primaryFixedDim: '#00dbe9', primaryFixed: '#7df4ff',
-  secondary: '#4edea3', error: '#ffb4ab',
-  tertiaryFixedDim: '#ffb95f',
-  onSurface: '#dae2fd', onSurfaceVariant: '#b9cacb',
-  outline: '#849495', outlineVariant: '#3b494b',
+  bg: '#e9edf5', surfaceContainer: '#ffffff', surfaceContainerLow: '#ffffff',
+  surfaceContainerHigh: '#f2f5fb', surfaceContainerHighest: '#e6ebf3',
+  primary: '#111827', primaryFixedDim: '#2563eb', primaryFixed: '#93c5fd',
+  secondary: '#16a34a', error: '#dc2626',
+  tertiaryFixedDim: '#d97706',
+  onSurface: '#1e293b', onSurfaceVariant: '#64748b',
+  outline: '#94a3b8', outlineVariant: '#e2e8f0',
 };
 const F = {
-  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  headline: "'Geist Sans', 'Inter', system-ui, sans-serif",
   body: "'Inter', system-ui, sans-serif",
   code: "'JetBrains Mono', monospace",
 };
-
-function Icon({ name, size = 20, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
-  return (
-    <span className="material-symbols-outlined" style={{
-      fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center',
-      fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
-    }}>{name}</span>
-  );
-}
 
 const DIM_META: Record<string, {
   label: string; icon: string; color: string;

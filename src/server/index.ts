@@ -21,17 +21,29 @@ import { renderExecutiveHtml, buildExecReportData } from '../analyzer/generateEx
 import { exportGraphFiles, type GraphExportFormat } from '../analyzer/exportGraph';
 import { loadPortfolio, upsertProject, removeProject } from '../analyzer/store/portfolioStore';
 import { rescaleRoi } from '../analyzer/computeRoi';
+import { eventBus, type BusEvent } from '../analyzer/eventBus';
+import { createRestGhClient } from '../analyzer/github/restGhClient';
+import { matchesFromEvents, runAgentDispatch } from '../analyzer/agents/runAgentDispatch';
+import { saveMeeting, loadMeetings, loadMeeting, ingestDecisions, type MeetingDecisionInput } from '../analyzer/store/meetingStore';
 
 // ── SSE broadcast ────────────────────────────────────────────────────────────
+//
+// broadcast() publica no eventBus único do processo (analyzer/eventBus.ts) em
+// vez de escrever direto nos clients locais — assim qualquer evento chega
+// também ao SSE do MCP server (mcp/server.ts::emit), que assina o mesmo bus.
 
 const sseClients = new Set<Response>();
 
 function broadcast(event: string, data: unknown) {
-  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  eventBus.publish({ source: 'server', type: event, payload: data });
+}
+
+eventBus.subscribe((busEvent: BusEvent) => {
+  const payload = `event: ${busEvent.type}\ndata: ${JSON.stringify(busEvent.payload)}\n\n`;
   for (const res of sseClients) {
     try { res.write(payload); } catch { sseClients.delete(res); }
   }
-}
+});
 
 // ── MCP Server state ─────────────────────────────────────────────────────────
 
@@ -69,10 +81,20 @@ async function runAndBroadcast(projectPath: string): Promise<PipelineResult> {
   if (result.success) {
     const fresh = loadActivity(dir).slice(before);
     for (const e of fresh) broadcast('activity-event', e);
+    const cfg = loadArchRules(projectPath);
     try {
-      const cfg = loadArchRules(projectPath);
       if (cfg?.alerts) await dispatchAlerts(fresh, cfg.alerts, path.basename(projectPath));
     } catch { /* best-effort */ }
+    try {
+      if (cfg?.agents?.enabled) {
+        const matches = matchesFromEvents(fresh, cfg.agents.on);
+        if (matches.length > 0) {
+          const client = createRestGhClient({});
+          const { records } = await runAgentDispatch(projectPath, dir, matches, cfg.agents, client);
+          for (const r of records) broadcast('agent-dispatched', r);
+        }
+      }
+    } catch { /* best-effort — falha de token/rede não derruba a análise */ }
   }
   return result;
 }
@@ -464,6 +486,44 @@ app.post('/api/create-tic-rules', (req: Request, res: Response) => {
   }
 });
 
+app.post('/api/ingest-meeting', (req: Request, res: Response) => {
+  const { projectPath, title, transcript, participants, decisions } = req.body as {
+    projectPath: string; title: string; transcript?: string; participants?: string[]; decisions?: MeetingDecisionInput[];
+  };
+  try {
+    if (!decisions || decisions.length === 0) {
+      if (!transcript) return res.json({ ok: false, error: 'Nenhuma decisão nem transcript fornecido.' });
+      const meeting = saveMeeting(ticDir(projectPath), { title, participants, sourceText: transcript, decisions: [] });
+      return res.json({ ok: true, meetingId: meeting.id, memoryEntriesCreated: 0, pending: true });
+    }
+    const meeting = saveMeeting(ticDir(projectPath), { title, participants, sourceText: transcript, decisions });
+    const result = ingestDecisions(ticDir(projectPath), meeting);
+    res.json({ ok: true, meetingId: meeting.id, ...result });
+  } catch (err) {
+    res.json({ ok: false, error: String(err) });
+  }
+});
+
+app.get('/api/meetings', (req: Request, res: Response) => {
+  const { projectPath, limit } = req.query as { projectPath: string; limit?: string };
+  try {
+    res.json(loadMeetings(ticDir(projectPath), limit ? Number(limit) : 20));
+  } catch (err) {
+    res.json({ ok: false, error: String(err) });
+  }
+});
+
+app.get('/api/meetings/:id', (req: Request, res: Response) => {
+  const { projectPath } = req.query as { projectPath: string };
+  try {
+    const meeting = loadMeeting(ticDir(projectPath), req.params.id);
+    if (!meeting) return res.status(404).json({ ok: false, error: 'not found' });
+    res.json(meeting);
+  } catch (err) {
+    res.json({ ok: false, error: String(err) });
+  }
+});
+
 app.get('/api/list-http-flows', (req: Request, res: Response) => {
   const { projectPath } = req.query as { projectPath: string };
   try {
@@ -580,7 +640,7 @@ app.get('/api/skills-overview', (req: Request, res: Response) => {
 });
 
 // Serve Vite-built frontend in production
-const distRenderer = path.join(__dirname, '..', '..', 'dist', 'renderer');
+const distRenderer = path.join(__dirname, '..', '..', 'renderer');
 if (fs.existsSync(distRenderer)) {
   app.use(express.static(distRenderer));
   app.get('*', (_req: Request, res: Response) => {

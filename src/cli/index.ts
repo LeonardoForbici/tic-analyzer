@@ -25,6 +25,10 @@ import { dispatchAlerts } from '../analyzer/notify';
 import { renderExecutiveHtml, buildExecReportData } from '../analyzer/generateExecutiveReport';
 import { exportGraphFiles, type GraphExportFormat } from '../analyzer/exportGraph';
 import { upsertProject, loadPortfolio } from '../analyzer/store/portfolioStore';
+import { createRestGhClient } from '../analyzer/github/restGhClient';
+import { verifyGithubLinks } from '../analyzer/store/githubLinkVerifier';
+import { matchesFromEvents, runAgentDispatch } from '../analyzer/agents/runAgentDispatch';
+import { makeEvent } from '../analyzer/store/activityLog';
 
 interface Args {
   positional: string[];
@@ -55,6 +59,8 @@ function usage(): never {
   tic-analyzer pr-review --base <dir> --head <dir>        Compara duas análises e gera report.md
                [--out report.md] [--gate new-high-risks,new-violations,health-drop:5]
                [--changed arquivo1,arquivo2 | --base-ref <ref>]
+               [--agent-mode none|issue-only|assign-copilot|create-pr-with-copilot] [--repo owner/name]
+               --agent-mode dispara o dispatcher da Frente A quando o gate falha (requer GITHUB_TOKEN)
   tic-analyzer serve <path> [--port 7432] [--host 0.0.0.0] [--token <segredo>]
                [--no-analyze] [--watch <minutos>] [--debounce <seg>]   MCP server vivo (máquina dedicada).
                --host 0.0.0.0 expõe na rede — USE --token (ou TIC_TOKEN).
@@ -63,7 +69,13 @@ function usage(): never {
   tic-analyzer report <path> [--out report.html]          Relatório executivo (HTML) para liderança
   tic-analyzer export <path> [--format html|mermaid|svg]  Exporta o grafo (standalone, fora do app)
                [--expanded id1,id2] [--out arquivo]       --expanded drilla layers/módulos antes de exportar
-  tic-analyzer portfolio [--json]                          Lista o portfólio (todos os projetos analisados)`);
+  tic-analyzer portfolio [--json]                          Lista o portfólio (todos os projetos analisados)
+  tic-analyzer verify-links <path> [--repo owner/name]      Confirma githubLinks pendentes contra a API real do GitHub
+               Precisa de GITHUB_TOKEN ou TIC_GITHUB_TOKEN no ambiente.
+  tic-analyzer self-heal <path> [--repo owner/name] [--reason "CI falhou"]
+               Dispara o MESMO dispatcher da Frente A para o próprio repositório:
+               requer .tic-rules.json → agents.enabled=true e agents.on.ciFailure=true.
+               Nunca faz auto-merge — só abre issue/PR. Precisa de GITHUB_TOKEN.`);
   process.exit(2);
 }
 
@@ -162,18 +174,36 @@ async function cmdPrReview(args: Args): Promise<number> {
 
   // --brief-out: AGENT-BRIEF (skill triage) da entidade mais crítica quebrada,
   // pronto para virar corpo de issue (gate falhou → issue bug/needs-triage)
+  const briefEntity = result.newRuleViolations[0]?.from ?? result.newRisks[0]?.file ?? result.impacts[0]?.file;
+  let briefText: string | null = null;
   const briefOut = args.flags.get('brief-out');
-  if (typeof briefOut === 'string') {
-    const entity = result.newRuleViolations[0]?.from ?? result.newRisks[0]?.file ?? result.impacts[0]?.file;
-    const db = entity ? openIndexDb(path.join(resolvedHead, '.tic-code', INDEX_DB_FILE)) : null;
-    if (db && entity) {
+  if (briefEntity) {
+    const db = openIndexDb(path.join(resolvedHead, '.tic-code', INDEX_DB_FILE));
+    if (db) {
       try {
-        const brief = buildAgentBrief(db, path.join(resolvedHead, '.tic-code'), entity, {
+        briefText = buildAgentBrief(db, path.join(resolvedHead, '.tic-code'), briefEntity, {
           category: 'bug',
           summary: gate?.failed ? `Resolver quality gate do PR: ${gate.reasons.join('; ')}` : undefined
         });
-        if (brief) fs.writeFileSync(path.resolve(briefOut), brief, 'utf8');
       } finally { db.close(); }
+    }
+  }
+  if (briefText && typeof briefOut === 'string') fs.writeFileSync(path.resolve(briefOut), briefText, 'utf8');
+
+  // --agent-mode: quando o gate falha, dispara o MESMO dispatcher da Frente A
+  // (issue-only | assign-copilot | create-pr-with-copilot) — usado pela
+  // GitHub Action (action.yml) como alternativa a só criar uma issue passiva.
+  const agentMode = args.flags.get('agent-mode');
+  if (gate?.failed && typeof agentMode === 'string' && agentMode !== 'none') {
+    try {
+      const repo = (args.flags.get('repo') as string) ?? undefined;
+      const client = createRestGhClient({});
+      const syntheticEvent = makeEvent('rule-violation', 'critical', `Quality gate do PR falhou: ${gate.reasons.join('; ')}`, undefined, briefEntity);
+      const config = { enabled: true, on: {}, mode: agentMode as 'issue-only' | 'assign-copilot' | 'create-pr-with-copilot', repo, maxDispatchesPerDay: 20 };
+      const { records } = await runAgentDispatch(resolvedHead, path.join(resolvedHead, '.tic-code'), [{ event: syntheticEvent, entity: briefEntity }], config, client);
+      for (const r of records) console.error(`[agent-mode] ${r.status}: ${r.reason ?? ''}${r.issueNumber ? ` (issue #${r.issueNumber})` : ''}${r.prNumber ? ` (PR #${r.prNumber})` : ''}`);
+    } catch (err) {
+      console.error('agent-mode: erro ao despachar agente:', (err as Error).message);
     }
   }
 
@@ -324,6 +354,54 @@ function cmdExport(args: Args): number {
   } finally { db.close(); }
 }
 
+async function cmdVerifyLinks(args: Args): Promise<number> {
+  const target = args.positional[0];
+  if (!target) usage();
+  const ticCodeDir = path.join(path.resolve(target), '.tic-code');
+  try {
+    const client = createRestGhClient({});
+    const result = await verifyGithubLinks(ticCodeDir, client);
+    console.error(`Links verificados: ${result.verified}/${result.checked} confirmados (${result.failed} não encontrados/expirados).`);
+    return 0;
+  } catch (err) {
+    console.error('Erro ao verificar links:', (err as Error).message);
+    return 2;
+  }
+}
+
+async function cmdSelfHeal(args: Args): Promise<number> {
+  const target = args.positional[0];
+  if (!target) usage();
+  const projectPath = path.resolve(target);
+  const ticCodeDir = path.join(projectPath, '.tic-code');
+  const reason = (args.flags.get('reason') as string) ?? 'CI falhou no repositório';
+
+  const cfg = loadArchRules(projectPath);
+  if (!cfg?.agents?.enabled) {
+    console.error('agents.enabled não está ligado em .tic-rules.json — nada a fazer (self-heal desligado por padrão).');
+    return 0;
+  }
+  if (!cfg.agents.on?.ciFailure && !cfg.agents.on?.buildFailure) {
+    console.error('agents.on.ciFailure/buildFailure não está ligado — self-heal não vai disparar para este gatilho.');
+    return 0;
+  }
+
+  const syntheticEvent = makeEvent('ci-failure', 'critical', reason);
+  const matches = matchesFromEvents([syntheticEvent], cfg.agents.on);
+  if (matches.length === 0) return 0;
+
+  try {
+    const repo = (args.flags.get('repo') as string) ?? cfg.agents.repo;
+    const client = createRestGhClient({});
+    const { records } = await runAgentDispatch(projectPath, ticCodeDir, matches, { ...cfg.agents, repo }, client);
+    for (const r of records) console.error(`[self-heal] ${r.status}: ${r.reason ?? ''}${r.issueNumber ? ` (issue #${r.issueNumber})` : ''}${r.prNumber ? ` (PR #${r.prNumber})` : ''}`);
+    return 0;
+  } catch (err) {
+    console.error('self-heal: erro ao despachar agente:', (err as Error).message);
+    return 0; // best-effort — não falha o job de CI por causa do self-heal
+  }
+}
+
 (async () => {
   const [command, ...rest] = process.argv.slice(2);
   const args = parseArgs(rest);
@@ -335,6 +413,8 @@ function cmdExport(args: Args): number {
     case 'report': process.exit(cmdReport(args));
     case 'export': process.exit(cmdExport(args));
     case 'portfolio': process.exit(cmdPortfolio(args));
+    case 'verify-links': process.exit(await cmdVerifyLinks(args));
+    case 'self-heal': process.exit(await cmdSelfHeal(args));
     default: usage();
   }
 })().catch((err) => {

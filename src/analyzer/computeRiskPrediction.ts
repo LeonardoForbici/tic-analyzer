@@ -12,6 +12,9 @@ export interface FileChurn {
   commits: number;
   /** Commits cuja mensagem indica correção (fix/bug/hotfix/corrige/conserta). */
   fixes: number;
+  /** SHA do commit de correção mais recente que tocou este arquivo (100% local, via git log). */
+  lastFixSha?: string;
+  lastFixMessage?: string;
 }
 
 export interface RiskPrediction {
@@ -41,16 +44,25 @@ export function collectChurn(projectPath: string, days = 90): Map<string, FileCh
 
   const churn = new Map<string, FileChurn>();
   let isFix = false;
+  let currentSha = '';
+  let currentMessage = '';
   for (const line of raw.split('\n')) {
     if (!line) continue;
     const sep = line.indexOf('|');
     if (sep > 0 && /^[0-9a-f]{40}\|/.test(line)) {
-      isFix = FIX_RE.test(line.slice(sep + 1));
+      currentSha = line.slice(0, sep);
+      currentMessage = line.slice(sep + 1);
+      isFix = FIX_RE.test(currentMessage);
       continue;
     }
     const entry = churn.get(line) ?? { commits: 0, fixes: 0 };
     entry.commits++;
-    if (isFix) entry.fixes++;
+    // `git log` lista do mais recente para o mais antigo — a primeira
+    // correção vista por arquivo já é a mais recente.
+    if (isFix) {
+      entry.fixes++;
+      if (!entry.lastFixSha) { entry.lastFixSha = currentSha; entry.lastFixMessage = currentMessage; }
+    }
     churn.set(line, entry);
   }
   return churn;

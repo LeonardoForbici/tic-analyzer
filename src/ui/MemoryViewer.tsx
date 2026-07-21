@@ -1,4 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Icon } from './Icon';
+
+/** Espelha GithubLink de src/analyzer/store/memoryStore.ts */
+interface GithubLink {
+  kind: 'pr' | 'commit' | 'issue';
+  repo: string;
+  number?: number;
+  sha?: string;
+  url: string;
+  title?: string;
+  state?: string;
+  verifiedAt?: string;
+}
 
 /** Espelha MemoryEntry de src/analyzer/store/memoryStore.ts */
 interface MemoryEntry {
@@ -11,16 +24,23 @@ interface MemoryEntry {
   result?: 'worked' | 'failed' | 'unknown';
   source?: string;
   refs?: string[];
+  githubLinks?: GithubLink[];
+}
+
+function githubLinkLabel(l: GithubLink): string {
+  if (l.kind === 'pr') return `PR #${l.number}`;
+  if (l.kind === 'issue') return `issue #${l.number}`;
+  return `commit ${(l.sha ?? '').slice(0, 7)}`;
 }
 
 const C = {
-  surfaceContainerLow: '#131b2e', surfaceContainer: '#171f33', surfaceContainerHigh: '#222a3d',
-  primaryFixedDim: '#00dbe9', secondary: '#4edea3', error: '#ffb4ab', tertiaryFixedDim: '#ffb95f',
-  onSurface: '#dae2fd', onSurfaceVariant: '#b9cacb', outline: '#849495', outlineVariant: '#3b494b',
-  purple: '#9d8cff',
+  surfaceContainerLow: '#ffffff', surfaceContainer: '#ffffff', surfaceContainerHigh: '#f2f5fb',
+  primaryFixedDim: '#2563eb', secondary: '#16a34a', error: '#dc2626', tertiaryFixedDim: '#d97706',
+  onSurface: '#1e293b', onSurfaceVariant: '#64748b', outline: '#94a3b8', outlineVariant: '#e2e8f0',
+  purple: '#7c3aed',
 };
 const F = {
-  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  headline: "'Geist Sans', 'Inter', system-ui, sans-serif",
   body: "'Inter', system-ui, sans-serif", code: "'JetBrains Mono', monospace",
 };
 
@@ -36,15 +56,6 @@ const RESULT_META: Record<string, { color: string; label: string }> = {
   failed:  { color: C.error, label: 'falhou' },
   unknown: { color: C.outline, label: '—' },
 };
-
-function Icon({ name, size = 18, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
-  return (
-    <span className="material-symbols-outlined" style={{
-      fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center',
-      fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
-    }}>{name}</span>
-  );
-}
 
 function relativeTime(ts: string): string {
   const diff = Date.now() - new Date(ts).getTime();
@@ -105,7 +116,7 @@ export function MemoryViewer({ ticCodeDir }: { ticCodeDir: string }) {
     padding: '4px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: F.code,
     background: active ? C.primaryFixedDim : C.surfaceContainerHigh,
     border: `1px solid ${active ? C.primaryFixedDim : C.outlineVariant}`,
-    color: active ? '#00363a' : C.onSurfaceVariant, fontWeight: active ? 700 : 400,
+    color: active ? '#ffffff' : C.onSurfaceVariant, fontWeight: active ? 700 : 400,
   });
 
   return (
@@ -182,6 +193,16 @@ export function MemoryViewer({ ticCodeDir }: { ticCodeDir: string }) {
                   </span>
                   {e.source && <span style={{ fontSize: 10, fontFamily: F.code, color: C.outline }}>· {e.source}</span>}
                   {e.refs?.length ? <span style={{ fontSize: 10, fontFamily: F.code, color: C.outline }}>· refs: {e.refs.join(', ')}</span> : null}
+                  {e.githubLinks?.map((l, i) => (
+                    <a key={i} href={l.url} target="_blank" rel="noreferrer"
+                      title={l.verifiedAt ? `confirmado em ${new Date(l.verifiedAt).toLocaleDateString('pt-BR')}` : 'ainda não confirmado contra a API do GitHub'}
+                      style={{ fontSize: 10, fontFamily: F.code, fontWeight: 700, padding: '1px 8px', borderRadius: 4,
+                        background: `${C.purple}22`, color: C.purple, textDecoration: 'none',
+                        opacity: l.verifiedAt ? 1 : 0.6, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <Icon name="link" size={11} color={C.purple} />
+                      {githubLinkLabel(l)}{l.state ? ` · ${l.state}` : ''}
+                    </a>
+                  ))}
                 </div>
               </div>
             );

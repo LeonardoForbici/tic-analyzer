@@ -17,6 +17,7 @@ const need = (p) => { if (!existsSync(p)) { console.error(`✗ dist ausente: ${p
 
 const { runPipeline } = require(need(join(root, 'dist/src/analyzer/pipeline.js')));
 const { compareAnalyses, evaluateGates, formatPrComment, REPORT_MARKER } = require(need(join(root, 'dist/src/cli/prReview.js')));
+const { appendMemory } = require(need(join(root, 'dist/src/analyzer/store/memoryStore.js')));
 
 const failures = [];
 const check = (name, cond, detail = '') => {
@@ -60,6 +61,22 @@ const check = (name, cond, detail = '') => {
   check('M1: markdown contém o marker sticky', md.includes(REPORT_MARKER));
   check('M2: markdown tem seções <details>', md.includes('<details>') && md.includes('</details>'));
   check('M3: markdown sinaliza gate falho', md.includes('Quality gate falhou'));
+
+  console.log('\n(4) Decision Guardian — resurge tentativas anteriores falhas (Frente D4)\n');
+  appendMemory(join(headDir, '.tic-code'), {
+    entity: 'file:src/pages/helper.ts',
+    kind: 'outcome',
+    summary: 'Tentativa anterior de remover o eval() quebrou o template engine',
+    result: 'failed',
+    githubLinks: [{ kind: 'pr', repo: 'acme/widgets', number: 17, url: 'http://mock/pr/17' }]
+  });
+  const resultWithMemory = compareAnalyses(baseDir, headDir, changed);
+  check('DG1: resurfacedMemory encontra a entrada failed para helper.ts', resultWithMemory.resurfacedMemory.some((r) => r.file === 'src/pages/helper.ts' && r.entries.some((e) => e.result === 'failed')));
+  const grillingWithMemory = resultWithMemory.grilling.some((q) => q.includes('tentativa anterior') && q.includes('helper.ts'));
+  check('DG2: grilling ganha pergunta sobre a tentativa anterior falha', grillingWithMemory, JSON.stringify(resultWithMemory.grilling));
+  const mdWithMemory = formatPrComment(resultWithMemory, gate);
+  check('DG3: comentário tem a seção "Decisões e tentativas anteriores"', mdWithMemory.includes('Decisões e tentativas anteriores relevantes'));
+  check('DG4: comentário renderiza o link do PR #17 vinculado', mdWithMemory.includes('PR #17') && mdWithMemory.includes('http://mock/pr/17'));
 
   rmSync(work, { recursive: true, force: true });
   console.log('');

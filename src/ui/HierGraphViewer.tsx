@@ -10,6 +10,7 @@ import cytoscape from 'cytoscape';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import dagre from 'cytoscape-dagre';
 import { GalaxyGraphViewer } from './GalaxyGraphViewer';
+import { Icon } from './Icon';
 
 cytoscape.use(dagre);
 
@@ -311,15 +312,6 @@ function useParticleField(canvasRef: React.RefObject<HTMLCanvasElement>, width: 
       ctx.fill();
     }
   }, [canvasRef, width, height]);
-}
-
-function Icon({ name, size = 14, color }: { name: string; size?: number; color?: string }) {
-  return (
-    <span className="material-symbols-outlined" style={{
-      fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center',
-      fontVariationSettings: `'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
-    }}>{name}</span>
-  );
 }
 
 const GRAPH_HEIGHT = 580;

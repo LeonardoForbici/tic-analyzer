@@ -1,0 +1,46 @@
+# Self-healing do próprio tic-analyzer: quando o job "CI" falha, dispara o
+# MESMO dispatcher da Frente A (src/analyzer/agents/) usado pelo produto —
+# não é uma segunda implementação. Nunca faz auto-merge: só abre issue/PR,
+# via `tic-analyzer self-heal`, que respeita os guardrails do dispatcher
+# (rate-limit diário, idempotência, circuit breaker de falhas repetidas) e
+# fica desligado por padrão (requer agents.enabled=true e
+# agents.on.ciFailure=true em .tic-rules.json).
+name: Self-heal
+
+on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  self-heal:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build:server
+
+      - name: Self-heal (best-effort — nunca falha o job)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node dist/src/cli/index.js self-heal . \
+            --repo "${{ github.repository }}" \
+            --reason "CI falhou em ${{ github.event.workflow_run.head_sha }} (run ${{ github.event.workflow_run.html_url }})"

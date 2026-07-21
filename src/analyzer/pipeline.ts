@@ -50,6 +50,9 @@ import { collectAuthorship, computeOwnership } from './computeOwnership';
 import { computeRoi } from './computeRoi';
 import { appendEvents, makeEvent } from './store/activityLog';
 import { computeSelfDelta, computePredictionFeedback, type PredictionAccuracy } from './computeDelta';
+import { inferRepoSlug } from './github/repoSlug';
+import { evaluateTriggers } from './triggers/evaluateTriggers';
+import { eventBus } from './eventBus';
 import { syncTriageItems, type TriageCandidate } from './store/triageStore';
 import { generateZoomOut } from './generateZoomOut';
 import { generateGraphReport } from './generateGraphReport';
@@ -708,7 +711,7 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
     report('graph-report', 94, 'Identificando hubs e conexões atípicas do grafo de impacto...');
     const fileToModule = new Map<string, string>();
     for (const m of modules) for (const f of m.files) fileToModule.set(f.relativePath, m.name);
-    const graphReport = generateGraphReport(ticCodeDir, projectName, impactEdges, fileToModule);
+    const graphReport = generateGraphReport(ticCodeDir, projectName, impactEdges, fileToModule, communityResult.byNode, churn ?? new Map());
     markDone('graph-report');
     report('graph-report', 100, `${graphReport.godNodes.length} god nodes, ${graphReport.surprising.length} conexões surpreendentes`);
 
@@ -727,7 +730,8 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
       : null;
     const deltaEvents = computeSelfDelta(prevDelta, curDelta);
     const newRiskFiles = new Set(deltaEvents.filter((e) => e.type === 'risk-new' && e.entity).map((e) => e.entity!.replace(/^file:/, '')));
-    const { events: predEvents, accuracy } = computePredictionFeedback(previousPrediction, churn, newRiskFiles, previousAccuracy as PredictionAccuracy | null, ticCodeDir);
+    const repoSlug = inferRepoSlug(projectPath);
+    const { events: predEvents, accuracy } = computePredictionFeedback(previousPrediction, churn, newRiskFiles, previousAccuracy as PredictionAccuracy | null, ticCodeDir, repoSlug);
     fs.writeFileSync(path.join(ticCodeDir, 'prediction-accuracy.json'), JSON.stringify(accuracy), 'utf8');
     const summary = makeEvent('analysis', 'info',
       `Análise concluída — health ${health.score}/100 (${health.grade})`,
@@ -736,6 +740,15 @@ export async function runPipeline(projectPathInput: string, onProgress: Progress
     appendEvents(ticCodeDir, allEvents);
     markDone('activity');
     report('activity', 100, `${deltaEvents.length} mudança(s), ${predEvents.length} predição(ões) confirmada(s)`);
+
+    // Publica gatilhos de agente elegíveis no barramento — a pipeline NUNCA
+    // fala com o GitHub diretamente; quem decide/despacha de fato (guardrails
+    // de rate-limit/circuit breaker) é server/index.ts ou o CLI self-heal,
+    // que têm acesso à memória (Frente B) e ao GhClient (Fase 0.2).
+    if (rulesConfig?.agents?.enabled) {
+      const triggerMatches = evaluateTriggers(allEvents, rulesConfig.agents.on);
+      if (triggerMatches.length > 0) eventBus.publish({ source: 'pipeline', type: 'trigger-fired', payload: triggerMatches });
+    }
 
     // ── 24b. SEARCH INDEX ─────────────────────────────────────────────────────────
     report('search-index', 95, 'Indexando termos de código para busca semântica...');

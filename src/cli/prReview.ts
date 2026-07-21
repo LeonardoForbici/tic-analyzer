@@ -12,6 +12,7 @@ import { openIndexDb, INDEX_DB_FILE } from '../analyzer/store/indexDb';
 import { queryBlastRadius } from '../analyzer/store/impactQueries';
 import { loadSnapshots } from '../analyzer/store/snapshots';
 import { suggestReviewers } from '../analyzer/computeOwnership';
+import { queryMemory, type MemoryEntry } from '../analyzer/store/memoryStore';
 
 export const REPORT_MARKER = '<!-- tic-analyzer-report -->';
 
@@ -41,6 +42,8 @@ export interface PrReviewResult {
   adrSuggested: boolean;
   /** Revisor(es) sugerido(s) por ownership dos arquivos mudados. */
   reviewers: Array<{ author: string; files: string[] }>;
+  /** "Decision Guardian": decisões/tentativas anteriores (Frente B) relevantes para arquivos tocados por este PR. */
+  resurfacedMemory: Array<{ file: string; entries: MemoryEntry[] }>;
 }
 
 export interface GateResult {
@@ -169,6 +172,26 @@ export function compareAnalyses(baseDir: string, headDir: string, changedFiles: 
     if (own?.fileOwner) reviewers = suggestReviewers(own.fileOwner, changedFiles).slice(0, 3);
   } catch { /* sem ownership */ }
 
+  // ── "Decision Guardian" (Frente D4, depende da Frente B) ────────────────
+  // Resurge decisões/tentativas anteriores relevantes para arquivos tocados
+  // por este PR, em vez de exigir que alguém chame `recall` manualmente.
+  const resurfacedMemory: PrReviewResult['resurfacedMemory'] = [];
+  for (const file of changedFiles.slice(0, 50)) {
+    const entries = queryMemory(path.join(headDir, '.tic-code'), file, 5)
+      .filter((m) => m.kind === 'decision' || m.result === 'failed');
+    if (entries.length > 0) resurfacedMemory.push({ file, entries });
+    if (resurfacedMemory.length >= 5) break;
+  }
+  for (const { file, entries } of resurfacedMemory) {
+    if (grilling.length >= 5) break;
+    const failed = entries.find((e) => e.result === 'failed');
+    if (failed) {
+      const link = failed.githubLinks?.[0];
+      const ref = link ? ` ([${link.kind === 'pr' ? 'PR' : link.kind} ${link.number ?? link.sha?.slice(0, 7)}](${link.url}))` : '';
+      grilling.push(`Uma tentativa anterior de mexer em \`${file}\` falhou${ref} ("${failed.summary}") — este PR repete a mesma abordagem?`);
+    }
+  }
+
   return {
     changedFiles,
     newRisks,
@@ -182,7 +205,8 @@ export function compareAnalyses(baseDir: string, headDir: string, changedFiles: 
     riskFlags,
     grilling: grilling.slice(0, 5),
     adrSuggested,
-    reviewers
+    reviewers,
+    resurfacedMemory
   };
 }
 
@@ -336,6 +360,22 @@ export function formatPrComment(result: PrReviewResult, gate?: GateResult): stri
       lines.push('', '> 📐 Esta mudança atinge o limiar de ADR (difícil de reverter + cruza camadas + trade-off real) — considere registrar a decisão em `docs/adr/`.');
     }
     lines.push('', '</details>', '');
+  }
+
+  if (result.resurfacedMemory.length > 0) {
+    lines.push('<details><summary><b>🧭 Decisões e tentativas anteriores relevantes</b></summary>', '');
+    for (const { file, entries } of result.resurfacedMemory) {
+      lines.push(`**\`${file}\`**`);
+      for (const e of entries) {
+        const tag = e.result ? ` → **${e.result}**` : '';
+        const links = e.githubLinks?.length
+          ? ' — ' + e.githubLinks.map((l) => `[${l.kind === 'pr' ? `PR #${l.number}` : l.kind === 'issue' ? `issue #${l.number}` : `commit ${(l.sha ?? '').slice(0, 7)}`}](${l.url})`).join(', ')
+          : '';
+        lines.push(`- **[${e.kind}]** ${e.summary}${tag}${links}`);
+      }
+      lines.push('');
+    }
+    lines.push('</details>', '');
   }
 
   if (result.reviewers.length > 0) {

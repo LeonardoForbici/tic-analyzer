@@ -4,28 +4,62 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TIC Analyzer</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body {
         font-family: 'Inter', system-ui, sans-serif;
-        background: #0b1326;
-        color: #dae2fd;
+        background: #e9edf5;
+        color: #1e293b;
         overflow-x: hidden;
       }
       ::-webkit-scrollbar { width: 6px; height: 6px; }
-      ::-webkit-scrollbar-track { background: #0b1326; }
-      ::-webkit-scrollbar-thumb { background: #3b494b; border-radius: 3px; }
-      ::-webkit-scrollbar-thumb:hover { background: #849495; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
       .material-symbols-outlined {
+        /* largura reservada = altura da linha: se a fonte de ícones não
+           carregar, o texto cru da ligadura fica cortado (overflow hidden)
+           em vez de vazar e sobrepor o label ao lado. */
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
         font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
         user-select: none;
       }
       @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
       @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      @keyframes ticFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes ticSlideUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes ticScaleIn { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+      .tic-fade-in { animation: ticFadeIn 0.28s ease-out both; }
+      .tic-slide-up { animation: ticSlideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
+      .tic-scale-in { animation: ticScaleIn 0.22s ease-out both; }
+      .tic-stagger > * { animation: ticSlideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
+      .tic-stagger > *:nth-child(1) { animation-delay: 0ms; }
+      .tic-stagger > *:nth-child(2) { animation-delay: 40ms; }
+      .tic-stagger > *:nth-child(3) { animation-delay: 80ms; }
+      .tic-stagger > *:nth-child(4) { animation-delay: 120ms; }
+      .tic-stagger > *:nth-child(5) { animation-delay: 160ms; }
+      .tic-stagger > *:nth-child(n+6) { animation-delay: 200ms; }
+      @media (prefers-reduced-motion: reduce) {
+        .tic-fade-in, .tic-slide-up, .tic-scale-in, .tic-stagger > * { animation: none !important; }
+        button { transition: none !important; }
+      }
+      /* Polish universal de botão — pega todos os botões da UI sem precisar
+         tocar cada estilo inline individualmente (inline style não define
+         :hover, então esta regra global nunca conflita com eles). */
+      button {
+        transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, opacity 0.15s ease;
+      }
+      button:not(:disabled):hover {
+        transform: translateY(-1px);
+        filter: brightness(1.04);
+      }
+      button:not(:disabled):active {
+        transform: translateY(0);
+        filter: brightness(0.98);
+      }
     </style>
   </head>
   <body>

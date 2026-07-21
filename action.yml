@@ -22,6 +22,15 @@ inputs:
     description: 'Quando um gate falha, cria issue com labels bug/needs-triage e corpo = AGENT-BRIEF (skill triage). Precisa de permissions: issues: write'
     required: false
     default: 'false'
+  agent-mode:
+    description: >
+      Quando um gate falha, dispara o dispatcher de agentes (mesma arquitetura do
+      self-healing do próprio tic-analyzer — ver .github/workflows/self-heal.yml):
+      none (default, comportamento antigo de create-issues) | issue-only |
+      assign-copilot | create-pr-with-copilot. Precisa de um token com permissão
+      para issues/PRs (github-token) — nunca faz auto-merge.
+    required: false
+    default: 'none'
   github-token:
     description: 'Token para o comentário no PR'
     required: false
@@ -107,6 +116,8 @@ runs:
       env:
         BASE_REF: ${{ inputs.base-ref }}
         GATE: ${{ inputs.gate }}
+        AGENT_MODE: ${{ inputs.agent-mode }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         set +e
         node "$GITHUB_ACTION_PATH/dist/src/cli/index.js" pr-review \
@@ -114,7 +125,8 @@ runs:
           --base-ref "origin/$BASE_REF" \
           ${GATE:+--gate "$GATE"} \
           --out /tmp/tic-report.md \
-          --brief-out /tmp/tic-brief.md
+          --brief-out /tmp/tic-brief.md \
+          ${AGENT_MODE:+--agent-mode "$AGENT_MODE" --repo "${{ github.repository }}"}
         echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
     - name: Persiste pr-history no branch base
@@ -162,7 +174,10 @@ runs:
         fi
 
     - name: Issue de triagem (skill triage — gate falhou)
-      if: inputs.create-issues == 'true' && steps.review.outputs.exit_code == '1' && github.event_name == 'pull_request'
+      # Quando agent-mode != none, o dispatcher (Frente A) já cria/atualiza a
+      # issue no passo anterior — este step só cobre o caminho antigo
+      # (create-issues sem agent-mode), para não duplicar a issue.
+      if: inputs.create-issues == 'true' && inputs.agent-mode == 'none' && steps.review.outputs.exit_code == '1' && github.event_name == 'pull_request'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}

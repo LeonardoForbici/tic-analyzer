@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { SvgBarChart } from './charts/SvgBarChart';
 import { SvgLineChart } from './charts/SvgLineChart';
+import { Icon } from './Icon';
 
 const C = {
-  bg: '#0b1326', surfaceContainer: '#171f33', surfaceContainerLow: '#131b2e',
-  surfaceContainerHigh: '#222a3d', surfaceContainerHighest: '#2d3449',
-  primary: '#dbfcff', primaryFixedDim: '#00dbe9', primaryFixed: '#7df4ff',
-  secondary: '#4edea3', error: '#ffb4ab',
-  tertiaryFixedDim: '#ffb95f',
-  onSurface: '#dae2fd', onSurfaceVariant: '#b9cacb',
-  outline: '#849495', outlineVariant: '#3b494b',
+  bg: '#e9edf5', surfaceContainer: '#ffffff', surfaceContainerLow: '#ffffff',
+  surfaceContainerHigh: '#f2f5fb', surfaceContainerHighest: '#e6ebf3',
+  primary: '#111827', primaryFixedDim: '#2563eb', primaryFixed: '#93c5fd',
+  secondary: '#16a34a', error: '#dc2626',
+  tertiaryFixedDim: '#d97706',
+  onSurface: '#1e293b', onSurfaceVariant: '#64748b',
+  outline: '#94a3b8', outlineVariant: '#e2e8f0',
 };
 const F = {
-  headline: "'Geist', 'Inter', system-ui, sans-serif",
+  headline: "'Geist Sans', 'Inter', system-ui, sans-serif",
   body: "'Inter', system-ui, sans-serif",
   code: "'JetBrains Mono', monospace",
 };
@@ -28,15 +29,6 @@ interface Roi {
 interface ModuleOwn { module: string; primaryOwner: string; ownershipPct: number; authorCount: number; busFactor: number; onboardingHours: number; difficulty: string; }
 interface Ownership { modules: ModuleOwn[]; knowledgeRisk: Array<{ file: string; author: string; reason: string }>; startHere: string[]; }
 interface Snapshot { counts?: { debtCost?: number; remediationHours?: number } }
-
-function Icon({ name, size = 20, color, fill = 0 }: { name: string; size?: number; color?: string; fill?: number }) {
-  return (
-    <span className="material-symbols-outlined" style={{
-      fontSize: `${size}px`, color, lineHeight: 1, display: 'inline-flex', alignItems: 'center',
-      fontVariationSettings: `'FILL' ${fill}, 'wght' 400, 'GRAD' 0, 'opsz' ${size}`,
-    }}>{name}</span>
-  );
-}
 
 function KpiCard({ label, value, sub, unit, color, icon, accentBg = false }: {
   label: string; value: string; sub?: string; unit?: string; color: string; icon: string; accentBg?: boolean;
@@ -138,8 +130,8 @@ export function ValueDashboard({ ticCodeDir, projectPath }: { ticCodeDir: string
           <button onClick={() => exportReport('pdf')} disabled={exporting}
             style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
               background: C.primaryFixedDim, border: 'none', borderRadius: 8,
-              color: '#00363a', cursor: 'pointer', fontFamily: F.code, fontSize: 12, fontWeight: 700 }}>
-            <Icon name="picture_as_pdf" size={15} color="#00363a" />
+              color: '#ffffff', cursor: 'pointer', fontFamily: F.code, fontSize: 12, fontWeight: 700 }}>
+            <Icon name="picture_as_pdf" size={15} color="#ffffff" />
             {exporting ? '…' : 'Relatório Executivo'}
           </button>
           <button onClick={() => exportReport('html')} disabled={exporting}
@@ -252,7 +244,7 @@ export function ValueDashboard({ ticCodeDir, projectPath }: { ticCodeDir: string
               <span style={{ fontSize: 13, color: C.onSurfaceVariant }}>/hora</span>
               <button onClick={applyRoiConfig} disabled={savingCfg}
                 style={{ padding: '7px 16px', background: C.primaryFixedDim, border: 'none', borderRadius: 6,
-                  color: '#00363a', cursor: 'pointer', fontWeight: 700, fontSize: 12, fontFamily: F.code }}>
+                  color: '#ffffff', cursor: 'pointer', fontWeight: 700, fontSize: 12, fontFamily: F.code }}>
                 {savingCfg ? '…' : 'Aplicar'}
               </button>
             </div>
