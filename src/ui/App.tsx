@@ -1475,9 +1475,22 @@ export function App() {
     return () => { cleanup?.(); };
   }, [mcpRunning]);
 
+  const connectionErrorResult = (action: string, err: unknown): AnalysisResult => ({
+    success: false, outputPath: '', totalFiles: 0, totalLines: 0, modulesGenerated: 0,
+    quickContextTokens: 0, plsqlObjects: 0, frontendCalls: 0, dbCalls: 0, hotspots: 0,
+    violations: 0, patterns: 0, impactedFiles: 0, inheritanceClasses: 0, dbTables: 0,
+    cacheHits: 0, transactions: 0, batchJobs: 0, angularModules: 0, deadComponents: 0,
+    error: `Não foi possível ${action} (${err instanceof Error ? err.message : String(err)}). Confirme que o servidor local está rodando em localhost:3000 — em dev, use \`npm run dev\` (não só o Vite sozinho).`
+  });
+
   const handleSelectFolder = useCallback(async () => {
-    const folder = await window.ticAnalyzer.selectFolder();
-    if (folder) setProjectPath(folder);
+    try {
+      const folder = await window.ticAnalyzer.selectFolder();
+      if (folder) setProjectPath(folder);
+    } catch (err) {
+      setState('error');
+      setResult(connectionErrorResult('selecionar a pasta', err));
+    }
   }, []);
 
   const handleAnalyze = useCallback(async () => {
@@ -1499,7 +1512,13 @@ export function App() {
         });
       }
     });
-    await window.ticAnalyzer.runAnalysis(projectPath);
+    try {
+      await window.ticAnalyzer.runAnalysis(projectPath);
+    } catch (err) {
+      cleanup();
+      setState('error');
+      setResult(connectionErrorResult('iniciar a análise', err));
+    }
   }, [projectPath]);
 
   const toggleLive = useCallback(async () => {
