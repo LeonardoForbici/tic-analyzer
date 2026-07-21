@@ -7,6 +7,7 @@ import { PortfolioDashboard } from './PortfolioDashboard';
 import { GovernanceDashboard } from './GovernanceDashboard';
 import { SkillsConsole } from './SkillsConsole';
 import { MemoryViewer } from './MemoryViewer';
+import { MeetingsViewer } from './MeetingsViewer';
 import { SearchCodeViewer } from './SearchCodeViewer';
 import { HttpFlowsViewer } from './HttpFlowsViewer';
 
@@ -92,7 +93,7 @@ interface ImpactOfResponse {
 export interface SearchHitUI { file: string; snippet: string; score: number; origin: 'fts' | 'vec' | 'both' }
 export interface SearchCodeResponse { hits?: SearchHitUI[]; mode?: string; error?: string }
 type AppState = 'idle' | 'analyzing' | 'done' | 'error';
-type Tab = 'overview' | 'health' | 'value' | 'governance' | 'skills' | 'activity' | 'explorer' | 'search' | 'memory' | 'impact' | 'metrics' | 'files' | 'portfolio' | 'docs' | 'http';
+type Tab = 'overview' | 'health' | 'value' | 'governance' | 'skills' | 'activity' | 'explorer' | 'search' | 'memory' | 'meetings' | 'impact' | 'metrics' | 'files' | 'portfolio' | 'docs' | 'http';
 
 // ── Design System ─────────────────────────────────────────────────────────────
 const C = {
@@ -932,6 +933,7 @@ const NAV_ITEMS: Array<{ id: Tab; label: string; icon: string; requiresDone?: bo
   { id: 'explorer',    label: 'Explorador',   icon: 'explore',           requiresDone: true },
   { id: 'search',      label: 'Busca',        icon: 'search',            requiresDone: true },
   { id: 'memory',      label: 'Memória',      icon: 'neurology',         requiresDone: true },
+  { id: 'meetings',    label: 'Reuniões',     icon: 'groups',            requiresDone: true },
   { id: 'impact',      label: 'Impacto',      icon: 'emergency_home',    requiresDone: true },
   { id: 'metrics',     label: 'Métricas',     icon: 'analytics',         requiresDone: true },
   { id: 'files',       label: 'Arquivos',     icon: 'folder',            requiresDone: true },
@@ -1718,6 +1720,12 @@ export function App() {
               {activeTab === 'memory' && (
                 <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
                   <MemoryViewer ticCodeDir={result!.outputPath} />
+                </div>
+              )}
+
+              {activeTab === 'meetings' && (
+                <div style={{ background: C.surfaceContainerLow, border: `1px solid ${C.outlineVariant}`, borderRadius: '8px', padding: '24px' }}>
+                  <MeetingsViewer projectPath={projectPath} />
                 </div>
               )}
 

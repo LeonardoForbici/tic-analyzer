@@ -34,6 +34,7 @@ import { suggestReviewers } from '../analyzer/computeOwnership';
 import { loadPortfolio } from '../analyzer/store/portfolioStore';
 import { getEmbedder } from '../analyzer/semantic/embeddings';
 import { eventBus, type BusEvent } from '../analyzer/eventBus';
+import { saveMeeting, loadMeetings, loadMeeting, ingestDecisions, type MeetingDecisionInput } from '../analyzer/store/meetingStore';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
 interface CallGraphEdge { from: string; to: string; type: string; confidence: string; label?: string; }
@@ -429,6 +430,42 @@ export class TicAnalyzerMcpServer {
               includeArchived: { type: 'boolean', description: 'Também varre a memória arquivada (default false).' }
             },
             required: []
+          }
+        },
+        {
+          name: 'ingest_meeting',
+          description: 'Registra as decisões de uma reunião/story já transcrita, vinculando-as à memória permanente do projeto. IMPORTANTE: "decisions" deve vir PRÉ-EXTRAÍDO por você (o agente) a partir do transcript — esta tool não faz NLP local (motor é zero-tokens de IA por princípio). Se só tiver o transcript bruto ainda, chame com "decisions" vazio para salvá-lo para auditoria e refazer a chamada depois com as decisões estruturadas.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'Título da reunião/story (ex: "Sprint planning 2026-07-21").' },
+              transcript: { type: 'string', description: 'Texto do transcript já pronto (colado). Opcional.' },
+              transcriptFile: { type: 'string', description: 'Caminho de um arquivo com o transcript já pronto. Opcional (alternativa a transcript).' },
+              participants: { type: 'array', items: { type: 'string' }, description: 'Nomes dos participantes (opcional).' },
+              decisions: {
+                type: 'array',
+                description: 'Decisões JÁ EXTRAÍDAS por você do transcript. Cada item: {summary, entity? (arquivo/módulo/procedure afetado), decisionType: decision|action-item|risk-flagged|out-of-scope, owner?, dueDate?, rationale?}.',
+                items: { type: 'object' }
+              }
+            },
+            required: ['title']
+          }
+        },
+        {
+          name: 'list_meetings',
+          description: 'Lista as reuniões registradas recentemente (mais recentes primeiro).',
+          inputSchema: {
+            type: 'object',
+            properties: { limit: { type: 'number', description: 'Default 20.' } }
+          }
+        },
+        {
+          name: 'get_meeting',
+          description: 'Detalhe completo de uma reunião registrada (todas as decisões).',
+          inputSchema: {
+            type: 'object',
+            properties: { id: { type: 'string', description: 'id retornado por ingest_meeting/list_meetings.' } },
+            required: ['id']
           }
         },
         {
@@ -1163,6 +1200,58 @@ export class TicAnalyzerMcpServer {
           if (entries.length === 0) return respond(textResult('Nenhuma memória vinculada a essa referência do GitHub.'));
           const label = pr !== undefined ? `PR #${pr}` : commit !== undefined ? `commit ${commit}` : issue !== undefined ? `issue #${issue}` : (repo ?? 'referência');
           return respond(textResult(formatMemoryEntries(`Memória vinculada a ${label}`, entries)));
+        }
+
+        case 'ingest_meeting': {
+          const { title, transcript, transcriptFile, participants, decisions } = args as {
+            title: string; transcript?: string; transcriptFile?: string; participants?: string[]; decisions?: MeetingDecisionInput[];
+          };
+          let sourceText = transcript;
+          if (!sourceText && transcriptFile) {
+            try { sourceText = fs.readFileSync(transcriptFile, 'utf8'); } catch { /* segue sem transcript */ }
+          }
+          if (!decisions || decisions.length === 0) {
+            if (!sourceText) return respond(textResult('Nenhuma decisão nem transcript fornecido — nada para registrar.'));
+            const meeting = saveMeeting(this.ticCodePath, { title, participants, sourceText, decisions: [] });
+            return respond(textResult(
+              `Transcript de "${title}" salvo (id: ${meeting.id}) sem decisões estruturadas ainda.\n` +
+              `Extraia as decisões do texto e chame ingest_meeting de novo com "decisions" preenchido ` +
+              `(cada uma com summary, entity opcional, decisionType: decision|action-item|risk-flagged|out-of-scope).`
+            ));
+          }
+          const meeting = saveMeeting(this.ticCodePath, { title, participants, sourceText, decisions });
+          const result = ingestDecisions(this.ticCodePath, meeting);
+          const lines = [
+            `Reunião "${title}" registrada (id: ${meeting.id}).`,
+            `${result.memoryEntriesCreated} decisão(ões) vinculada(s) à memória permanente (ver recall/get_agent_brief).`
+          ];
+          if (result.outOfScopeSuggestions.length) {
+            lines.push('', `${result.outOfScopeSuggestions.length} sugestão(ões) de out-of-scope (mescle manualmente em .tic-rules.json → outOfScope[]):`);
+            for (const s of result.outOfScopeSuggestions) lines.push(`- ${s.decision} (${s.reason})`);
+          }
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'list_meetings': {
+          const { limit } = args as { limit?: number };
+          const meetings = loadMeetings(this.ticCodePath, limit ?? 20);
+          if (meetings.length === 0) return respond(textResult('Nenhuma reunião registrada.'));
+          const lines = ['## Reuniões recentes', ''];
+          for (const m of meetings) lines.push(`- **${m.title}** (${m.ts.slice(0, 10)}) — ${m.decisionCount} decisão(ões) · id: \`${m.id}\``);
+          return respond(textResult(lines.join('\n')));
+        }
+
+        case 'get_meeting': {
+          const { id } = args as { id: string };
+          const meeting = loadMeeting(this.ticCodePath, id);
+          if (!meeting) return respond(textResult(`Reunião "${id}" não encontrada.`));
+          const lines = [`## ${meeting.title}`, `*${meeting.ts.slice(0, 10)}${meeting.participants?.length ? ` · participantes: ${meeting.participants.join(', ')}` : ''}*`, ''];
+          for (const d of meeting.decisions) {
+            lines.push(`- **[${d.decisionType}]** ${d.summary}${d.entity ? ` (${d.entity})` : ''}`);
+            if (d.owner || d.dueDate) lines.push(`  ${[d.owner ? `responsável: ${d.owner}` : null, d.dueDate ? `prazo: ${d.dueDate}` : null].filter(Boolean).join(' · ')}`);
+            if (d.rationale) lines.push(`  > ${d.rationale}`);
+          }
+          return respond(textResult(lines.join('\n')));
         }
 
         case 'list_http_flows': {

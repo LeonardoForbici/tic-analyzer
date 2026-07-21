@@ -24,6 +24,7 @@ import { rescaleRoi } from '../analyzer/computeRoi';
 import { eventBus, type BusEvent } from '../analyzer/eventBus';
 import { createRestGhClient } from '../analyzer/github/restGhClient';
 import { matchesFromEvents, runAgentDispatch } from '../analyzer/agents/runAgentDispatch';
+import { saveMeeting, loadMeetings, loadMeeting, ingestDecisions, type MeetingDecisionInput } from '../analyzer/store/meetingStore';
 
 // ── SSE broadcast ────────────────────────────────────────────────────────────
 //
@@ -480,6 +481,44 @@ app.post('/api/create-tic-rules', (req: Request, res: Response) => {
     if (fs.existsSync(target)) return res.json({ ok: true, existed: true, path: '.tic-rules.json' });
     fs.writeFileSync(target, JSON.stringify(rulesTemplate(), null, 2), 'utf8');
     res.json({ ok: true, existed: false, path: '.tic-rules.json' });
+  } catch (err) {
+    res.json({ ok: false, error: String(err) });
+  }
+});
+
+app.post('/api/ingest-meeting', (req: Request, res: Response) => {
+  const { projectPath, title, transcript, participants, decisions } = req.body as {
+    projectPath: string; title: string; transcript?: string; participants?: string[]; decisions?: MeetingDecisionInput[];
+  };
+  try {
+    if (!decisions || decisions.length === 0) {
+      if (!transcript) return res.json({ ok: false, error: 'Nenhuma decisão nem transcript fornecido.' });
+      const meeting = saveMeeting(ticDir(projectPath), { title, participants, sourceText: transcript, decisions: [] });
+      return res.json({ ok: true, meetingId: meeting.id, memoryEntriesCreated: 0, pending: true });
+    }
+    const meeting = saveMeeting(ticDir(projectPath), { title, participants, sourceText: transcript, decisions });
+    const result = ingestDecisions(ticDir(projectPath), meeting);
+    res.json({ ok: true, meetingId: meeting.id, ...result });
+  } catch (err) {
+    res.json({ ok: false, error: String(err) });
+  }
+});
+
+app.get('/api/meetings', (req: Request, res: Response) => {
+  const { projectPath, limit } = req.query as { projectPath: string; limit?: string };
+  try {
+    res.json(loadMeetings(ticDir(projectPath), limit ? Number(limit) : 20));
+  } catch (err) {
+    res.json({ ok: false, error: String(err) });
+  }
+});
+
+app.get('/api/meetings/:id', (req: Request, res: Response) => {
+  const { projectPath } = req.query as { projectPath: string };
+  try {
+    const meeting = loadMeeting(ticDir(projectPath), req.params.id);
+    if (!meeting) return res.status(404).json({ ok: false, error: 'not found' });
+    res.json(meeting);
   } catch (err) {
     res.json({ ok: false, error: String(err) });
   }
