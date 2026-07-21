@@ -21,17 +21,26 @@ import { renderExecutiveHtml, buildExecReportData } from '../analyzer/generateEx
 import { exportGraphFiles, type GraphExportFormat } from '../analyzer/exportGraph';
 import { loadPortfolio, upsertProject, removeProject } from '../analyzer/store/portfolioStore';
 import { rescaleRoi } from '../analyzer/computeRoi';
+import { eventBus, type BusEvent } from '../analyzer/eventBus';
 
 // ── SSE broadcast ────────────────────────────────────────────────────────────
+//
+// broadcast() publica no eventBus único do processo (analyzer/eventBus.ts) em
+// vez de escrever direto nos clients locais — assim qualquer evento chega
+// também ao SSE do MCP server (mcp/server.ts::emit), que assina o mesmo bus.
 
 const sseClients = new Set<Response>();
 
 function broadcast(event: string, data: unknown) {
-  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  eventBus.publish({ source: 'server', type: event, payload: data });
+}
+
+eventBus.subscribe((busEvent: BusEvent) => {
+  const payload = `event: ${busEvent.type}\ndata: ${JSON.stringify(busEvent.payload)}\n\n`;
   for (const res of sseClients) {
     try { res.write(payload); } catch { sseClients.delete(res); }
   }
-}
+});
 
 // ── MCP Server state ─────────────────────────────────────────────────────────
 

@@ -22,6 +22,7 @@ import { appendMemory, queryMemory, type MemoryKind, type MemoryResult } from '.
 import { suggestReviewers } from '../analyzer/computeOwnership';
 import { loadPortfolio } from '../analyzer/store/portfolioStore';
 import { getEmbedder } from '../analyzer/semantic/embeddings';
+import { eventBus, type BusEvent } from '../analyzer/eventBus';
 
 interface CallGraphNode { id: string; label: string; layer: string; file: string; line?: number; }
 interface CallGraphEdge { from: string; to: string; type: string; confidence: string; label?: string; }
@@ -79,6 +80,16 @@ export class TicAnalyzerMcpServer {
     this.projectPath = options.projectPath;
     this.ticCodePath = path.join(options.projectPath, '.tic-code');
     this.onToolCall = options.onToolCall;
+    // Assina o barramento único do processo: eventos publicados por
+    // qualquer origem (server/index.ts, pipeline, futuros dispatchers de
+    // agente) chegam ao /events deste MCP server, não só os emitidos por
+    // this.emit(). Mantém o wire format antigo (data-only, sem envelope).
+    eventBus.subscribe((busEvent: BusEvent) => {
+      const payload = `data: ${JSON.stringify(busEvent.payload)}\n\n`;
+      for (const res of this.sseClients) {
+        try { res.write(payload); } catch { this.sseClients.delete(res); }
+      }
+    });
   }
 
   private createServerInstance(): Server {
@@ -2593,10 +2604,8 @@ export class TicAnalyzerMcpServer {
 
   /** Push de um evento para todos os clientes SSE conectados em /events. */
   emit(event: unknown): void {
-    const payload = `data: ${JSON.stringify(event)}\n\n`;
-    for (const res of this.sseClients) {
-      try { res.write(payload); } catch { this.sseClients.delete(res); }
-    }
+    const type = (event as { type?: string } | null)?.type ?? 'mcp-event';
+    eventBus.publish({ source: 'mcp', type, payload: event });
   }
 
   sseClientCount(): number {

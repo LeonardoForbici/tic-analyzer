@@ -11,11 +11,12 @@
     "build:server": "tsc -p tsconfig.server.json && npm run copy:grammars",
     "copy:grammars": "node scripts/copy-grammars.mjs",
     "start": "node dist/src/server/index.js",
-    "verify": "npm run build:server && node scripts/verify-semantic.mjs && node scripts/verify-store.mjs && node scripts/verify-crosstier.mjs && node scripts/verify-orm.mjs && node scripts/verify-impact.mjs && node scripts/verify-graph-insights.mjs && node scripts/verify-export.mjs && node scripts/verify-communities.mjs && node scripts/verify-health.mjs && node scripts/verify-pr-review.mjs && node scripts/verify-serve.mjs && node scripts/verify-governance.mjs && node scripts/verify-living.mjs && node scripts/verify-value.mjs && node scripts/verify-portfolio.mjs && node scripts/verify-incremental.mjs && node scripts/verify-ux.mjs && node scripts/verify-embeddings.mjs && node scripts/verify-git-history.mjs && node scripts/verify-ast-metrics.mjs",
+    "verify": "npm run build:server && node scripts/verify-semantic.mjs && node scripts/verify-store.mjs && node scripts/verify-crosstier.mjs && node scripts/verify-orm.mjs && node scripts/verify-impact.mjs && node scripts/verify-graph-insights.mjs && node scripts/verify-export.mjs && node scripts/verify-communities.mjs && node scripts/verify-health.mjs && node scripts/verify-pr-review.mjs && node scripts/verify-serve.mjs && node scripts/verify-governance.mjs && node scripts/verify-living.mjs && node scripts/verify-value.mjs && node scripts/verify-portfolio.mjs && node scripts/verify-incremental.mjs && node scripts/verify-ux.mjs && node scripts/verify-embeddings.mjs && node scripts/verify-git-history.mjs && node scripts/verify-ast-metrics.mjs && node scripts/verify-eventbus.mjs && node scripts/verify-github-client.mjs",
     "cli": "node dist/src/cli/index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@octokit/rest": "^22.0.1",
     "@types/d3": "^7.4.3",
     "@xenova/transformers": "^2.17.2",
     "better-sqlite3": "^11.10.0",
