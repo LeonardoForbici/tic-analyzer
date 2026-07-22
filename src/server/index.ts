@@ -704,6 +704,17 @@ if (fs.existsSync(distRenderer)) {
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const server = http.createServer(app);
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n✗ Porta ${PORT} já está em uso por outro processo — o servidor não subiu.`);
+    console.error(`  No npm run dev, a UI (Vite) sobe normalmente mesmo assim, então a página carrega`);
+    console.error(`  mas nenhuma chamada de API funciona ("Failed to fetch").`);
+    console.error(`  Feche o que está usando a porta ${PORT} ou rode com outra: PORT=3001 npm run dev:server\n`);
+  } else {
+    console.error('✗ Erro ao iniciar o servidor:', err);
+  }
+  process.exit(1);
+});
 server.listen(PORT, () => {
   console.log(`TIC Analyzer web server running on http://localhost:${PORT}`);
 });
